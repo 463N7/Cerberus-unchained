@@ -1,4 +1,5 @@
 {
-  "manifest": "cerberus-sentinel-1.0.0/manifest.json",
-  "sha256": "13bc518f940d201d64696b420ec35e38826bc6ca9b726acf1b75d1be3a7f9276"
+  "product": "Cerberus Unchained",
+  "status": "unavailable",
+  "message": "No Cerberus Unchained release is available yet. Installation is disabled."
 }

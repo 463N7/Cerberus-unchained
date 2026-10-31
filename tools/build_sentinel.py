@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build Cerberus Sentinel in PlatformIO; never uploads to hardware."""
+"""Build Cerberus Unchained in PlatformIO; never uploads to hardware."""
 
 from __future__ import annotations
 

@@ -372,7 +372,7 @@ static esp_err_t send_page_start(httpd_req_t *request, const char *title)
     httpd_resp_sendstr_chunk(request, title);
     httpd_resp_sendstr_chunk(request, "</title><style>");
     httpd_resp_sendstr_chunk(request, web_style);
-    return httpd_resp_sendstr_chunk(request, "</style><header><h1>CERBERUS SENTINEL</h1></header><main>");
+    return httpd_resp_sendstr_chunk(request, "</style><header><h1>CERBERUS UNCHAINED</h1></header><main>");
 }
 
 static esp_err_t root_get(httpd_req_t *request)

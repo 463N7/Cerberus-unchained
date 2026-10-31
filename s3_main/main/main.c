@@ -178,7 +178,7 @@ static esp_err_t draw_boot_screen(void)
         64, 244, "CERBERUS", 0xEF9F, SCREEN_BACKGROUND, 4),
         TAG, "boot title failed");
     ESP_RETURN_ON_ERROR(cerberus_display_draw_text(
-        112, 287, "SENTINEL", 0x2EFD, SCREEN_BACKGROUND, 2), TAG, "boot subtitle");
+        106, 287, "UNCHAINED", 0x2EFD, SCREEN_BACKGROUND, 2), TAG, "boot subtitle");
     ESP_RETURN_ON_ERROR(cerberus_display_draw_text(
         82, 340, "WATCH / SCOUT / SENSE", 0x9D16, SCREEN_BACKGROUND, 1), TAG, "boot purpose");
     return cerberus_display_draw_text(109, 373, "STARTING SYSTEMS", 0x9D16, SCREEN_BACKGROUND, 1);

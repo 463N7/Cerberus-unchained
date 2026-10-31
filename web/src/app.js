@@ -8,11 +8,11 @@ const steps = ['bridge','c5','s3','check'];
 let release, session, busy = false, supported = false, wakeLock;
 const lines = [];
 const descriptions = {
-  bridge: {title:'Prepare your Cerberus',chip:'ESP32-S3',button:'Connect & prepare',description:'Install the temporary USB bridge that lets this browser reach the onboard radio.',instructions:'Connect Cerberus using a USB data cable. Select the USB JTAG/serial device.\nThe touchscreen will go blank while the bridge is running. Your final Sentinel firmware is installed in step 3.'},
+  bridge: {title:'Prepare your Cerberus',chip:'ESP32-S3',button:'Connect & prepare',description:'Install the temporary USB bridge that lets this browser reach the onboard radio.',instructions:'Connect Cerberus using a USB data cable. Select the USB JTAG/serial device.\nThe touchscreen will go blank while the bridge is running. Your final Unchained firmware is installed in step 3.'},
   c5: {title:'Give your guardian its senses',chip:'ESP32-C5',button:'Connect & install radio',description:'The bridge now connects this browser to the onboard C5. This step may take several minutes.',instructions:'Keep the same Cerberus connected. Select the Cerberus C5 Bridge USB port when prompted.\nIf it is missing after step 1, tap S3 RESET with BOOT released, then try again.'},
-  s3: {title:'Install the Sentinel experience',chip:'ESP32-S3',button:'Connect & install Sentinel',description:'Install the touchscreen firmware and restore normal operation.',instructions:'Select the USB JTAG/serial device for the same Cerberus.\nIf it has not returned: hold S3 BOOT, tap S3 RESET, then release BOOT. Keep the USB cable connected.'},
-  check: {title:'Meet your guardian',chip:'STARTUP CHECK',button:'Connect & check startup',description:'Confirm the installed version, buffered display, and communication with the C5. This takes about eight seconds.',instructions:'Wait for the Sentinel home screen, then select its USB JTAG/serial device.\nIf the screen stays blank, tap S3 RESET with BOOT released. The final visual and touch checks are yours to confirm on the board.'},
-  done: {title:'Your guardian is ready',chip:'CHECKS PASSED',button:'Check startup again',description:'Both firmware writes were verified, and Sentinel reports the expected version and an online C5.',instructions:'Check that the touchscreen responds and the display looks correct. You can now disconnect Cerberus.\nSave a report for this board, or start a new board below.'},
+  s3: {title:'Install the Unchained experience',chip:'ESP32-S3',button:'Connect & install Unchained',description:'Install the touchscreen firmware and restore normal operation.',instructions:'Select the USB JTAG/serial device for the same Cerberus.\nIf it has not returned: hold S3 BOOT, tap S3 RESET, then release BOOT. Keep the USB cable connected.'},
+  check: {title:'Meet your guardian',chip:'STARTUP CHECK',button:'Connect & check startup',description:'Confirm the installed version, buffered display, and communication with the C5. This takes about eight seconds.',instructions:'Wait for the Unchained home screen, then select its USB JTAG/serial device.\nIf the screen stays blank, tap S3 RESET with BOOT released. The final visual and touch checks are yours to confirm on the board.'},
+  done: {title:'Your guardian is ready',chip:'CHECKS PASSED',button:'Check startup again',description:'Both firmware writes were verified, and Unchained reports the expected version and an online C5.',instructions:'Check that the touchscreen responds and the display looks correct. You can now disconnect Cerberus.\nSave a report for this board, or start a new board below.'},
 };
 
 function log(text) {
@@ -48,7 +48,7 @@ function render() {
   }
 }
 function showHealth(result) {
-  const labels = {identity:'Same Cerberus board',firmware:'Sentinel version',display:'Buffered display',radio:'C5 online and current',protocol:'Processor communication',startup:'Clean startup'};
+  const labels = {identity:'Same Cerberus board',firmware:'Unchained version',display:'Buffered display',radio:'C5 online and current',protocol:'Processor communication',startup:'Clean startup'};
   $('check-results').replaceChildren();
   for (const [key, ok] of Object.entries(result.checks)) {
     const p = document.createElement('p');
@@ -102,7 +102,7 @@ async function run() {
       try { await bridgeControl(port,1200); }
       catch (e) { log(`USB handoff: ${e.message}. Use the S3 BOOT/RESET instructions.`); }
     }
-    status(key === 'bridge' ? 'Bridge verified. Continue with the radio installation.' : key === 'c5' ? 'C5 verified. Continue with Sentinel installation; use BOOT/RESET if the S3 port is missing.' : 'Sentinel verified. Wait for the home screen, then run the startup check.','success');
+    status(key === 'bridge' ? 'Bridge verified. Continue with the radio installation.' : key === 'c5' ? 'C5 verified. Continue with Unchained installation; use BOOT/RESET if the S3 port is missing.' : 'Unchained verified. Wait for the home screen, then run the startup check.','success');
   } catch (e) {
     const cancelled = e.name === 'NotFoundError';
     log(`${cancelled ? 'Port selection cancelled' : 'Stopped'}: ${e.message}`);
@@ -121,9 +121,9 @@ $('resume-c5').addEventListener('click',()=>{if(busy || !session)return;session.
 $('restore-s3').addEventListener('click',()=>{if(busy || !session)return;session.stage='s3';session.checks=null;$('check-results').hidden=true;save();render();status('S3 recovery selected. This does not install or verify the C5.');});
 $('restart').addEventListener('click',()=>{if(busy || !release)return;session=freshSession(release.manifest.releaseId);lines.length=0;$('log').textContent='';$('consent').checked=false;$('check-results').hidden=true;save();render();progress(0,'Ready for a new board');status('Connect one Cerberus to begin.');});
 $('download-log').addEventListener('click',()=>{
-  const report = {installerVersion:'1.0.0',savedAt:new Date().toISOString(),release:release?.manifest.releaseId || null,session:session || null,log:lines,qualification:'Browser checks do not replace physical display, touch and radio acceptance tests.'};
+  const report = {installerVersion:'0.1.0-dev.rev81',savedAt:new Date().toISOString(),release:release?.manifest.releaseId || null,session:session || null,log:lines,qualification:'Browser checks do not replace physical display, touch and radio acceptance tests.'};
   const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}));
-  const a=document.createElement('a');a.href=url;a.download=`cerberus-install-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  const a=document.createElement('a');a.href=url;a.download=`cerberus-unchained-install-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 });
 window.addEventListener('beforeunload',e=>{if(busy){e.preventDefault();e.returnValue='';}});
 
@@ -137,7 +137,7 @@ async function init() {
   }
   try {
     release = await loadRelease(new URL('./',window.location.href),(n,total)=>progress(n/total*100,`Checking firmware ${n} of ${total}`));
-    $('version').textContent=`Sentinel ${release.manifest.version}`;
+    $('version').textContent=`Unchained ${release.manifest.version}`;
     $('release-status').textContent='Complete set downloaded · SHA-256 checked';
     $('release-manifest').href=release.manifestUrl;$('release-manifest').hidden=false;
     let saved=null; try{saved=localStorage.getItem(SESSION_KEY);}catch{}
@@ -147,7 +147,7 @@ async function init() {
     progress(0,'Ready to connect');status('Firmware downloads checked. Choose your board when ready.');
     render();
   } catch(e) {
-    log(e.message);status(e.message,'error');$('version').textContent='Release unavailable';$('release-status').textContent='No device has been changed.';$('primary').disabled=true;
+    log(e.message);status(e.message,'error');$('version').textContent='Unchained / Experimental';$('release-status').textContent='No release selected';$('primary').disabled=true;
   }
 }
 init();

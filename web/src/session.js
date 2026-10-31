@@ -1,4 +1,4 @@
-export const SESSION_KEY = 'cerberus-install-v1';
+export const SESSION_KEY = 'cerberus-unchained-install-v1';
 export function freshSession(releaseId) {
   return {releaseId, startedAt:new Date().toISOString(), stage:'bridge', verified:{}, s3Mac:null, c5Mac:null, checks:null};
 }

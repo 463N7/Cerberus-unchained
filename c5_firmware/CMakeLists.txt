@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(PROJECT_VER "1.0.0")
+set(PROJECT_VER "0.1.0-dev.rev81")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(cerberus_c5_sentinel)
+project(cerberus_c5_unchained)
 
 # Scope the compatibility adapter to this build and this exact SDK blob.
 get_target_property(c5_wifi_original esp_wifi_net80211 IMPORTED_LOCATION)

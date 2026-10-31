@@ -337,7 +337,7 @@ esp_err_t sentinel_dashboard_draw(const sentinel_dashboard_status_t *status, uin
     if (status == NULL) return ESP_ERR_INVALID_ARG;
     TRY(cerberus_display_fill_rect(0, 0, CERBERUS_LCD_WIDTH, CERBERUS_LCD_HEIGHT, BG));
     TRY(cerberus_display_draw_text(12, 13, "CERBERUS", WHITE, BG, 3));
-    TRY(cerberus_display_draw_text(13, 42, "F I E L D  K I T", CYAN, BG, 1));
+    TRY(cerberus_display_draw_text(13, 42, "U N C H A I N E D", CYAN, BG, 1));
     TRY(cerberus_display_fill_rect(12, 57, 296, 1, BORDER));
     TRY(cerberus_display_fill_rect(12, 57, 52, 1, CYAN));
     TRY(sentinel_guardian_draw(frame, status->c5_online));

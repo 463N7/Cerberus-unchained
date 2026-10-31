@@ -1,4 +1,4 @@
-name: Build matched firmware candidate
+name: Build Unchained firmware candidate
 
 # Produces a private review artifact. It never flashes hardware, changes the
 # selected web release, or publishes a production release automatically.
@@ -26,11 +26,11 @@ jobs:
         # before the matched receipt is taken; the final gate then detects any
         # later input/output changes instead of accepting stale build metadata.
         run: |
-          python tools/build_sentinel.py --target s3
-          python tools/build_sentinel.py --target c5
-          python tools/build_sentinel.py --target bridge
+          python tools/build_unchained.py --target s3
+          python tools/build_unchained.py --target c5
+          python tools/build_unchained.py --target bridge
       - name: Build and package the unchanged matched set
-        run: python tools/build_sentinel.py --target all --package
+        run: python tools/build_unchained.py --target all --package
       - name: Verify the package and produce its ZIP
         run: |
           python - <<'PY'
@@ -53,7 +53,7 @@ jobs:
       - name: Save firmware candidate for review
         uses: actions/upload-artifact@v7
         with:
-          name: cerberus-firmware-candidate-${{ github.run_number }}
+          name: cerberus-unchained-candidate-${{ github.run_number }}
           path: |
             dist/*.zip
             dist/*.zip.sha256
@@ -63,7 +63,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: cerberus-build-diagnostics-${{ github.run_number }}
+          name: cerberus-unchained-build-diagnostics-${{ github.run_number }}
           path: artifacts/build/
           if-no-files-found: ignore
           retention-days: 7

@@ -1,4 +1,4 @@
-name: Build web installer
+name: Check Unchained installer
 
 on:
   push:
@@ -46,7 +46,7 @@ jobs:
       - name: Save static website for review
         uses: actions/upload-artifact@v7
         with:
-          name: cerberus-usb-installer
+          name: cerberus-unchained-installer
           path: web/dist/
           if-no-files-found: error
           retention-days: 14

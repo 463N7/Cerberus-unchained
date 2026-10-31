@@ -12,7 +12,7 @@ export function relativeUrl(path, base) {
 }
 
 export function validateManifest(manifest) {
-  if (manifest.schemaVersion !== 1 || manifest.product !== 'Cerberus Sentinel' ||
+  if (manifest.schemaVersion !== 1 || manifest.product !== 'Cerberus Unchained' ||
       typeof manifest.version !== 'string' || !manifest.version || typeof manifest.releaseId !== 'string' ||
       !HASH.test(manifest.sourceSha256)) throw new Error('Unrecognized Cerberus release.');
   for (const [key, [chip, , bootOffset, budget]] of Object.entries(profiles)) {
@@ -63,6 +63,9 @@ async function download(url) {
 
 export async function loadRelease(base, progress = () => {}) {
   const pointer = JSON.parse(new TextDecoder().decode(await download(new URL('firmware/latest.json', base))));
+  if (pointer.product === 'Cerberus Unchained' && pointer.status === 'unavailable') {
+    throw new Error('No Cerberus Unchained release is available yet. Installation is disabled.');
+  }
   if (!HASH.test(pointer.sha256)) throw new Error('Missing release checksum.');
   const manifestUrl = relativeUrl(pointer.manifest, new URL('firmware/latest.json',base));
   const raw = await download(manifestUrl);

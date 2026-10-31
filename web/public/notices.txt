@@ -1,7 +1,7 @@
-CERBERUS SENTINEL — THIRD-PARTY SOFTWARE NOTICES
+CERBERUS UNCHAINED — THIRD-PARTY SOFTWARE NOTICES
 
 The following notices apply to their named components, not to the Cerberus
-project as a whole. Third-party projects do not endorse Cerberus Sentinel.
+project as a whole. Third-party projects do not endorse Cerberus Unchained or Sentinel.
 Watch catalog notices and protocol-source attributions are also distributed
 inside each firmware release directory.
 

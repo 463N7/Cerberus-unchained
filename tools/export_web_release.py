@@ -139,7 +139,7 @@ def validate_package(package: Path) -> tuple[dict, dict[str, bytes]]:
     if "manifest.json" not in files or any(name not in files for name in NOTICES):
         raise ValueError("Package manifest or redistribution notices are missing")
     manifest = json.loads(files["manifest.json"])
-    if manifest.get("format") != 1 or manifest.get("product") != "Cerberus Sentinel":
+    if manifest.get("format") != 1 or manifest.get("product") != "Cerberus Unchained":
         raise ValueError("Unsupported package format or product")
     targets = manifest.get("targets", {})
     if set(targets) != set(PROFILE):
@@ -214,7 +214,7 @@ def export_release(package: Path, output: Path, *, release_id: str | None = None
             "partitions": target["partitions"],
         }
     exported = {
-        "schemaVersion": 1, "product": "Cerberus Sentinel", "releaseId": release_id,
+        "schemaVersion": 1, "product": "Cerberus Unchained", "releaseId": release_id,
         "version": manifest["targets"]["s3"]["project_version"],
         "status": manifest["status"], "hardwareValidation": manifest.get("hardware_validation", "not recorded"),
         "builtUtc": manifest["built_utc"], "sourceSha256": manifest["source"]["sha256"],
@@ -263,7 +263,7 @@ def validate_web_release(directory: Path) -> dict:
     if set(files) != expected_files:
         raise ValueError("Web release contains missing or non-public files")
     manifest = json.loads(files["manifest.json"])
-    if manifest.get("schemaVersion") != 1 or manifest.get("product") != "Cerberus Sentinel" or manifest.get("releaseId") != directory.name:
+    if manifest.get("schemaVersion") != 1 or manifest.get("product") != "Cerberus Unchained" or manifest.get("releaseId") != directory.name:
         raise ValueError("Unsupported web manifest or release ID")
     if manifest.get("notices") != list(NOTICES) or set(manifest.get("targets", {})) != set(PROFILE):
         raise ValueError("Web manifest is missing target or notice metadata")
@@ -282,6 +282,12 @@ def validate_web_release(directory: Path) -> dict:
 def validate_site(directory: Path) -> dict:
     directory = directory.resolve()
     pointer = json.loads(safe_file(directory, "latest.json").read_bytes())
+    if pointer.get("status") == "unavailable":
+        if pointer.get("product") != "Cerberus Unchained" or not isinstance(pointer.get("message"), str) or not pointer["message"]:
+            raise ValueError("Invalid unavailable-release metadata")
+        if set(pointer) != {"product", "status", "message"} or any(path.name != "latest.json" for path in directory.iterdir()):
+            raise ValueError("An unavailable release must not include firmware assets or a selected manifest")
+        return pointer
     manifest_path = safe_file(directory, pointer.get("manifest"))
     if manifest_path.name != "manifest.json" or manifest_path.parent.parent != directory:
         raise ValueError("Latest pointer must address one release directory")
@@ -320,7 +326,7 @@ def main() -> int:
     try:
         if args.verify_site:
             manifest = validate_site(args.verify_site)
-            print(f"Verified web release: {manifest['releaseId']}")
+            print(f"Verified web release: {manifest['releaseId']}" if "releaseId" in manifest else "Verified Unchained installer: no release selected")
         elif args.verify_only:
             validate_package(args.package.resolve())
             print("Package hashes, chip headers, partitions, and image bounds are valid. No files changed.")

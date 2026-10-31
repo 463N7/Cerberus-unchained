@@ -777,7 +777,7 @@ static esp_err_t draw_header(const char *title)
     uint16_t accent = current_page == UI_PAGE_BLE ? 0xACDF :
         current_page == UI_PAGE_IEEE802154 ? 0xFDEA : 0x3F1B;
     ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(8, 7, 3, 28, accent), TAG, "header rail");
-    ESP_RETURN_ON_ERROR(cerberus_display_draw_text(20, 5, "CERBERUS / SENTINEL", UI_MUTED, UI_BACKGROUND, 1), TAG, "header brand");
+    ESP_RETURN_ON_ERROR(cerberus_display_draw_text(20, 5, "CERBERUS / UNCHAINED", UI_MUTED, UI_BACKGROUND, 1), TAG, "header brand");
     ESP_RETURN_ON_ERROR(cerberus_display_draw_text(20, 20, title, UI_TEXT, UI_BACKGROUND, 2), TAG, "header title");
     ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(8, 44, 304, 1, UI_PANEL), TAG, "header divider");
     return cerberus_display_fill_rect(8, 44, 46, 1, accent);
@@ -930,7 +930,7 @@ static esp_err_t draw_dashboard_summary(void)
     cerberus_system_health_t s3_health;
     cerberus_system_health_snapshot(&s3_health);
 
-    snprintf(line, sizeof(line), "SENTINEL %s", esp_app_get_description()->version);
+    snprintf(line, sizeof(line), "UNCHAINED %s", esp_app_get_description()->version);
     ESP_RETURN_ON_ERROR(draw_centered(68, line, UI_MUTED, 1), TAG, "dashboard subtitle failed");
     ESP_RETURN_ON_ERROR(cerberus_display_draw_text(22, 108, "S3 DISPLAY", UI_TEXT, UI_BACKGROUND, 2), TAG, "dashboard S3 failed");
     ESP_RETURN_ON_ERROR(cerberus_display_draw_text(218, 108, "READY", UI_GOOD, UI_BACKGROUND, 2), TAG, "dashboard S3 state failed");

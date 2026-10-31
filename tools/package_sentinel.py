@@ -160,7 +160,7 @@ def package(output: Path | None = None, *, release: bool = False, accepted_on: s
     receipt = json.loads(RECEIPT.read_text())
     current_source = source_snapshot()
     if current_source != receipt["source"]:
-        raise ValueError("Build inputs changed. Run tools/build_sentinel.py --target all again")
+        raise ValueError("Build inputs changed. Run tools/build_unchained.py --target all again")
     targets = {name: inspect_target(name) for name in TARGETS}
     if targets != receipt["targets"]:
         raise ValueError("Build outputs changed or are mismatched. Rebuild all three targets")
@@ -178,7 +178,7 @@ def package(output: Path | None = None, *, release: bool = False, accepted_on: s
     elif accepted_on is not None:
         raise ValueError("--accepted-on requires --release")
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    destination = output or ROOT / "dist" / f"cerberus-sentinel-{version}-{timestamp}"
+    destination = output or ROOT / "dist" / f"cerberus-unchained-{version}-{timestamp}"
     destination = destination.resolve()
     if destination.exists():
         raise ValueError(f"Output already exists: {destination}")
@@ -200,17 +200,17 @@ def package(output: Path | None = None, *, release: bool = False, accepted_on: s
         (directory / "flash_args.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     status = "stable" if release else "development candidate"
     validation = f"Owner-reported acceptance on {accepted_on}; packaging performs no hardware tests" if release else "not performed by packaging"
-    manifest = {"format": 1, "product": "Cerberus Sentinel", "status": status,
+    manifest = {"format": 1, "product": "Cerberus Unchained", "status": status,
                 "hardware_validation": validation,
                 "built_utc": receipt["built_utc"], "packaged_utc": timestamp,
                 "platformio": receipt["platformio"], "source": current_source, "targets": targets}
     (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    shutil.copy2(ROOT / "docs" / "SENTINEL_BUILD.md", destination / "BUILD_AND_RECOVERY.md")
+    shutil.copy2(ROOT / "docs" / "UNCHAINED_BUILD.md", destination / "BUILD_AND_RECOVERY.md")
     # Keep protocol provenance and redistribution notices with binary builds.
     for name in ("WATCH_SIGNATURES.md", "WATCH_THIRD_PARTY_NOTICES.md"):
         shutil.copy2(ROOT / "docs" / name, destination / name)
     (destination / "README.txt").write_text(
-        f"CERBERUS SENTINEL {version} — {status.upper()}\n\n"
+        f"CERBERUS UNCHAINED {version} — {status.upper()}\n\n"
         "Production N16R2 S3 + onboard C5 (2 MB flash budget).\n"
         f"{validation}.\n"
         "S3, C5 and bridge are a matched set. Preserve their separate chip destinations.\n"
