@@ -155,6 +155,8 @@ static bool wait_for_ready_cycle(uint32_t baseline)
     return true;
 }
 
+#include "c5_passive_exchange_impl.h"
+
 static void spi_request_response_sized(
     const void *request,
     void *discarded,
@@ -164,6 +166,12 @@ static void spi_request_response_sized(
 {
     uint32_t started = transport_now_us();
     diagnostic_increment(&transport_diagnostics.exchanges);
+    if (!passive_ready_recover_legacy()) {
+        memset(discarded, 0, request_length);
+        memset(response, 0, response_length);
+        diagnostic_maximum(&transport_diagnostics.max_exchange_us, transport_now_us() - started);
+        return;
+    }
     bool request_ready = c5_ready_wait_high(&ready_io,
         C5_READY_TIMEOUT_US, C5_READY_POLL_US);
     if (!request_ready) diagnostic_increment(&transport_diagnostics.ready_initial_timeouts);
@@ -253,32 +261,19 @@ uint32_t c5_spi_link_clock_hz(void)
     return c5_spi_actual_clock_hz;
 }
 
-static esp_err_t get_status_v2_locked(uint8_t request_sequence, cerberus_c5_status_t *status)
+static esp_err_t decode_status_v2_response(const cerberus_spi_frame_t *response,
+    uint8_t request_sequence, cerberus_c5_status_t *status)
 {
-    cerberus_spi_frame_t request;
-    if (!cerberus_protocol_prepare_frame(
-            &request,
-            CERBERUS_SPI_COMMAND_STATUS,
-            request_sequence,
-            NULL,
-            0)) {
-        return ESP_FAIL;
-    }
-
-    uint8_t discarded[CERBERUS_SPI_TRANSFER_SIZE] = {0};
-    cerberus_spi_frame_t response = {0};
-    spi_request_response(&request, discarded, &response, sizeof(request));
-
-    if (!cerberus_protocol_frame_is_valid(&response) ||
-        response.command != CERBERUS_SPI_COMMAND_STATUS ||
-        response.sequence != request_sequence ||
-        (response.payload_length != sizeof(cerberus_status_payload_t) &&
-            response.payload_length != CERBERUS_STATUS_PAYLOAD_LEGACY_SIZE)) {
+    if (!cerberus_protocol_frame_is_valid(response) ||
+        response->command != CERBERUS_SPI_COMMAND_STATUS ||
+        response->sequence != request_sequence ||
+        (response->payload_length != sizeof(cerberus_status_payload_t) &&
+            response->payload_length != CERBERUS_STATUS_PAYLOAD_LEGACY_SIZE)) {
         return ESP_ERR_INVALID_RESPONSE;
     }
 
     cerberus_status_payload_t payload = {0};
-    memcpy(&payload, response.payload, response.payload_length);
+    memcpy(&payload, response->payload, response->payload_length);
     if (!payload.ready) {
         return ESP_ERR_INVALID_RESPONSE;
     }
@@ -294,6 +289,30 @@ static esp_err_t get_status_v2_locked(uint8_t request_sequence, cerberus_c5_stat
     status->minimum_free_heap_kib = payload.minimum_free_heap_kib;
     status->radio_state = payload.radio_state;
     return ESP_OK;
+}
+
+static esp_err_t get_status_v2_locked(uint8_t request_sequence, cerberus_c5_status_t *status)
+{
+    cerberus_spi_frame_t request;
+    if (!cerberus_protocol_prepare_frame(&request, CERBERUS_SPI_COMMAND_STATUS,
+            request_sequence, NULL, 0)) return ESP_FAIL;
+    uint8_t discarded[CERBERUS_SPI_TRANSFER_SIZE] = {0};
+    cerberus_spi_frame_t response = {0};
+    spi_request_response(&request, discarded, &response, sizeof(request));
+    return decode_status_v2_response(&response, request_sequence, status);
+}
+
+static esp_err_t get_status_v2_passive_locked(uint8_t request_sequence,
+    uint32_t deadline_ms, cerberus_c5_status_t *status)
+{
+    cerberus_spi_frame_t request;
+    if (!cerberus_protocol_prepare_frame(&request, CERBERUS_SPI_COMMAND_STATUS,
+            request_sequence, NULL, 0)) return ESP_FAIL;
+    uint8_t discarded[CERBERUS_SPI_TRANSFER_SIZE] = {0};
+    cerberus_spi_frame_t response = {0};
+    esp_err_t error = spi_request_response_passive(&request, discarded, &response,
+        sizeof(request), deadline_ms);
+    return error == ESP_OK ? decode_status_v2_response(&response, request_sequence, status) : error;
 }
 
 static esp_err_t exchange_v2_locked(
@@ -2407,3 +2426,4 @@ esp_err_t c5_spi_link_get_ieee802154_activity_scan_result(
 #include "c5_csi_link_impl.h"
 #include "c5_mac_monitor_link_impl.h"
 #include "c5_wifi_relation_link_impl.h"
+#include "c5_wifi_scan_link_impl.h"

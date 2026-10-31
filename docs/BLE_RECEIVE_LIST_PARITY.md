@@ -1,5 +1,11 @@
 # BLE receive-list parity audit
 
+## Rev93 source contribution
+
+The contribution adds independent Find My/Flipper Analyzer facts, completed-sweep Recon recording and inventory, and saved BLE snapshots with an offline viewer. Raw saved ADV is capped at 31 bytes; scan-response payloads are not retained. Current native extended reception is still disabled. See [BLE snapshots](BLE_SD_SNAPSHOTS.md), [Recon inventory](RECON_INVENTORY.md) and [the native gap](BLE_EXTENDED_RECEIVE_GAP.md).
+
+See [CONTRIBUTION_REV93.md](CONTRIBUTION_REV93.md) for validation boundaries and [the coverage ledger](MARAUDER_COVERAGE_LEDGER.md) for remaining work. The following sections retain the earlier contribution history.
+
 ## Installed rev79: focused live ordinary discovery
 
 The ordinary Bluetooth list uses a dedicated S3 discovery attachment. It

@@ -1,0 +1,43 @@
+"""Exercise production archive capture/controller with the real offline viewer.
+
+Clock, allocator and async IO are counted boundaries. The actual private UI
+adapter, codec and capture mapper run; no radio or filesystem call is linked.
+"""
+from pathlib import Path
+import os
+import subprocess
+import sys
+
+root = Path(__file__).resolve().parents[1]
+out = root / 'artifacts/ble-archive-live-checks'
+out.mkdir(parents=True, exist_ok=True)
+display = (root / 's3_main/main/display.c').read_text(encoding='utf-8')
+start = display.index('static const uint8_t *font5x7(')
+(out / 'display_font.h').write_text(display[start:display.index('\nesp_err_t ', start)], encoding='utf-8')
+frame = (root / 'tools/host_checks/recon_render.c').read_text(encoding='utf-8').split('/* Exercise the real private controls', 1)[0]
+frame = frame.replace('static unsigned calls;', 'static unsigned calls, fail_after;\nstatic char drawn[65536];\nstatic size_t drawn_size;')
+frame = frame.replace('    bounds(x,y,w,h);', '    if (fail_after && calls + 1U == fail_after) { ++calls; return ESP_FAIL; }\n    bounds(x,y,w,h);')
+frame = frame.replace('    if(!*text)return ESP_OK;', '    drawn_size += (size_t)snprintf(drawn + drawn_size, sizeof(drawn) - drawn_size, "%s\\n", text);\n    assert(drawn_size < sizeof(drawn));\n    if(!*text)return ESP_OK;')
+(out / 'archive_framebuffer.h').write_text(frame, encoding='utf-8')
+prefix = (root / 'tools/host_checks/ble_archive_ui_check.c').read_text(encoding='utf-8').split('#include "ble_archive_ui.h"', 1)[0]
+(out / 'archive_live_adapters.h').write_text(prefix, encoding='utf-8')
+exe = out / ('ble-archive-live-check.exe' if os.name == 'nt' else 'ble-archive-live-check')
+env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(out / 'zig-global'), ZIG_LOCAL_CACHE_DIR=str(out / 'zig-local'))
+subprocess.run([sys.executable, '-m', 'ziglang', 'cc', '-std=c11', '-O1', '-Wall', '-Wextra', '-Werror',
+    '-I', str(out), '-I', str(root / 'tools/host_checks/stubs'), '-I', str(root / 's3_main/main'),
+    '-I', str(root / 'shared'), str(root / 'tools/host_checks/ble_archive_live_check.c'),
+    str(root / 's3_main/main/ble_archive.c'), '-o', str(exe)], check=True, env=env)
+subprocess.run([str(exe)], check=True, env=env)
+
+# Bind the exercised adapter to actual entry points, rather than assuming an
+# isolated renderer makes the feature reachable. Live behavior is tested above.
+ui = (root / 's3_main/main/ui.c').read_text(encoding='utf-8')
+for route in ('#include "ble_archive_live_ui.h"',
+              'if (current_page == UI_PAGE_BLE_ARCHIVE) return ble_archive_draw();',
+              'ble_archive_open_file(file_path, file_entries[index].name);',
+              'if (item == 7) { ble_archive_open_menu(); return; }',
+              'ble_archive_tick(screen_asleep);'):
+    assert route in ui, route
+assert ui.index('ble_archive_tap(x, y);') < ui.index('if (current_page != UI_PAGE_TOOLS) {')
+assert 'ble_archive_save_selected();' in ui
+print('Actual archive capture, job routing, Back, cleanup and production reachability passed.')

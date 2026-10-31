@@ -49,13 +49,15 @@ typedef struct {
     uint32_t deadline_ms;
     esp_err_t error;
     uint8_t generation, capacity, phase, index, chunk;
-    bool anchored, check_only, expect_bank;
+    bool anchored, check_only, expect_bank, legacy_exchange;
 } cerberus_c5_wifi_relation_reader_t;
 
 /* Reader storage must initially be zeroed. Begin/cancel issue no SPI. Each
  * step performs at most one physical request/response attempt, with at most
- * 20 ms mutex wait. An in-flight READY exchange can overrun the deadline once;
- * afterward failure clears staging. Continue callbacks execute outside locks.
+ * 20 ms mutex wait. Incremental readers share a 5 ms software READY budget per
+ * exchange, capped by the original absolute deadline, with no legacy fallback.
+ * Hardware SPI already in flight is not preemptible; a late attempt fails and
+ * clears staging. Continue callbacks execute outside locks.
  * ESP_OK+complete=false means progress; only complete=true publishes proof.
  * Any error is terminal until begin, and clears all bounded caller rows.
  * Keep rows alive until cancel or terminal completion; no allocation occurs. */
@@ -68,12 +70,18 @@ esp_err_t c5_spi_link_wifi_relation_begin(cerberus_c5_wifi_relation_reader_t *,
 esp_err_t c5_spi_link_wifi_relation_begin_expected(cerberus_c5_wifi_relation_reader_t *,
     const cerberus_c5_wifi_relation_bank_t *expected, uint32_t deadline_ms,
     cerberus_wifi_relation_row_t *rows, size_t capacity);
+/* Status/clock/peer fences only. Begin performs no I/O; advance with the same
+ * step API. The expected variant retains the original source-time anchor. */
+esp_err_t c5_spi_link_wifi_relation_begin_check(cerberus_c5_wifi_relation_reader_t *,
+    uint8_t generation, uint32_t deadline_ms);
+esp_err_t c5_spi_link_wifi_relation_begin_check_expected(cerberus_c5_wifi_relation_reader_t *,
+    const cerberus_c5_wifi_relation_bank_t *expected, uint32_t deadline_ms);
 esp_err_t c5_spi_link_wifi_relation_step(cerberus_c5_wifi_relation_reader_t *,
     cerberus_c5_wifi_relation_bank_t *proof, bool *complete,
     cerberus_c5_relation_continue_fn, void *context);
 void c5_spi_link_wifi_relation_cancel(cerberus_c5_wifi_relation_reader_t *);
-/* Worker-only wrappers drive the same incremental reader. UI callers use
- * step once per tick. NOT_SUPPORTED occurs only on initial old-peer proof;
+/* Worker-only wrappers retain the ordinary legacy-compatible exchange policy.
+ * UI callers use bounded incremental steps. NOT_SUPPORTED occurs only on initial old-peer proof;
  * a supported peer changing/rebooting/malforming never permits fallback. */
 esp_err_t c5_spi_link_copy_wifi_relations(uint8_t generation, uint32_t deadline_ms,
     cerberus_c5_wifi_relation_bank_t *proof, cerberus_wifi_relation_row_t *rows,
@@ -122,6 +130,32 @@ typedef struct {
 esp_err_t c5_spi_link_get_wifi_scan_observed_result(uint8_t generation,
     uint8_t index, cerberus_c5_wifi_result_t *result,
     cerberus_s3_wifi_observation_t *observation);
+
+/* UI-owned reader for a single AP row. No allocation or RF command. Each step
+ * attempts at most one physical exchange, waits at most 20 ms for the mutex,
+ * and releases it before returning. All READY waits share a 5 ms software
+ * budget capped by the original deadline; no legacy fallback occurs. Hardware
+ * SPI already in flight is not preemptible, but a late attempt cannot publish.
+ * Begin/cancel issue no I/O. Outputs must not alias reader storage and are
+ * zero until complete. Every error is terminal until another begin. The
+ * containing snapshot must still fence its generation/bank before commit. */
+typedef struct {
+    cerberus_c5_wifi_result_t pending;
+    cerberus_s3_wifi_observation_t observation;
+    uint64_t last_local_us;
+    uint32_t deadline_ms, firmware_version;
+    esp_err_t error;
+    uint8_t generation, index, phase, ssid_length, copied;
+    bool clock_sampled;
+} cerberus_c5_wifi_scan_reader_t;
+esp_err_t c5_spi_link_wifi_scan_result_begin(cerberus_c5_wifi_scan_reader_t *,
+    uint8_t generation, uint8_t index, uint32_t deadline_ms);
+esp_err_t c5_spi_link_wifi_scan_result_step(cerberus_c5_wifi_scan_reader_t *,
+    cerberus_c5_wifi_result_t *, cerberus_s3_wifi_observation_t *, bool *complete);
+void c5_spi_link_wifi_scan_result_cancel(cerberus_c5_wifi_scan_reader_t *);
+/* One-attempt read for a snapshot's final status fence; never starts reception. */
+esp_err_t c5_spi_link_get_wifi_scan_status_once(uint32_t deadline_ms,
+    cerberus_wifi_scan_status_payload_t *);
 
 typedef struct {
     char name[CERBERUS_BLE_NAME_MAX_LENGTH + 1U];

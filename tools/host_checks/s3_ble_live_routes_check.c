@@ -3,10 +3,12 @@
 #include "scan_display_store.h"
 #include "s3_ble_list.h"
 #include "s3_ble_recent.h"
+#include "s3_wifi_list.h"
 #include "s3_ble_discovery_inventory.h"
 #include "s3_ble_discovery_session.h"
 #include "sentinel_scan_view.h"
 #include "sentinel_scan_session.h"
+#include "ble_live_wifi_map_type.h"
 #include <assert.h>
 #include <stdio.h>
 #define ESP_ERROR_CHECK(x) assert((x)==ESP_OK)
@@ -23,8 +25,11 @@ static cerberus_scan_display_store_t store,*live_store=&store;
 static cerberus_findmy_monitor_record_t evidence[32],*live_ble_evidence=evidence,selected;
 static uint8_t live_ble_indexes[32];static size_t live_ble_filtered_count;
 static bool live_wifi_recent_only;
-static uint8_t live_wifi_indexes[32];
-static size_t live_wifi_filtered_count;
+static cerberus_s3_wifi_sort_t live_wifi_sort;
+static cerberus_s3_wifi_band_t live_wifi_band;
+static live_wifi_paint_map_t live_wifi_built,live_wifi_painted;
+static uint64_t wifi_relation_publication;
+static uint8_t wifi_relation_generation;
 static cerberus_c5_status_t c5_status;
 static uint16_t live_page[SENTINEL_SCAN_TOOL_COUNT];
 typedef struct {bool captured;uint16_t count;uint8_t saved_generation;} live_scan_record_t;
@@ -88,6 +93,17 @@ static esp_err_t live_paint(bool full){(void)full;return sentinel_scan_view_upda
 #include "ble_live_route_impl.h"
 int main(void)
 {
+    /* Shared dispatch must not mutate ordinary Wi-Fi presentation state while
+     * this fixture exercises BLE-only routes. Compile the actual map guard;
+     * full Wi-Fi rendering and binding live in the discovery UI fixture. */
+    live_wifi_sort=CERBERUS_S3_WIFI_SORT_NAME_ASC;
+    live_wifi_band=CERBERUS_S3_WIFI_BAND_5_GHZ;
+    wifi_relation_publication=UINT64_C(0x1234567800000042);wifi_relation_generation=9;
+    live_wifi_built=(live_wifi_paint_map_t){.publication=wifi_relation_publication,
+        .token=17,.generation=9,.bank_count=3,.count=2,.indexes={2,0},.valid=true};
+    live_wifi_painted=live_wifi_built;
+    live_wifi_painted.token=16;
+    live_wifi_paint_map_t wifi_built_before=live_wifi_built,wifi_painted_before=live_wifi_painted;
     assert(live_is_view());
     for(unsigned i=0;i<CERBERUS_S3_BLE_FILTER_COUNT;++i){handle_ble_tap(100,60);assert(ble_filter==(i+1)%CERBERUS_S3_BLE_FILTER_COUNT);}
     ble_filter=CERBERUS_S3_BLE_FILTER_FIND_MY;action=SENTINEL_VIEW_TOOLS;handle_ble_tap(250,380);
@@ -128,5 +144,9 @@ int main(void)
     assert(actual_ble_start(true)==ESP_OK && active_starts==1);
     current_page=UI_PAGE_WATCH;assert(actual_ble_start(true)==ESP_OK && passive_starts==1);
     assert(actual_ble_start(false)==ESP_OK && stop_count==1);
+    assert(live_wifi_sort==CERBERUS_S3_WIFI_SORT_NAME_ASC && live_wifi_band==CERBERUS_S3_WIFI_BAND_5_GHZ);
+    assert(wifi_relation_publication==UINT64_C(0x1234567800000042) && wifi_relation_generation==9);
+    assert(!memcmp(&wifi_built_before,&live_wifi_built,sizeof(live_wifi_built)));
+    assert(!memcmp(&wifi_painted_before,&live_wifi_painted,sizeof(live_wifi_painted)));
     puts("Actual BLE live dispatch: filters, Monitor entry, mapped frozen selection, pagination, sorted/focused original indexes, original timestamp, active-list/passive-Watch scan gate passed");
 }

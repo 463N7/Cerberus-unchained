@@ -81,6 +81,9 @@ static esp_err_t draw_detail_page(void);
 static esp_err_t draw_current_page(void){return draw_detail_page();}
 static void return_to_launcher(void){++launches;current_page=tool_parent_page;}
 static int unexpected_call(void){assert(!"Unrelated route called");return 0;}
+/* This fixture exercises Wi-Fi relationship navigation. The unrelated Recent
+ * viewer is closed; retain the real parent dispatcher's guard and ordering. */
+static bool wardrive_recent_is_open(void){assert(current_page!=UI_PAGE_WARDRIVE);return false;}
 static bool live_supported(sentinel_scan_tool_t tool){return tool==SENTINEL_SCAN_WIFI;}
 static sentinel_scan_tool_t watch_requested_tool(void){assert(false);return SENTINEL_SCAN_NONE;}
 static bool ble_discovery_page(void){return false;}

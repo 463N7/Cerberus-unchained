@@ -26,8 +26,12 @@ permissions:
 
 jobs:
   host-checks:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
@@ -37,15 +41,19 @@ jobs:
           python-version: '3.13'
       - name: Install pinned host compiler
         run: python -m pip install ziglang==0.14.1
-      - name: Run rev81 host suites
+      - name: Run 107 rev93 host suites
         run: python tools/run_host_checks.py --jobs 2
+      - name: Check build-report failure handling
+        run: python tools/check_build_unified.py
       - name: Check SD resources
         run: python tools/check_field_kit.py
       - name: Save host-check results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: cerberus-unchained-host-checks-${{ github.run_number }}
-          path: artifacts/host-checks/
+          name: cerberus-unchained-host-checks-${{ matrix.os }}-${{ github.run_number }}
+          path: |
+            artifacts/host-checks/host-checks.json
+            artifacts/host-checks/*.log
           if-no-files-found: ignore
           retention-days: 14

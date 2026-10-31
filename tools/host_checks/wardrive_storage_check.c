@@ -53,6 +53,7 @@ static const char *test_root;
 static bool sd_mounted = true, locked;
 static cerberus_storage_owner_t storage_owner = CERBERUS_STORAGE_OWNER_FIRMWARE;
 static FILE *sd_wifi_capture_file;
+static struct { bool active; } sd_recon; /* Only the new lease admission boundary. */
 static int64_t test_now_us;
 static bool cerberus_storage_is_mounted(void) { return sd_mounted; }
 static esp_err_t cerberus_storage_mount(void)
@@ -86,6 +87,10 @@ int main(int argc, char **argv)
     const char row[] = "row1\n";
     char name[24];
     uint64_t bytes = 0;
+    sd_recon.active = true;
+    assert(cerberus_storage_reserve_for_usb() == ESP_ERR_INVALID_STATE && !locked);
+    assert(cerberus_storage_wardrive_begin(header, sizeof(header) - 1U) == ESP_ERR_INVALID_STATE && !locked);
+    sd_recon.active = false;
     assert(cerberus_storage_wardrive_begin(header, sizeof(header) - 1U) == ESP_OK);
     assert(!locked && sd_wardrive_stream.file != NULL);
     assert(cerberus_storage_reserve_for_usb() == ESP_ERR_INVALID_STATE);

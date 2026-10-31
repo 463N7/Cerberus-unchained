@@ -168,8 +168,10 @@ static void console_printf(const char *format, ...)
 #define OTHER(name) static void name(void) { ++other_commands; }
 OTHER(print_info) OTHER(print_health) OTHER(print_memory) OTHER(print_c5)
 OTHER(print_storage) OTHER(print_resources) OTHER(print_capture) OTHER(print_usb)
-OTHER(print_network) OTHER(print_wifi_seen) OTHER(print_stations) OTHER(print_reports)
+OTHER(print_network) OTHER(print_wifi_seen) OTHER(print_wifi_readout) OTHER(print_stations) OTHER(print_reports)
 OTHER(print_radio) OTHER(print_battery)
+OTHER(print_recon_record)
+OTHER(print_ble_archive)
 #include "remote_id_console_impl.h"
 
 static void clear_output(void)

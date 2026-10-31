@@ -92,6 +92,12 @@ esp_err_t sentinel_hub_draw(sentinel_hub_t hub, const cerberus_ui_widget_theme_t
             "SURVEY", 1, true, theme), "hub", "survey");
         return cerberus_ui_widget_draw_button((cerberus_ui_rect_t){12, 364, 68, 42}, "LEARN", 1, true, theme);
     }
+    if (hub == SENTINEL_HUB_BLE) {
+        ESP_RETURN_ON_ERROR(cerberus_ui_widget_draw_button((cerberus_ui_rect_t){12, 364, 88, 42},
+            "LEARN", 1, true, theme), "hub", "learn");
+        return cerberus_ui_widget_draw_button((cerberus_ui_rect_t){108, 364, 200, 42},
+            "SD SNAPSHOTS", 2, true, theme);
+    }
     return cerberus_ui_widget_draw_button((cerberus_ui_rect_t){12, 364, 296, 42},
         "LEARN WITH CERBERUS", 2, true, theme);
 }
@@ -100,6 +106,7 @@ int sentinel_hub_hit_test(sentinel_hub_t hub, uint16_t x, uint16_t y)
 {
     if (hub > SENTINEL_HUB_RADIO || x < 12 || x >= 308) return -1;
     if (y >= 364 && y < 406) {
+        if (hub == SENTINEL_HUB_BLE) return x < 100 ? 6 : x >= 108 ? 7 : -1;
         if (hub != SENTINEL_HUB_WIFI) return 6;
         if (x < 80) return 6;
         if (x >= 88 && x < 156) return 9;

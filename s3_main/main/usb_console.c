@@ -12,7 +12,10 @@
 #include "recovery.h"
 #include "storage.h"
 #include "recon_store.h"
+#include "recon_recorder.h"
+#include "ble_archive_io.h"
 #include "remote_id_diagnostics.h"
+#include "wifi_readout_diagnostics.h"
 #include "wifi_multissid_session.h"
 #include "wifi_pinescan_session.h"
 #include "ble_test.h"
@@ -55,6 +58,29 @@ static TaskHandle_t console_task_handle;
 static usb_phy_handle_t console_phy;
 static atomic_bool console_stop_requested;
 static atomic_bool console_task_stopped = true;
+
+/* Keep command-local snapshots out of the permanent console task frame.
+ * With size optimization, otherwise even an unrelated command inherits the
+ * largest inlined snapshot and can exhaust the 4096-byte task stack. */
+static __attribute__((noinline)) void print_help(void);
+static __attribute__((noinline)) void print_info(void);
+static __attribute__((noinline)) void print_health(void);
+static __attribute__((noinline)) void print_memory(void);
+static __attribute__((noinline)) void print_c5(void);
+static __attribute__((noinline)) void print_storage(void);
+static __attribute__((noinline)) void print_resources(void);
+static __attribute__((noinline)) void print_capture(void);
+static __attribute__((noinline)) void print_usb(void);
+static __attribute__((noinline)) void print_network(void);
+static __attribute__((noinline)) void print_wifi_seen(void);
+static __attribute__((noinline)) void print_wifi_readout(void);
+static __attribute__((noinline)) void print_recon_record(void);
+static __attribute__((noinline)) void print_ble_archive(void);
+static __attribute__((noinline)) void print_remote_id(void);
+static __attribute__((noinline)) void print_stations(void);
+static __attribute__((noinline)) void print_reports(void);
+static __attribute__((noinline)) void print_radio(void);
+static __attribute__((noinline)) void print_battery(void);
 
 static void console_write(const char *text)
 {
@@ -110,10 +136,13 @@ static void print_help(void)
         "c5       Show onboard C5 link health and capabilities\r\n"
         "storage  Show microSD health and capacity\r\n"
         "resources Verify SD Recon database and SHA-256\r\n"
+        "recon_record Read SD Recon recording state and counters\r\n"
+        "ble_archive Read saved BLE snapshot worker state\r\n"
         "capture   Read passive capture, MultiSSID and PineScan state\r\n"
         "usb      Show USB storage handover status\r\n"
         "network  Show onboard C5 network scan status\r\n"
         "wifi_seen Read completed Wi-Fi source-age coverage without scanning\r\n"
+        "wifi_readout Read local UI AP transfer metrics without SPI or scanning\r\n"
         "remote_id Read published Remote ID session counts without scanning\r\n"
         "stations Read passive station capture without renewing its lease\r\n"
         "reports  Read the first 32 SD log names and network CSVs\r\n"
@@ -166,6 +195,10 @@ static void print_memory(void)
             (unsigned)heap_caps_get_largest_free_block(caps[i]));
     }
     console_printf("s3_task_count=%u\r\n",(unsigned)uxTaskGetNumberOfTasks());
+    /* ESP-IDF reports this minimum remaining task stack in bytes. Query this
+     * command again after a diagnostic sequence to include its exercised paths. */
+    console_printf("usb_console_stack_low_water_bytes=%u\r\n",
+        (unsigned)uxTaskGetStackHighWaterMark(NULL));
     cerberus_c5_status_t status;
     esp_err_t err=c5_spi_link_get_status(&status);
     console_printf("memory=C5_INTERNAL\r\ntransport=%s\r\n",esp_err_to_name(err));
@@ -570,6 +603,70 @@ static void print_network(void)
         esp_err_to_name(err), status.job_id, status.state, status.tested, status.total,
         status.open, status.closed, status.filtered, status.result_count,
         (unsigned long)status.elapsed_ms, (long)status.error_code);
+}
+
+static void print_wifi_readout(void)
+{
+    cerberus_wifi_readout_diagnostics_t snapshot;
+    cerberus_wifi_readout_diagnostics_get(&snapshot);
+    console_printf("wifi_readout_scope=s3_ap_readout_excludes_rf_scan_display_touch\r\n"
+        "wifi_readout_state=%u\r\nwifi_readout_phase=%u\r\n"
+        "wifi_readout_rows_total=%u\r\nwifi_readout_rows_copied=%u\r\n"
+        "wifi_readout_attempts=%" PRIu32 "\r\nwifi_readout_completed=%" PRIu32 "\r\n"
+        "wifi_readout_failed=%" PRIu32 "\r\nwifi_readout_cancelled=%" PRIu32 "\r\n"
+        "wifi_readout_step_calls=%" PRIu32 "\r\nwifi_readout_error=%" PRId32 "\r\n"
+        "wifi_readout_cancel_reason=%u\r\nwifi_readout_timing_valid=%u\r\n"
+        "wifi_readout_counters_saturated=%u\r\nwifi_readout_sampled_us=%" PRIu64 "\r\n"
+        "wifi_readout_elapsed_us=%" PRIu64 "\r\nwifi_readout_max_step_us=%" PRIu64 "\r\n"
+        "wifi_readout_max_tick_gap_us=%" PRIu64 "\r\n",
+        (unsigned)snapshot.state, (unsigned)snapshot.phase,
+        (unsigned)snapshot.rows_total, (unsigned)snapshot.rows_copied,
+        snapshot.attempts, snapshot.completed, snapshot.failed, snapshot.cancelled,
+        snapshot.step_calls, snapshot.error, (unsigned)snapshot.cancel_reason,
+        snapshot.timing_valid ? 1U : 0U, snapshot.counters_saturated ? 1U : 0U,
+        snapshot.sampled_us, snapshot.elapsed_us, snapshot.max_step_us, snapshot.max_tick_gap_us);
+}
+
+static void print_ble_archive(void)
+{
+    cerberus_ble_archive_io_status_t snapshot;
+    cerberus_ble_archive_io_get_status(&snapshot);
+    console_printf("ble_archive_state=%s\r\nble_archive_active=%u\r\n"
+        "ble_archive_error=%" PRId32 "\r\nble_archive_job_id=%" PRIu64 "\r\n"
+        "ble_archive_operation=%u\r\nble_archive_cancel_requested=%u\r\n"
+        "ble_archive_result_ready=%u\r\nble_archive_bytes=%" PRIu32 "\r\n"
+        "ble_archive_rows=%u\r\nble_archive_path=%s\r\nble_archive_file=%s\r\n",
+        cerberus_ble_archive_io_state_name(snapshot.state), snapshot.worker_active ? 1U : 0U,
+        (int32_t)snapshot.error, snapshot.job_id, (unsigned)snapshot.operation,
+        snapshot.cancel_requested ? 1U : 0U, snapshot.result_ready ? 1U : 0U,
+        snapshot.bytes, (unsigned)snapshot.count, snapshot.relative_path, snapshot.file_name);
+}
+
+static void print_recon_record(void)
+{
+    cerberus_recon_recorder_status_t snapshot;
+    cerberus_recon_recorder_get_status(&snapshot);
+    console_printf("recon_record_state=%s\r\nrecon_record_active=%u\r\n"
+        "recon_record_error=%" PRId32 "\r\nrecon_record_session=%s\r\n"
+        "recon_record_session_id=%" PRIu64 "\r\nrecon_record_started_us=%" PRIu64 "\r\n"
+        "recon_record_ended_us=%" PRIu64 "\r\nrecon_record_queued=%u\r\n"
+        "recon_record_accepted=%" PRIu32 "\r\nrecon_record_written=%" PRIu32 "\r\n"
+        "recon_record_dropped=%" PRIu32 "\r\nrecon_record_invalid=%" PRIu32 "\r\n"
+        "recon_record_abandoned=%" PRIu32 "\r\n"
+        "recon_record_accepted_wifi_rows=%" PRIu32 "\r\n"
+        "recon_record_accepted_ble_rows=%" PRIu32 "\r\n"
+        "recon_record_accepted_ibeacon_rows=%" PRIu32 "\r\n"
+        "recon_record_written_wifi_rows=%" PRIu32 "\r\n"
+        "recon_record_written_ble_rows=%" PRIu32 "\r\n"
+        "recon_record_written_ibeacon_rows=%" PRIu32 "\r\n",
+        cerberus_recon_recorder_state_name(snapshot.state), snapshot.worker_active ? 1U : 0U,
+        (int32_t)snapshot.error, snapshot.session_name, snapshot.session_id,
+        snapshot.started_us, snapshot.ended_us, (unsigned)snapshot.queued,
+        snapshot.counters.accepted, snapshot.counters.written, snapshot.counters.dropped,
+        snapshot.counters.invalid, snapshot.counters.abandoned,
+        snapshot.counters.accepted_wifi_rows, snapshot.counters.accepted_ble_rows,
+        snapshot.counters.accepted_ibeacon_rows, snapshot.counters.written_wifi_rows,
+        snapshot.counters.written_ble_rows, snapshot.counters.written_ibeacon_rows);
 }
 
 static void print_wifi_seen_error(const char *stage, esp_err_t error)
@@ -999,6 +1096,24 @@ static void print_wardrive_relations(const cerberus_wardrive_status_t *status)
 }
 /* END WIFI RELATION DIAGNOSTICS. */
 
+/* Compact read-only view: never place the ten-row bank on the console stack. */
+__attribute__((noinline))
+static void print_wardrive_recent(void)
+{
+    cerberus_wardrive_recent_status_t recent;
+    cerberus_wardrive_get_recent_status(&recent);
+    console_printf("processor=WARDRIVE_RECENT\r\nstate=%u\r\nworker_active=%u\r\n"
+        "available=%u\r\nerror=%ld\r\nview_error=%ld\r\n"
+        "session_id=%" PRIu64 "\r\nrevision=%" PRIu64 "\r\nevents=%" PRIu64 "\r\n"
+        "rows=%u\r\nretained_events=%u\r\nclock_faults=%" PRIu32 "\r\n"
+        "receipt_scope=S3_processing_uptime_not_RF_time\r\n"
+        "append_scope=API_accepted_not_SD_durability\r\n",
+        (unsigned)recent.state, recent.worker_active ? 1U : 0U,
+        recent.available ? 1U : 0U, (long)recent.error, (long)recent.view_error,
+        recent.session_id, recent.revision, recent.events,
+        (unsigned)recent.count, (unsigned)recent.retained_events, recent.clock_faults);
+}
+
 static void print_radio(void)
 {
     print_wifi_relations();
@@ -1083,6 +1198,7 @@ static void print_radio(void)
         (unsigned long)wardrive.c5_probe_dropped,
         (unsigned long)wardrive.c5_probe_unavailable_sweeps);
     print_wardrive_relations(&wardrive);
+    print_wardrive_recent();
 }
 
 static void print_pinescan(void)
@@ -1228,6 +1344,12 @@ static void execute_command(char *line)
         print_network();
     } else if (strcmp(start, "wifi_seen") == 0) {
         print_wifi_seen();
+    } else if (strcmp(start, "wifi_readout") == 0) {
+        print_wifi_readout();
+    } else if (strcmp(start, "recon_record") == 0) {
+        print_recon_record();
+    } else if (strcmp(start, "ble_archive") == 0) {
+        print_ble_archive();
     } else if (strcmp(start, "remote_id") == 0) {
         print_remote_id();
     } else if (strcmp(start, "stations") == 0) {

@@ -9,7 +9,7 @@ import zlib
 root = Path(__file__).resolve().parents[1]
 out = root / "artifacts/wardrive-ui-checks"
 out.mkdir(parents=True, exist_ok=True)
-ui = (root / "s3_main/main/ui.c").read_text()
+ui = (root / "s3_main/main/ui.c").read_text(encoding="utf-8")
 
 def between(source, first, after):
     begin = source.index(first)
@@ -29,7 +29,7 @@ env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(out / "zig-cache"))
 exe = out / "wardrive-ui-check.exe"
 subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
     "-I", str(out), "-I", str(root / "tools/host_checks/stubs"),
-    "-I", str(root / "s3_main/main"),
+    "-I", str(root / "s3_main/main"), "-I", str(root / "shared"),
     str(root / "tools/host_checks/wardrive_ui_check.c"),
     str(root / "s3_main/main/ui_widgets.c"), "-o", str(exe)], check=True, env=env)
 subprocess.run([str(exe), str(out / "wardrive")], check=True, env=env)

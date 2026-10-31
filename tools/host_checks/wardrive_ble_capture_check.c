@@ -3,6 +3,7 @@
 #endif
 #include "wardrive_core.h"
 #include "wardrive_service.h"
+#include "wardrive_recent_attempt_type.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -36,8 +37,9 @@ static esp_err_t cerberus_s3_ble_scanner_copy_wardrive(uint8_t generation,uint8_
     memcpy(rows,samples,count*sizeof(*rows));memcpy(hints,evidence,count*sizeof(*hints));
     return bank_error;
 }
-static esp_err_t append_observation(const cerberus_wardrive_observation_t *o)
+static esp_err_t append_observation_impl(const cerberus_wardrive_observation_t *o, cerberus_wardrive_recent_outcome_t *outcome)
 {
+    *outcome=CERBERUS_WARDRIVE_RECENT_NOT_LOGGED;
     ++append_calls;
     if(!cerberus_wardrive_observation_valid(o))return ESP_ERR_INVALID_ARG;
     cerberus_wardrive_decision_t decision=cerberus_wardrive_decide_evidence(&dedupe,o,1234);
@@ -50,6 +52,14 @@ static esp_err_t append_observation(const cerberus_wardrive_observation_t *o)
     if(stop_after_first)stop=true;
     return ESP_OK;
 }
+
+/* Retained publication is independently exercised by the whole-service suite. */
+static void recent_preview(const cerberus_wardrive_observation_t *o, wardrive_recent_attempt_t *a)
+{ (void)o; a->previewed=true; }
+static void recent_outcome(cerberus_wardrive_recent_ticket_t t, cerberus_wardrive_recent_outcome_t o)
+{ (void)t; (void)o; }
+#include "wardrive_recent_attempt_impl.h"
+static wardrive_recent_attempt_t ble_attempts[32];
 #include "wardrive_ble_impl.h"
 static void reset(void)
 {
@@ -89,7 +99,8 @@ int main(void)
     assert(capture_ble(7,2,false)==ESP_OK&&saved_count==3&&wardrive_status.s3_ble_flock_corroborated==1);
     reset();sd_error=ESP_FAIL;assert(capture_ble(7,2,false)==ESP_FAIL&&append_calls==1&&!saved_count);
     assert(!wardrive_status.s3_ble_observations&&!wardrive_status.s3_ble_flock_observations);
-    sd_error=ESP_OK;assert(capture_ble(7,2,false)==ESP_OK&&saved_count==2);
+    sd_error=ESP_OK;assert(capture_ble(7,2,true)==ESP_FAIL&&append_calls==1&&!saved_count);
+    ble_capture_ready=false;assert(capture_ble(7,2,false)==ESP_OK&&saved_count==2);
     reset();stop_after_first=true;assert(capture_ble(7,2,false)==ESP_OK&&saved_count==1);
     assert(capture_ble(7,1,true)==ESP_ERR_INVALID_STATE);
     assert(capture_ble(8,2,true)==ESP_ERR_INVALID_STATE);
@@ -117,5 +128,5 @@ int main(void)
     publish_sighting(&relation,true);
     assert(wardrive_status.c5_relation_observations==UINT32_MAX&&wardrive_status.c5_relation_logged==UINT32_MAX&&
         wardrive_status.dedupe_evicted==UINT32_MAX);
-    puts("Wardriving BLE: atomic banks, source evidence, independent relation counters, SD retry and Stop drain pass");
+    puts("Wardriving BLE: atomic banks, source evidence, independent relation counters, terminal SD failure and Stop drain pass");
 }

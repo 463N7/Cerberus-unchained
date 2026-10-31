@@ -22,6 +22,13 @@ extern "C" {
 #define CERBERUS_STORAGE_WIFI_CAPTURE_MAX_BYTES (64U * 1024U * 1024U)
 #define CERBERUS_STORAGE_WARDRIVE_MAX_BYTES (64U * 1024U * 1024U)
 #define CERBERUS_STORAGE_WARDRIVE_PATH "/CERBERUS/WARD"
+#define CERBERUS_STORAGE_RECON_PATH "/CERBERUS/RECON"
+#define CERBERUS_STORAGE_RECON_ROW_MAX 1024U
+#define CERBERUS_STORAGE_RECON_MANIFEST_MAX 4096U
+#define CERBERUS_STORAGE_RECON_MAX_BYTES (64U * 1024U * 1024U)
+#define CERBERUS_STORAGE_RECON_NAME_CAPACITY 7U
+#define CERBERUS_STORAGE_BLE_ARCHIVE_PATH "/CERBERUS/BLE"
+#define CERBERUS_STORAGE_BLE_ARCHIVE_MAX_BYTES 6144U
 
 typedef struct {
     bool mounted;
@@ -145,6 +152,43 @@ esp_err_t cerberus_storage_wardrive_wigle_append(const char *row, size_t row_len
 esp_err_t cerberus_storage_wardrive_wigle_sync(void);
 esp_err_t cerberus_storage_wardrive_wigle_finish(bool keep,
     char *file_name, size_t file_name_capacity, uint64_t *bytes_written);
+/* Worker-only journal: begin requires mounted firmware-owned storage and
+ * returns R00001..R99999. Its lease excludes USB/unmount/capture/Wardriving and
+ * mutations overlapping the active session until finish. Begin examines at most
+ * 1024 candidate indices, starting from a cached rotating hint. Failed begin
+ * releases its lease and retains a nonempty name if a fresh directory was
+ * created, so partial files can be found. Failed append/sync requires
+ * finish(..., false), including a lock
+ * timeout. Finish waits for the mutex and releases both streams and the lease
+ * even for invalid arguments or a prior write failure. Header/rows are bounded
+ * by ROW_MAX, manifest by MANIFEST_MAX, and all bytes together by MAX_BYTES.
+ * Observation data reserves MANIFEST_MAX bytes for a final error manifest;
+ * reaching the observation limit fails the session rather than completing it.
+ * Only fully written, flushed, synced and closed files are eligible for
+ * OBS.CSV then SESSION.JSON publication. SESSION.JSON is the completion marker.
+ * Failures retain partial files; a failed second rename leaves OBS.CSV
+ * alongside SESSION.TMP without a completion marker. This is not atomic
+ * publication or a power-loss guarantee. No caller may retry a partial append. */
+esp_err_t cerberus_storage_recon_begin(const char *csv_header, size_t length,
+    char *session_name, size_t capacity);
+esp_err_t cerberus_storage_recon_append(const char *row, size_t length);
+esp_err_t cerberus_storage_recon_sync(void);
+esp_err_t cerberus_storage_recon_finish(const char *manifest, size_t length,
+    bool successful);
+/* Worker-only bounded archive operations. The existing storage mutex is held
+ * for the entire operation, excluding USB/unmount/file tools; other capture,
+ * Wardriving and Recon leases must be idle. Byte bounds do not bound SD latency.
+ * Save searches at most 1024 names from a cached hint, creates Bnnnnn.TMP with
+ * O_EXCL and publishes Bnnnnn.BLE only after full write, flush, sync and close.
+ * Existing files are never overwritten; a failure retains an owned temp and
+ * returns its name when created. No atomic/power-loss durability is claimed.
+ * Load accepts safe relative directories and .BLE filenames, checks complete
+ * bounded data/EOF/close, and clears data/length on failure. Codec validation is
+ * the caller's responsibility before publishing a loaded document. */
+esp_err_t cerberus_storage_ble_archive_save(const uint8_t *data, size_t length,
+    char *file_name, size_t capacity);
+esp_err_t cerberus_storage_ble_archive_load(const char *relative_path,
+    const char *file_name, uint8_t *data, size_t capacity, size_t *length);
 esp_err_t cerberus_storage_write_qr_bmp(
     const uint8_t *modules,
     uint16_t module_count,
@@ -171,6 +215,12 @@ esp_err_t cerberus_storage_run_benchmark(cerberus_storage_benchmark_result_t *re
 esp_err_t cerberus_storage_create_directory(const char *relative_path, const char *name);
 esp_err_t cerberus_storage_create_empty_file(const char *relative_path, const char *name);
 esp_err_t cerberus_storage_rename_entry(const char *relative_path, const char *old_name, const char *new_name);
+/* Copy under the firmware-owned storage lock through a destination-adjacent
+ * .CERBTMP file. Existing destination/temp entries or uncertain existence checks
+ * are rejected. Rename is attempted only after clean EOF, complete writes,
+ * flush/fsync and both successful closes. A failure preserves the source and
+ * attempts to remove only the temp created by this call; failed cleanup may
+ * leave that temp for inspection. This is not an atomic or power-loss guarantee. */
 esp_err_t cerberus_storage_copy_file(
     const char *source_path,
     const char *source_name,

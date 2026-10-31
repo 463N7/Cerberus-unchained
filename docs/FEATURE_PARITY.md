@@ -1,5 +1,11 @@
 # Field kit feature ledger
 
+## Rev93 source contribution
+
+The rev82–93 contribution adds passive result-readout resilience, cached AP analysis/list controls, BLE analysis and SD snapshots, Recon recording/inventory, SD copy error handling and integrated Wardriving Recent Nets. The current ledger has 95 mode symbols: 73 partial, 8 pending, 10 needing review and 4 hardware limited. No mode is declared complete.
+
+See [CONTRIBUTION_REV93.md](CONTRIBUTION_REV93.md) for validation boundaries and [the coverage ledger](MARAUDER_COVERAGE_LEDGER.md) for remaining work. The following sections retain the earlier contribution history.
+
 Current installed checkpoint, 2026-10-30 UTC: S3
 `candidate-ready-edge-portable-build` (rev54), paired with C5 firmware 49.
 All five target builds passed with stable inputs, including final S3 ELF

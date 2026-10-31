@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the 79 host suites used for the rev81 development checkpoint.
+"""Run the 107 host suites used for the rev93 development checkpoint.
 
 The checked-in synthetic fixtures need no board, radio, or private captures.
 Generated fixtures, native executables, previews, logs, and the result receipt
@@ -14,6 +14,7 @@ import hashlib
 import importlib.metadata
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -22,6 +23,24 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "artifacts" / "host-checks"
 
 CHECKS = (
+    'check_wardrive_recent.py',
+    'check_wardrive_recent_service.py',
+    'check_ble_archive.py',
+    'check_ble_archive_io.py',
+    'check_recon_inventory.py',
+    'check_recon_journal.py',
+    'check_recon_journal_storage.py',
+    'check_recon_recorder.py',
+    'check_recon_parallel.py',
+    'check_report_storage.py',
+    'check_c5_ready_handshake.py',
+    'check_storage_file_copy.py',
+    'check_s3_wifi_list.py',
+    'check_sentinel_baseline.py',
+    'check_s3_wifi_ssid_analysis.py',
+    'check_wifi_readout_diagnostics.py',
+    'check_wifi_scan_cache.py',
+    'check_wifi_scan_incremental.py',
     'check_wifi_relation_observation.py',
     'check_s3_wifi_relation.py',
     'check_wifi_relation_transport.py',
@@ -94,6 +113,16 @@ CHECKS = (
 )
 
 SERIAL_CHECKS = (
+    'check_wardrive_recent_ui.py',
+    'check_wardrive_recent_live.py',
+    'check_ble_archive_ui.py',
+    'check_ble_archive_live.py',
+    'check_recon_inventory_ui.py',
+    'check_recon_recorder_ui.py',
+    'render_recon.py',
+    'check_wifi_owned_poll_ui.py',
+    'check_wifi_baseline_ui.py',
+    'check_wifi_ssid_analysis_ui.py',
     'check_wifi_relation_ui.py',
     'check_s3_ble_discovery_live.py',
     'check_mac_monitor_ui.py',
@@ -108,9 +137,17 @@ SERIAL_CHECKS = (
 
 
 def run(name: str) -> dict:
+    # Some older harnesses inherit Zig's shared default cache. Give each suite
+    # independent cache roots while preserving each harness's own overrides.
+    cache = OUTPUT / "caches" / name.removesuffix(".py")
+    overrides = {"ZIG_GLOBAL_CACHE_DIR": str(cache / "global"),
+                 "ZIG_LOCAL_CACHE_DIR": str(cache / "local")}
+    for directory in overrides.values():
+        Path(directory).mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
         [sys.executable, str(ROOT / "tools" / name)], cwd=ROOT,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        env=dict(os.environ, **overrides),
     )
     path = OUTPUT / (name.removesuffix(".py") + ".log")
     path.write_bytes(result.stdout)
@@ -121,6 +158,7 @@ def run(name: str) -> dict:
         "check": name, "exit_code": result.returncode,
         "log": path.relative_to(ROOT).as_posix(),
         "log_sha256": hashlib.sha256(result.stdout).hexdigest(),
+        "cache_roots": {key: Path(value).relative_to(ROOT).as_posix() for key, value in overrides.items()},
     }
 
 
@@ -130,8 +168,8 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=3, help="Parallel compiler jobs (default: 3)")
     args = parser.parse_args()
     names = (*CHECKS, *SERIAL_CHECKS)
-    if len(names) != 79 or len(set(names)) != 79:
-        parser.error("Expected the 79 unique rev81 suites; do not silently skip a suite")
+    if len(names) != 107 or len(set(names)) != 107:
+        parser.error("Expected the 107 unique rev93 suites; do not silently skip a suite")
     if args.list:
         for name in names:
             print(name)
@@ -143,6 +181,9 @@ def main() -> int:
         parser.error("Missing suites: " + ", ".join(missing))
     if importlib.util.find_spec("ziglang") is None:
         parser.error("Install the host compiler first: python -m pip install ziglang==0.14.1")
+    version = importlib.metadata.version("ziglang")
+    if version != "0.14.1":
+        parser.error("Expected ziglang==0.14.1; install the pinned host compiler")
     from build_unified import inputs
 
     OUTPUT.mkdir(parents=True, exist_ok=True)
@@ -155,7 +196,7 @@ def main() -> int:
     changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
     receipt = {
         "format": 1,
-        "suite_set": "rev81",
+        "suite_set": "rev93",
         "recorded_utc": datetime.now(timezone.utc).isoformat(),
         "status": "passed" if not changed and all(r["exit_code"] == 0 for r in results) else "failed",
         "hardware_validated": False,

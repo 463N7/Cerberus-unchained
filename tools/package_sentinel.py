@@ -156,8 +156,43 @@ def inspect_target(name: str) -> dict:
             "flash_settings": metadata["flash_settings"], "partitions": partitions, "images": images}
 
 
+def validate_console_proof(receipt: dict) -> dict:
+    """Require the exact final S3 ELF and checker covered by the matched build."""
+    proof = receipt.get("native_console_stack")
+    if not isinstance(proof, dict) or proof.get("status") != "passed" or proof.get("hardware_validated") is not False:
+        raise ValueError("Missing native console proof. Rebuild the matched Unchained set")
+    identities = {
+        "sha256": ROOT / ".pio/build/s3-main/firmware.elf",
+        "source_sha256": ROOT / "s3_main/main/usb_console.c",
+        "checker_sha256": ROOT / "tools/build_unified.py",
+    }
+    for key, path in identities.items():
+        if proof.get(key) != sha256(path):
+            raise ValueError(f"Native console proof is stale: {key}; rebuild the matched set")
+    frames = proof.get("frames_bytes", {})
+    known = proof.get("known_frame_bytes", -1)
+    if (proof.get("allocated_stack_bytes") != 4096 or proof.get("task_frame_limit_bytes") != 192
+            or not 0 < frames.get("usb_console_task", 0) <= 192
+            or type(known) is not int or not 0 < known <= 3072
+            or proof.get("remaining_after_known_frames_bytes") != 4096 - known
+            or proof.get("minimum_remaining_after_known_frames_bytes") != 1024):
+        raise ValueError("Native console frame budget is missing or invalid")
+    expected = {"artifacts/integration/s3-console-stack.json",
+                "artifacts/integration/s3-console-stack.txt"}
+    evidence = receipt.get("native_console_evidence", {})
+    if set(evidence) != expected:
+        raise ValueError("Native console debugger evidence is missing")
+    for name, digest in evidence.items():
+        if sha256(ROOT / name) != digest:
+            raise ValueError("Native console evidence changed; rebuild the matched set")
+    if json.loads((ROOT / "artifacts/integration/s3-console-stack.json").read_text(encoding="utf-8")) != proof:
+        raise ValueError("Native console JSON differs from the matched receipt")
+    return proof
+
+
 def package(output: Path | None = None, *, release: bool = False, accepted_on: str | None = None) -> Path:
     receipt = json.loads(RECEIPT.read_text())
+    console_proof = validate_console_proof(receipt)
     current_source = source_snapshot()
     if current_source != receipt["source"]:
         raise ValueError("Build inputs changed. Run tools/build_unchained.py --target all again")
@@ -203,7 +238,18 @@ def package(output: Path | None = None, *, release: bool = False, accepted_on: s
     manifest = {"format": 1, "product": "Cerberus Unchained", "status": status,
                 "hardware_validation": validation,
                 "built_utc": receipt["built_utc"], "packaged_utc": timestamp,
-                "platformio": receipt["platformio"], "source": current_source, "targets": targets}
+                "platformio": receipt["platformio"], "source": current_source, "targets": targets,
+                "native_console_stack": console_proof,
+                "native_console_evidence": {"native-validation/" + Path(name).name: digest
+                    for name, digest in receipt["native_console_evidence"].items()}}
+    proof_directory = destination / "native-validation"
+    proof_directory.mkdir()
+    for name, digest in receipt["native_console_evidence"].items():
+        copy = proof_directory / Path(name).name
+        shutil.copy2(ROOT / name, copy)
+        if sha256(copy) != digest:
+            raise ValueError("Native console evidence changed while packaging")
+    validate_console_proof(receipt)
     (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     shutil.copy2(ROOT / "docs" / "UNCHAINED_BUILD.md", destination / "BUILD_AND_RECOVERY.md")
     # Keep protocol provenance and redistribution notices with binary builds.

@@ -9,7 +9,7 @@
 #include <string.h>
 #include "display_font.h"
 
-static unsigned checks, calls, fail_at, status_reads, stop_requests, page_draws;
+static unsigned checks, calls, fail_at, status_reads, stop_requests, page_draws, recent_opens;
 #define CHECK(x) do { ++checks; if (!(x)) { fprintf(stderr,"%s:%d: %s\n",__FILE__,__LINE__,#x);abort(); } } while (0)
 #define ESP_ERROR_CHECK(x) CHECK((x)==ESP_OK)
 #define UI_HEADER_HEIGHT 48U
@@ -25,6 +25,7 @@ static char wardrive_blocked_reason[64];
 static uint32_t wardrive_start_requested_ms,wardrive_last_start_attempt_ms,wardrive_last_draw_ms;
 static int64_t clock_us=1234000;
 static esp_err_t draw_detail_page(void);
+static void wardrive_recent_open(void){++recent_opens;}
 static int64_t esp_timer_get_time(void){return clock_us;}
 static const char *esp_err_to_name(esp_err_t e)
 {return e==ESP_ERR_TIMEOUT?"ESP_ERR_TIMEOUT":e==ESP_ERR_NO_MEM?"ESP_ERR_NO_MEM":"ESP_FAIL";}
@@ -66,7 +67,7 @@ static void reset(void)
 {
     memset(&runtime,0,sizeof(runtime));wardrive_start_pending=wardrive_return_pending=false;
     wardrive_gps_enabled=wardrive_include_expansions=false;wardrive_start_error=ESP_OK;
-    wardrive_blocked_reason[0]='\0';calls=fail_at=status_reads=stop_requests=page_draws=0;
+    wardrive_blocked_reason[0]='\0';calls=fail_at=status_reads=stop_requests=page_draws=recent_opens=0;
     wardrive_last_draw_ms=999;clock_us=1234000;
 }
 static void draw(void)
@@ -130,15 +131,21 @@ static void check_routes(void)
     unsigned old=status_reads;wardrive_handle_tap(23,390);wardrive_handle_tap(296,390);CHECK(status_reads==old);
     unsigned draws=page_draws;wardrive_handle_tap(200,178);CHECK(page_draws==draws&&!stop_requests);
     wardrive_start_error=ESP_FAIL;strcpy(wardrive_blocked_reason,"old failure");
-    wardrive_handle_tap(160,380);CHECK(wardrive_start_pending&&!stop_requests&&!wardrive_start_error&&!wardrive_blocked_reason[0]);
+    wardrive_handle_tap(80,380);CHECK(wardrive_start_pending&&!stop_requests&&!wardrive_start_error&&!wardrive_blocked_reason[0]);
     CHECK(wardrive_start_requested_ms==1234&&wardrive_last_start_attempt_ms==984&&!wardrive_last_draw_ms);
     wardrive_handle_tap(24,346);CHECK(wardrive_include_expansions); /* No configuration changes while pending. */
-    wardrive_handle_tap(160,411);CHECK(!wardrive_start_pending&&!stop_requests);
+    wardrive_handle_tap(80,411);CHECK(!wardrive_start_pending&&!stop_requests);
     for(unsigned state=CERBERUS_WARDRIVE_STARTING;state<=CERBERUS_WARDRIVE_STOPPING;++state){
         runtime.state=(cerberus_wardrive_state_t)state;unsigned stops=stop_requests;
-        wardrive_handle_tap(160,380);CHECK(stop_requests==stops+1&&!wardrive_start_pending);
+        wardrive_handle_tap(80,380);CHECK(stop_requests==stops+1&&!wardrive_start_pending);
         wardrive_handle_tap(164,346);CHECK(wardrive_gps_enabled);
     }
+    old=status_reads;draws=page_draws;
+    wardrive_handle_tap(156,390);wardrive_handle_tap(163,390);
+    CHECK(status_reads==old&&page_draws==draws&&!recent_opens);
+    unsigned stops=stop_requests;
+    wardrive_handle_tap(164,380);wardrive_handle_tap(295,411);
+    CHECK(recent_opens==2&&status_reads==old&&stop_requests==stops);
     /* A failed paint is returned, not reported as successful. */
     reset();fail_at=1;CHECK(draw_wardrive()==ESP_FAIL);
 }

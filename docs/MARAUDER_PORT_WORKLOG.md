@@ -1,5 +1,11 @@
 # Marauder port work, 2026-10-28
 
+## Rev93 source contribution
+
+The public rev82–93 source contribution is prepared for Cerberus Unchained. [The contribution summary](CONTRIBUTION_REV93.md) separates the locally installed Unified checkpoint from the Unchained adaptation and records pending physical work. Publication is authorized; the broader firmware mission is paused and unfinished. Earlier entries below remain historical and do not establish acceptance of these new sources.
+
+See [CONTRIBUTION_REV93.md](CONTRIBUTION_REV93.md) for validation boundaries and [the coverage ledger](MARAUDER_COVERAGE_LEDGER.md) for remaining work. The following sections retain the earlier contribution history.
+
 ## Revision 81 installed: navigation milestone and requested pause, 2026-10-30
 
 The owner confirmed Observed Clients rows on rev80, then reported that there

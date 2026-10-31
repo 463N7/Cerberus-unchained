@@ -2,6 +2,7 @@
 #undef NDEBUG
 #endif
 #include "wardrive_core.h"
+#include "wardrive_recent.h"
 #include "wardrive_wigle.h"
 #include "esp_err.h"
 #include <assert.h>

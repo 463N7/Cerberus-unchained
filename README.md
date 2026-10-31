@@ -1,6 +1,6 @@
 # Cerberus Unchained
 
-Experimental Cerberus firmware for the expanded rev81 feature set: integrated
+Experimental Cerberus firmware for the expanded rev93 feature set: integrated
 wardriving, C5 Wi-Fi capture and analysis, S3 BLE discovery and tools, Remote ID
 receive workflows, AP/client navigation, and optional expansion radios.
 
@@ -9,7 +9,7 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev81` (experimental), paired with onboard
+**Current source version: `0.1.0-dev.rev93` (experimental), paired with onboard
 C5 protocol firmware revision 60. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -41,14 +41,28 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 
 ## Development status
 
-The imported checkpoint recorded 79 passing host suites and five firmware
-targets; those are historical results, not fresh Unchained hardware acceptance.
-Reported Wi-Fi **NO MEM**, **Association Sleep**, and **Bad Message** failures
-remain unresolved. Rev81 Back navigation and the next normal scan still need
-physical confirmation. GPS reception, sustained load, saved-file correctness,
-and six-radio expansion acceptance remain incomplete.
+The rev82–rev93 contribution adds bounded Wi-Fi result transfer and recovery,
+scan-list controls and passive SSID/trust review, BLE analysis and SD snapshots,
+Recon inventory and session recording, SD copy error handling, and a live
+Recent Networks viewer in the integrated Wardriving tab. C5 Wi-Fi and S3 BLE
+observations feed the existing scan services. Recent Networks reuses those
+observations without another radio scan or worker task.
 
-- [Contribution overview and remaining work](docs/CONTRIBUTION_REV81.md)
+The local rev93 checkpoint recorded 107 passing host suites and five firmware
+targets. Its installed-board evidence belongs to that original development
+checkpoint; the Unchained-branded contribution has separate build/test results
+and has not been flashed for new hardware acceptance. See the
+[rev93 contribution and validation summary](docs/CONTRIBUTION_REV93.md).
+
+Reported Wi-Fi **NO MEM**, **Association Sleep**, and **Bad Message** failures
+remain open in the feature ledger. Later local owner checks confirmed Back and
+subsequent Wi-Fi scan navigation; these do not validate every active feature.
+The new Recent Networks UI, BLE archive save/reopen, Recon recording contents,
+GPS reception, sustained load and six-radio expansion still need acceptance.
+The full Marauder port and Wardriving integration remain in progress.
+
+- [Rev93 contribution and remaining work](docs/CONTRIBUTION_REV93.md)
+- [Original rev81 contribution](docs/CONTRIBUTION_REV81.md)
 - [Feature coverage ledger](docs/MARAUDER_COVERAGE_LEDGER.md)
 - [Integration targets and layout](INTEGRATION.md)
 - [SD resources and their notices](sdcard/README.md)

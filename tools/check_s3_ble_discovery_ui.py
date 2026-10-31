@@ -1,6 +1,7 @@
 """Exercise actual focused BLE cards, frozen selection, detail and Fox Hunt routes."""
 from pathlib import Path
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -14,6 +15,9 @@ out.mkdir(parents=True, exist_ok=True)
 ui = (root / "s3_main/main/ui.c").read_text()
 live = (root / "s3_main/main/sentinel_live_ui.h").read_text()
 discovery = (root / "s3_main/main/s3_ble_discovery_live_ui.h").read_text()
+(out / "discovery_back_geometry.h").write_text("\n".join(
+    re.search(r"^#define " + name + r"\s+\d+", ui, re.M).group(0)
+    for name in ("UI_BACK_Y", "UI_BACK_HEIGHT")) + "\n")
 assert "!ble_discovery_defers_c5_telemetry()" in ui, "Periodic C5 telemetry must use the production discovery gate"
 assert "!(wifi_relation_ui && wifi_relation_ui->reading)" in ui, "Relation transfers must defer optional C5 telemetry"
 def between(source, first, after):
@@ -39,17 +43,27 @@ start = ui.index("    if (ble_mode == UI_BLE_MODE_DETAIL) {", ui.index("static v
 end = ui.index("            bool selected_connected =", start)
 parts += ui[start:end] + "        }\n    }\n}\n"
 parts += between(ui, "static void ble_fox_hunt_finish_exit(", "static void ble_analyzer_finish_exit(")
+parts += between(ui, "static void ble_analyzer_finish_exit(", "static bool ble_sound_terminal(")
 parts += between(ui, "static esp_err_t draw_ble_analyzer(", "static esp_err_t draw_ble_feature_menu(")
 metadata_start = ui.index("    if (cerberus_ble_rssi_valid(", ui.index("    format_ble_service(&ble_selected_result, service, sizeof(service));"))
 metadata_end = ui.index('\n', ui.index('TAG, "BLE detail metadata failed");', metadata_start))
 parts += "static esp_err_t actual_ble_peak_metadata(void) { char line[64]; bool connectable=(ble_selected_result.flags&CERBERUS_BLE_RESULT_CONNECTABLE)!=0;\n" + ui[metadata_start:metadata_end] + "\nreturn ESP_OK; }\n"
 back_start = ui.index("            } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FOX_HUNT)", ui.index("static void handle_tap("))
 back_end = ui.index("            } else if", back_start + 20)
+assert "UI_BLE_MODE_ANALYZER" in ui[back_end:back_end + 130]
+back_end = ui.index("            } else if", back_end + 20)
 detail_start = ui.index("            } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_DETAIL)", back_end)
 detail_end = ui.index("            } else if", detail_start + 20)
 list_start = ui.index("            } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_LIST)", detail_end)
 list_end = ui.index("            } else if", list_start + 20)
-parts += "static void actual_back(uint16_t y) { if(y < 420U)return;\n" + ui[back_start:back_end].replace("} else if", "if", 1) + ui[detail_start:detail_end] + ui[list_start:list_end] + "\n}\n}\n"
+parts += "static void actual_back(uint16_t y) { if(y < UI_BACK_Y)return;\n" + ui[back_start:back_end].replace("} else if", "if", 1) + ui[detail_start:detail_end] + ui[list_start:list_end] + "\n}\n}\n"
+live_back_start = ui.index("            } else if (live_is_view()) {", ui.index("static void handle_tap("))
+live_back_end = ui.index("            } else if", live_back_start + 20)
+parts += "static void actual_live_list_back(uint16_t y) { if(y < UI_BACK_Y)return;\n" + ui[live_back_start:live_back_end].replace("} else if", "if", 1) + "\n}\n}\n"
+footer_start = ui.index("    } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_ANALYZER)", ui.index("static esp_err_t draw_detail_page("))
+footer_end = ui.index("    } else if", footer_start + 20)
+parts += "static esp_err_t actual_analyzer_footer(void) { const char *back_label = \"BACK\";\n" + ui[footer_start:footer_end].replace("} else if", "if", 1) + "}\n"
+parts += re.search(r"    return draw_button\(64, UI_BACK_Y, 192, UI_BACK_HEIGHT, back_label\);", ui).group(0) + "\n}\n"
 (out / "discovery_routes_impl.h").write_text(parts)
 exe = out / ("ble-discovery-native-check.exe" if native else "ble-discovery-ui-check.exe")
 env = os.environ.copy()
@@ -60,6 +74,7 @@ subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-Wall
     str(root / "tools/host_checks" / ("s3_ble_discovery_live_check.c" if native else "s3_ble_discovery_ui_check.c")), str(root / "s3_main/main/privacy.c"),
     str(root / "s3_main/main/sentinel_scan_view.c"), str(root / "s3_main/main/sentinel_scan_session.c"),
     str(root / "s3_main/main/sentinel_watch_detect.c"),
+    str(root / "s3_main/main/s3_wifi_list.c"),
     str(root / "s3_main/main/ble_analyzer.c"),
     str(root / "s3_main/main/s3_ble_discovery_session.c"),
     str(root / "s3_main/main/s3_ble_discovery_inventory.c"),

@@ -1,7 +1,9 @@
 /* Private integration on the existing UI task. C5 Wi-Fi and S3 BLE each own
  * one bounded passive sweep and can run at the same time. */
+#include "recon_recorder.h"
 typedef enum { WATCH_LIVE, WATCH_HISTORY, WATCH_DETAILS, WATCH_DEMO, WATCH_FILTERS, WATCH_WHY,
-    WATCH_OPTIONS, WATCH_ACTIONS, WATCH_SIGNAL } watch_page_t;
+    WATCH_OPTIONS, WATCH_ACTIONS, WATCH_SIGNAL, WATCH_INVENTORY,
+    WATCH_INVENTORY_DETAIL, WATCH_INVENTORY_ACTIVITY } watch_page_t;
 static sentinel_watch_t watch_state;
 static sentinel_watch_view_t watch_view;
 static sentinel_watch_entry_t watch_detail;
@@ -15,6 +17,7 @@ static sentinel_watch_activity_t watch_activity_state;
 static bool watch_extra_unavailable[2], watch_activity_available;
 static watch_page_t watch_page;
 static bool watch_initialized, watch_paused, watch_capture_failed[2];
+static bool watch_recording_context;
 static uint8_t watch_demo_scene, watch_history_page, watch_filters_page;
 static uint32_t watch_seen_capture[2], watch_last_draw, watch_last_read[2];
 static uint16_t watch_last_count[2];
@@ -24,7 +27,56 @@ static uint32_t watch_capture_wait_since[2];
 static char watch_phase_text[52], watch_detail_text[52];
 static char recon_message[49];
 static unsigned recon_confirm;
+static bool watch_inventory_accepting;
+static uint8_t watch_inventory_slot;
 static void watch_notify(bool queued, const sentinel_watch_match_t *match, uint32_t now);
+
+#include "recon_inventory_ui.h"
+
+static uint64_t watch_inventory_now(void)
+{
+    const int64_t now = esp_timer_get_time();
+    return now > 0 ? (uint64_t)now : 0U;
+}
+
+static void watch_inventory_set_error(unsigned slot, esp_err_t error)
+{
+    if (!recon_inventory_ui || slot > 1U) return;
+    recon_inventory_ui->radio_errors[slot] = error;
+    recon_inventory_error = recon_inventory_ui->radio_errors[0] != ESP_OK ?
+        recon_inventory_ui->radio_errors[0] : recon_inventory_ui->radio_errors[1];
+}
+
+static void watch_inventory_release(void)
+{
+    watch_inventory_accepting = false;
+    if (recon_inventory_ui) {
+        heap_caps_free(recon_inventory_ui);
+        recon_inventory_ui = NULL;
+    }
+}
+
+static void watch_inventory_open(void)
+{
+    const uint64_t now = watch_inventory_now();
+    watch_inventory_accepting = false;
+    if (!now) {
+        watch_inventory_release();
+        recon_inventory_error = ESP_ERR_INVALID_STATE;
+        return;
+    }
+    if (!recon_inventory_ui)
+        recon_inventory_ui = heap_caps_calloc(1U, sizeof(*recon_inventory_ui),
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!recon_inventory_ui) {
+        recon_inventory_error = ESP_ERR_NO_MEM;
+        return;
+    }
+    memset(recon_inventory_ui, 0, sizeof(*recon_inventory_ui));
+    recon_inventory_ui->filter = CERBERUS_RECON_INVENTORY_ALL;
+    cerberus_recon_inventory_init(&recon_inventory_ui->model, now);
+    recon_inventory_error = ESP_OK;
+}
 
 static const sentinel_watch_category_t watch_categories[] = {
     SENTINEL_WATCH_AXON, SENTINEL_WATCH_FLOCK, SENTINEL_WATCH_WELLNESS,
@@ -197,6 +249,102 @@ static void watch_notify(bool queued, const sentinel_watch_match_t *match, uint3
     cerberus_ui_notification_add(now, notification);
 }
 
+/* Copies facts from the same validated, frozen bank consumed below. The
+ * recorder only queues this value; its worker owns all filesystem activity.
+ * Alert state describes this call, not a suppression reason or device identity. */
+static void watch_record_observation(sentinel_scan_tool_t tool, uint16_t index,
+    const sentinel_watch_match_t *match, cerberus_recon_alert_state_t alert_state)
+{
+    cerberus_recon_record_t record = {0};
+    int64_t consumed_us = esp_timer_get_time();
+    if (consumed_us < 0) {
+        /* An omitted row cannot turn a validated bank into an apparently
+         * complete inventory publication. Keep the previous bank intact. */
+        if (watch_inventory_accepting && recon_inventory_ui) {
+            (void)cerberus_recon_inventory_offer(&recon_inventory_ui->model, NULL);
+            cerberus_recon_inventory_abort(&recon_inventory_ui->model);
+            watch_inventory_accepting = false;
+            watch_inventory_set_error(watch_inventory_slot, ESP_ERR_INVALID_STATE);
+        }
+        return; /* Never turn an invalid clock into RF/UTC time. */
+    }
+    record.consumed_us = (uint64_t)consumed_us;
+    record.generation = live_records[tool].saved_generation;
+    const char *name;
+    size_t capacity;
+    if (tool == SENTINEL_SCAN_WIFI) {
+        const cerberus_c5_wifi_result_t *row = &live_store->wifi[index];
+        record.radio = CERBERUS_RECON_RADIO_WIFI;
+        memcpy(record.address, row->bssid, sizeof(record.address));
+        record.rssi = row->rssi;
+        record.channel = row->channel;
+        record.channel_valid = cerberus_s3_wifi_list_channel_band(row->channel) != CERBERUS_S3_WIFI_BAND_ALL;
+        if (!record.channel_valid) record.channel = 0;
+        name = row->ssid; capacity = sizeof(row->ssid);
+        const cerberus_s3_wifi_observation_t *source = &live_store->wifi_observations[index];
+        if (source->valid) {
+            record.source_kind = CERBERUS_RECON_SOURCE_C5_AGE_MS;
+            record.source_time = source->source_age_ms;
+            record.source_anchor_us = source->request_started_us;
+            record.source_flags = CERBERUS_RECON_SOURCE_TIME_VALID | CERBERUS_RECON_SOURCE_ANCHOR_VALID;
+        }
+        if (wifi_scan_status.total_count > wifi_scan_status.stored_count)
+            record.source_limits |= CERBERUS_RECON_LIMIT_RETAINED_CAPACITY;
+    } else {
+        const cerberus_c5_ble_result_t *row = &live_store->ble[index];
+        record.radio = CERBERUS_RECON_RADIO_BLE;
+        memcpy(record.address, row->address, sizeof(record.address));
+        record.address_type = row->address_type;
+        record.rssi = row->rssi;
+        name = row->name; capacity = sizeof(row->name);
+        /* Never substitute consumption time or an old retained iBeacon time
+         * for the current ADV source. Unavailable binding remains explicit. */
+        const cerberus_findmy_monitor_record_t *frozen = live_ble_evidence ? &live_ble_evidence[index] : NULL;
+        if (frozen && frozen->generation == record.generation &&
+            frozen->peer.address_type == row->address_type &&
+            !memcmp(frozen->peer.address, row->address, sizeof(row->address))) {
+            const cerberus_s3_ble_discovery_evidence_t *source = &frozen->focus.discovery;
+            const uint8_t required = CERBERUS_S3_BLE_EVIDENCE_ADV_COMPLETE | CERBERUS_S3_BLE_EVIDENCE_ADV_VALID;
+            if (source->generation == record.generation && source->address_type == row->address_type &&
+                !memcmp(source->address, row->address, sizeof(row->address)) &&
+                (source->flags & required) == required && !(source->flags & CERBERUS_S3_BLE_EVIDENCE_SID_INVALID) &&
+                source->advertisement_sequence) {
+                record.source_kind = CERBERUS_RECON_SOURCE_S3_ADV_MS32;
+                record.source_time = source->advertisement_observed_ms;
+                record.source_sequence = source->advertisement_sequence;
+                record.source_flags = CERBERUS_RECON_SOURCE_TIME_VALID | CERBERUS_RECON_SOURCE_SEQUENCE_VALID;
+                record.ibeacon = cerberus_s3_ble_ibeacon_is_current(&frozen->focus);
+            }
+        }
+        if (watch_advertisements[index].flags & CERBERUS_BLE_ADVERTISEMENT_TRUNCATED)
+            record.source_limits |= CERBERUS_RECON_LIMIT_RAW_TRUNCATED;
+        if (ble_scan_status.dropped_reports)
+            record.source_limits |= CERBERUS_RECON_LIMIT_REPORTS_REJECTED;
+    }
+    record.rssi_valid = record.rssi >= -127 && record.rssi <= (tool == SENTINEL_SCAN_BLE ? 20 : 0);
+    if (!record.rssi_valid) record.rssi = 0;
+    size_t length = strnlen(name, capacity);
+    if (length > sizeof(record.name)) {
+        length = sizeof(record.name);
+        record.source_limits |= CERBERUS_RECON_LIMIT_NAME_TRUNCATED;
+    }
+    memcpy(record.name, name, length);
+    record.name_length = (uint8_t)length;
+    if (!record.source_flags) record.source_limits |= CERBERUS_RECON_LIMIT_SOURCE_UNAVAILABLE;
+    record.alert_state = alert_state;
+    if (match && match->rule_id && strnlen(match->rule_id, sizeof(record.rule)) < sizeof(record.rule)) {
+        record.classified = true;
+        record.category = match->category;
+        record.confidence = match->confidence;
+        record.mode = sentinel_watch_get_mode(&watch_state, match->category);
+        snprintf(record.rule, sizeof(record.rule), "%s", match->rule_id);
+    } else if (match) record.alert_state = CERBERUS_RECON_ALERT_NOT_EVALUATED;
+    if (watch_inventory_accepting && recon_inventory_ui &&
+        !cerberus_recon_inventory_offer(&recon_inventory_ui->model, &record))
+        watch_inventory_set_error(watch_inventory_slot, ESP_ERR_INVALID_RESPONSE);
+    (void)cerberus_recon_recorder_offer(&record);
+}
+
 static bool watch_consume_radio(sentinel_scan_tool_t tool, uint32_t now)
 {
     unsigned slot = tool == SENTINEL_SCAN_WIFI ? 0U : 1U;
@@ -214,6 +362,7 @@ static bool watch_consume_radio(sentinel_scan_tool_t tool, uint32_t now)
          * live_observe retries that copy; give it a bounded recovery window
          * without interpreting an old or partially copied inventory. */
         watch_capture_failed[slot] = true;
+        watch_inventory_set_error(slot, ESP_ERR_INVALID_STATE);
         if (!watch_capture_waiting[slot]) {
             watch_capture_waiting[slot] = true;
             watch_capture_wait_since[slot] = now;
@@ -242,6 +391,7 @@ static bool watch_consume_radio(sentinel_scan_tool_t tool, uint32_t now)
             end.generation != record->saved_generation || end.stored_count != record->count)) err = ESP_ERR_INVALID_STATE;
         if (err != ESP_OK) {
             watch_capture_failed[slot] = true;
+            watch_inventory_set_error(slot, err);
             /* Bounded retry: preserve evidence instead of silently skipping a
              * failed packet transfer and claiming full monitoring coverage. */
             if ((uint32_t)(now - record->captured_ms) > 15000U)
@@ -249,8 +399,10 @@ static bool watch_consume_radio(sentinel_scan_tool_t tool, uint32_t now)
             return false;
         }
     }
-    if (watch_stage_extra(tool, record->saved_generation) != ESP_OK) {
+    const esp_err_t extra_error = watch_stage_extra(tool, record->saved_generation);
+    if (extra_error != ESP_OK) {
         watch_capture_failed[slot] = true;
+        watch_inventory_set_error(slot, extra_error);
         if ((uint32_t)(now - record->captured_ms) > 15000U)
             sentinel_scan_session_pause(session, true);
         return false;
@@ -262,6 +414,17 @@ static bool watch_consume_radio(sentinel_scan_tool_t tool, uint32_t now)
         wifi_scan_status.total_count > wifi_scan_status.stored_count;
     watch_limited_capture[slot] = watch_limited_capture[slot] ||
         (watch_extra_status.flags & CERBERUS_WATCH_CAPTURE_OVERFLOW) != 0;
+    /* The full bank is validated above. One S3 uptime value identifies this
+     * accepted UI ingestion; it is not a new radio/source timestamp. Staging
+     * prevents a bad row from partially replacing the visible inventory. */
+    const uint64_t inventory_now = watch_inventory_now();
+    watch_inventory_slot = (uint8_t)slot;
+    watch_inventory_accepting = recon_inventory_ui && inventory_now &&
+        cerberus_recon_inventory_begin(&recon_inventory_ui->model,
+            tool == SENTINEL_SCAN_WIFI ? CERBERUS_RECON_RADIO_WIFI : CERBERUS_RECON_RADIO_BLE,
+            inventory_now, inventory_now);
+    if (recon_inventory_ui && !watch_inventory_accepting)
+        watch_inventory_set_error(slot, ESP_ERR_INVALID_STATE);
     for (uint16_t i = 0; i < record->count; ++i) {
         sentinel_watch_match_t match = {0};
         bool detected, queued;
@@ -285,13 +448,25 @@ static bool watch_consume_radio(sentinel_scan_tool_t tool, uint32_t now)
                 observation.advertisement_flags = watch_advertisements[i].flags;
             }
             detected = sentinel_watch_classify_ble(&observation, &match);
-            if (detected && match.category == SENTINEL_WATCH_DRONE && watch_extra_has_drone(row->address, row->address_type))
-                continue; /* The richer same-sweep record below owns this observation. */
+            if (detected && match.category == SENTINEL_WATCH_DRONE && watch_extra_has_drone(row->address, row->address_type)) {
+                watch_record_observation(tool, i, &match, CERBERUS_RECON_ALERT_NOT_EVALUATED);
+                continue; /* The richer same-sweep record below owns this alert. */
+            }
             queued = sentinel_watch_observe(&watch_state, SENTINEL_WATCH_RADIO_BLE,
                 row->address, row->address_type, row->name, observation.name_length, row->rssi, detected ? &match : NULL, now);
         }
+        watch_record_observation(tool, i, detected ? &match : NULL,
+            queued ? CERBERUS_RECON_ALERT_QUEUED : CERBERUS_RECON_ALERT_NOT_QUEUED);
         watch_notify(queued, &match, now);
     }
+    if (watch_inventory_accepting) {
+        const uint64_t ended_us = watch_inventory_now();
+        bool accepted = ended_us &&
+            cerberus_recon_inventory_end(&recon_inventory_ui->model, ended_us);
+        if (!ended_us) cerberus_recon_inventory_abort(&recon_inventory_ui->model);
+        watch_inventory_set_error(slot, accepted ? ESP_OK : ESP_ERR_INVALID_RESPONSE);
+    }
+    watch_inventory_accepting = false;
     watch_consume_extra(tool, now);
     if (watch_state.sweeps < UINT32_MAX) ++watch_state.sweeps;
     watch_seen_capture[slot] = record->captured_ms;
@@ -322,7 +497,7 @@ static void watch_select_detail(const sentinel_watch_entry_t *entry)
 static esp_err_t watch_draw_history(uint32_t now)
 {
     ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(0, 0, 320, 480, UI_BACKGROUND), TAG, "watch history clear");
-    ESP_RETURN_ON_ERROR(draw_header("RECON LOG"), TAG, "watch history header");
+    ESP_RETURN_ON_ERROR(draw_header("LIVE HINT HISTORY"), TAG, "watch history header");
     char line[52];
     snprintf(line, sizeof(line), "%u SESSION HINTS / %lu SWEEPS", watch_state.history_count, (unsigned long)watch_state.sweeps);
     ESP_RETURN_ON_ERROR(draw_centered(60, line, UI_GOOD, 1), TAG, "watch history count");
@@ -497,13 +672,16 @@ static esp_err_t watch_draw_why(void)
     ESP_RETURN_ON_ERROR(draw_centered(78, watch_detail.match.label, UI_GOOD, 1), TAG, "watch why title");
     for (size_t i = 0; i < 5; ++i)
         ESP_RETURN_ON_ERROR(draw_centered(125U + i * 34U, lines[i], UI_TEXT, 1), TAG, "watch why text");
-    ESP_RETURN_ON_ERROR(draw_centered(345, "HISTORY STAYS IN THIS POWER SESSION", UI_MUTED, 1), TAG, "watch why privacy");
+    ESP_RETURN_ON_ERROR(draw_centered(345, "LIVE HISTORY IS VOLATILE / SD IS SEPARATE", UI_MUTED, 1), TAG, "watch why privacy");
     return draw_button(64, 426, 192, 44, "BACK TO EVIDENCE");
 }
 
 #include "recon_controls_ui.h"
 static esp_err_t watch_draw(uint32_t now, bool full)
 {
+    if (watch_page == WATCH_INVENTORY) return recon_draw_inventory(watch_inventory_now());
+    if (watch_page == WATCH_INVENTORY_DETAIL) return recon_draw_inventory_detail(watch_inventory_now());
+    if (watch_page == WATCH_INVENTORY_ACTIVITY) return recon_draw_inventory_activity(watch_inventory_now());
     if (watch_page == WATCH_HISTORY) return watch_draw_history(now);
     if (watch_page == WATCH_DETAILS) return watch_draw_details(now);
     if (watch_page == WATCH_FILTERS) return watch_draw_filters();
@@ -536,6 +714,12 @@ static esp_err_t watch_draw(uint32_t now, bool full)
                 live_session.active == SENTINEL_SCAN_WIFI ? "SCANNING" : live_radio_busy ? "WAITING" : "READY",
             !ble_ready ? "OFF" : live_ble_session.faulted || watch_capture_failed[1] ? "ERROR" :
                 live_ble_session.active == SENTINEL_SCAN_BLE ? "SCANNING" : "READY");
+        cerberus_recon_recorder_status_t recording;
+        cerberus_recon_recorder_get_status(&recording);
+        const char *save_hint = recording.state == CERBERUS_RECON_RECORDER_RECORDING ? " / SD REC" :
+            recording.worker_active ? " / SD WAIT" : recording.state == CERBERUS_RECON_RECORDER_ERROR ? " / SD ERR" : "";
+        size_t phase_length = strlen(watch_phase_text);
+        snprintf(watch_phase_text + phase_length, sizeof(watch_phase_text) - phase_length, "%s", save_hint);
         watch_view.phase = watch_phase_text;
         if (watch_state.alert_active) {
             const sentinel_watch_entry_t *entry = &watch_state.alert;
@@ -558,7 +742,7 @@ static esp_err_t watch_draw(uint32_t now, bool full)
                 watch_limited_capture[0] || watch_limited_capture[1] ?
                 "BUSY AIRSPACE / CAPTURE LIMIT REACHED" :
                 watch_activity_state.learned < 3U ? "LEARNING LOCAL BLUETOOTH ACTIVITY BASELINE" :
-                watch_state.muted ? "ALERTS MUTED / OBSERVATIONS STILL LOGGED" :
+                watch_state.muted ? "ALERTS MUTED / LIVE HINT HISTORY CONTINUES" :
                 "C5 WI-FI + S3 BLE / PASSIVE SCANS";
         }
     }
@@ -567,6 +751,10 @@ static esp_err_t watch_draw(uint32_t now, bool full)
 
 static void watch_open(uint32_t now)
 {
+    /* Opening or resuming Recon never silently starts a new SD session. */
+    cerberus_recon_recorder_stop();
+    watch_recording_context = true;
+    watch_inventory_open();
     if (!watch_initialized) {
         sentinel_watch_init(&watch_state);
         sentinel_watch_activity_init(&watch_activity_state);
@@ -574,6 +762,8 @@ static void watch_open(uint32_t now)
     }
     watch_page = WATCH_LIVE;
     watch_paused = false;
+    recon_confirm = 0;
+    recon_message[0] = 0;
     memset(watch_capture_failed, 0, sizeof(watch_capture_failed));
     memset(watch_capture_waiting, 0, sizeof(watch_capture_waiting));
     memset(watch_last_count, 0, sizeof(watch_last_count));
@@ -595,14 +785,24 @@ static void watch_open(uint32_t now)
 
 static void watch_ui_tick(uint32_t now)
 {
-    if (current_page != UI_PAGE_WATCH) return;
+    if (current_page != UI_PAGE_WATCH) {
+        if (watch_recording_context) cerberus_recon_recorder_stop();
+        watch_recording_context = false;
+        watch_inventory_release();
+        return;
+    }
     if (live_session.faulted) watch_capture_failed[0] = true;
     if (live_ble_session.faulted) watch_capture_failed[1] = true;
     bool changed = watch_consume(now);
+    if (recon_inventory_ui && !cerberus_recon_inventory_tick(&recon_inventory_ui->model,
+            watch_inventory_now())) recon_inventory_error = ESP_ERR_INVALID_STATE;
     if (watch_page == WATCH_LIVE && !watch_paused) changed = sentinel_watch_tick(&watch_state, now) || changed;
     if ((changed && (watch_page == WATCH_LIVE || watch_page == WATCH_HISTORY)) ||
         ((watch_page == WATCH_LIVE || watch_page == WATCH_DEMO) && (uint32_t)(now - watch_last_draw) >= 100U) ||
-        (watch_page == WATCH_SIGNAL && (uint32_t)(now - watch_last_draw) >= 1000U)) {
+        (watch_page == WATCH_SIGNAL && (uint32_t)(now - watch_last_draw) >= 1000U) ||
+        ((watch_page == WATCH_OPTIONS || watch_page == WATCH_INVENTORY ||
+          watch_page == WATCH_INVENTORY_DETAIL || watch_page == WATCH_INVENTORY_ACTIVITY) &&
+         (uint32_t)(now - watch_last_draw) >= 500U)) {
         ESP_ERROR_CHECK(watch_draw(now, false));
         watch_last_draw = now;
     }
@@ -611,7 +811,10 @@ static void watch_ui_tick(uint32_t now)
 static void watch_handle_tap(uint16_t x, uint16_t y)
 {
     uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-    if (watch_page == WATCH_OPTIONS || watch_page == WATCH_ACTIONS || watch_page == WATCH_SIGNAL) {
+    if (watch_page == WATCH_INVENTORY || watch_page == WATCH_INVENTORY_DETAIL ||
+        watch_page == WATCH_INVENTORY_ACTIVITY) {
+        if (!recon_inventory_handle_tap(x, y, watch_inventory_now())) return;
+    } else if (watch_page == WATCH_OPTIONS || watch_page == WATCH_ACTIONS || watch_page == WATCH_SIGNAL) {
         if (!recon_handle_control_tap(x, y, now)) return;
     } else if (watch_page == WATCH_HISTORY) {
         if (y >= 104 && y < 376 && x >= 8 && x < 312 && (y - 104) % 68 < 60) {
@@ -650,6 +853,9 @@ static void watch_handle_tap(uint16_t x, uint16_t y)
         if (action == SENTINEL_WATCH_ACTION_BACK) {
             if (watch_page == WATCH_DEMO) watch_page = WATCH_LIVE;
             else {
+                cerberus_recon_recorder_stop();
+                watch_recording_context = false;
+                watch_inventory_release();
                 sentinel_scan_session_select(&live_session, SENTINEL_SCAN_NONE);
                 sentinel_scan_session_select(&live_ble_session, SENTINEL_SCAN_NONE);
                 open_main_menu(); return;
@@ -665,6 +871,7 @@ static void watch_handle_tap(uint16_t x, uint16_t y)
                 sentinel_scan_session_select(&live_ble_session, SENTINEL_SCAN_BLE);
                 sentinel_scan_session_pause(&live_ble_session, false);
             } else {
+                cerberus_recon_recorder_stop();
                 sentinel_scan_session_select(&live_session, SENTINEL_SCAN_NONE);
                 sentinel_scan_session_select(&live_ble_session, SENTINEL_SCAN_NONE);
             }
@@ -674,7 +881,7 @@ static void watch_handle_tap(uint16_t x, uint16_t y)
             watch_history_page = 0;
         } else if (action == SENTINEL_WATCH_ACTION_DEMO) {
             if (watch_page == WATCH_DEMO) watch_demo_scene = (watch_demo_scene + 1U) % SENTINEL_WATCH_SCENE_COUNT;
-            else { watch_page = WATCH_OPTIONS; recon_confirm = 0; }
+            else { watch_page = WATCH_OPTIONS; recon_confirm = 0; recon_message[0] = 0; }
         } else if (action == SENTINEL_WATCH_ACTION_DETAILS && watch_state.alert_active) {
             watch_select_detail(&watch_state.alert);
             watch_page = WATCH_DETAILS;

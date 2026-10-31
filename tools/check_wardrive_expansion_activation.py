@@ -22,7 +22,7 @@ assert start_body.index("prepare_expansion_plan(expansion_stage.present_mask)") 
 )
 assert "if (include_expansions) {\n        error = prepare_expansion_plan(" in start_body
 stop_body = source[
-    source.index("static void stop_expansions("):source.index("static void stop_scans_and_close_file(")
+    source.index("static void stop_expansions_impl("):source.index("static void stop_scans_and_close_file(")
 ]
 assert stop_body.index("field_survey_stream_close()") < (
     stop_body.index("field_survey_set_expansion_plan(NULL)")
