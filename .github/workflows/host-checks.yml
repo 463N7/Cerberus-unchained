@@ -32,7 +32,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     # Cold isolated Zig caches make the full Windows matrix exceed 45 minutes.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 90 || 45 }}
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 120 || 45 }}
     steps:
       - uses: actions/checkout@v7
         with:
