@@ -130,6 +130,8 @@ def verify_console_stack(root: Path) -> dict:
                         calls[name].add(literal[3])
     if frames.keys() != selected.keys() or frames["usb_console_task"] > 192:
         raise RuntimeError("Console task permanent frame exceeds its reviewed 192-byte limit")
+    if frames["console_printf"] > 128:
+        raise RuntimeError("Console formatter frame exceeds its reviewed 128-byte limit")
     if ("vsnprintf" not in calls["console_printf"] or
             "_vsnprintf_r" not in calls["vsnprintf"] or
             "_svfprintf_r" not in calls["_vsnprintf_r"]):
@@ -160,6 +162,7 @@ def verify_console_stack(root: Path) -> dict:
               "source_sha256": digest(source_path), "checker_sha256": digest(Path(__file__)),
               "debugger": {"path": debugger.as_posix(), "sha256": digest(debugger)},
               "allocated_stack_bytes": allocated, "task_frame_limit_bytes": 192,
+              "formatter_frame_limit_bytes": 128,
               "frames_bytes": frames, "isolated_handlers": sorted(handlers),
               "known_calls": {name: sorted(children) for name, children in calls.items()},
               "known_frame_path": known_path, "known_frame_bytes": known_bytes,

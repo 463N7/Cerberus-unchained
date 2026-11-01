@@ -173,6 +173,8 @@ def validate_console_proof(receipt: dict) -> dict:
     known = proof.get("known_frame_bytes", -1)
     if (proof.get("allocated_stack_bytes") != 4096 or proof.get("task_frame_limit_bytes") != 192
             or not 0 < frames.get("usb_console_task", 0) <= 192
+            or proof.get("formatter_frame_limit_bytes") != 128
+            or not 0 < frames.get("console_printf", 0) <= 128
             or type(known) is not int or not 0 < known <= 3072
             or proof.get("remaining_after_known_frames_bytes") != 4096 - known
             or proof.get("minimum_remaining_after_known_frames_bytes") != 1024):

@@ -58,6 +58,10 @@
 static const char *TAG = "usb_console";
 static TaskHandle_t console_task_handle;
 static usb_phy_handle_t console_phy;
+/* Only the console task formats into this buffer. Lifecycle calls are
+ * serialized by the UI; stop retains it until the task publishes quiescence.
+ * Keep large output off both the task stack and scarce internal RAM. */
+static char *console_output;
 static atomic_bool console_stop_requested;
 static atomic_bool console_task_stopped = true;
 
@@ -111,15 +115,18 @@ static void console_write(const char *text)
 
 static void console_printf(const char *format, ...)
 {
-    char output[USB_CONSOLE_OUTPUT_CAPACITY];
+    char *output = console_output;
+    if (output == NULL) {
+        return;
+    }
     va_list arguments;
     va_start(arguments, format);
-    int length = vsnprintf(output, sizeof(output), format, arguments);
+    int length = vsnprintf(output, USB_CONSOLE_OUTPUT_CAPACITY, format, arguments);
     va_end(arguments);
     if (length <= 0) {
         return;
     }
-    output[sizeof(output) - 1U] = '\0';
+    output[USB_CONSOLE_OUTPUT_CAPACITY - 1U] = '\0';
     console_write(output);
 }
 
@@ -752,11 +759,15 @@ static void print_ble_archive(void)
         "ble_archive_error=%" PRId32 "\r\nble_archive_job_id=%" PRIu64 "\r\n"
         "ble_archive_operation=%u\r\nble_archive_cancel_requested=%u\r\n"
         "ble_archive_result_ready=%u\r\nble_archive_bytes=%" PRIu32 "\r\n"
-        "ble_archive_rows=%u\r\nble_archive_path=%s\r\nble_archive_file=%s\r\n",
+        "ble_archive_rows=%u\r\n",
         cerberus_ble_archive_io_state_name(snapshot.state), snapshot.worker_active ? 1U : 0U,
         (int32_t)snapshot.error, snapshot.job_id, (unsigned)snapshot.operation,
         snapshot.cancel_requested ? 1U : 0U, snapshot.result_ready ? 1U : 0U,
-        snapshot.bytes, (unsigned)snapshot.count, snapshot.relative_path, snapshot.file_name);
+        snapshot.bytes, (unsigned)snapshot.count);
+    /* Each bounded path fits the unchanged formatter capacity independently;
+     * their combined maximum plus scalar fields would truncate one call. */
+    console_printf("ble_archive_path=%s\r\n", snapshot.relative_path);
+    console_printf("ble_archive_file=%s\r\n", snapshot.file_name);
 }
 
 static void print_recon_record(void)
@@ -1571,6 +1582,18 @@ esp_err_t cerberus_usb_console_start(void)
     }
     console_task_handle = NULL;
 
+    /* No internal-RAM or automatic-array fallback: insufficient PSRAM leaves
+     * the optional diagnostic console unavailable without taxing radio memory.
+     * A completed task after a prior stop timeout may still own this allocation;
+     * its published quiescence makes reuse safe. */
+    if (console_output == NULL) {
+        console_output = heap_caps_malloc(USB_CONSOLE_OUTPUT_CAPACITY,
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (console_output == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
     /* TinyUSB leaves the internal PHY routed to OTG after uninstall. Own a
      * native PHY handle while the console is active, releasing it on stop so
      * subsequent USB SD sessions can acquire the same physical USB pads. */
@@ -1581,6 +1604,8 @@ esp_err_t cerberus_usb_console_start(void)
         };
         esp_err_t err = usb_new_phy(&phy_config, &console_phy);
         if (err != ESP_OK) {
+            heap_caps_free(console_output);
+            console_output = NULL;
             return err;
         }
     }
@@ -1594,6 +1619,8 @@ esp_err_t cerberus_usb_console_start(void)
         if (err != ESP_OK) {
             (void)usb_del_phy(console_phy);
             console_phy = NULL;
+            heap_caps_free(console_output);
+            console_output = NULL;
             return err;
         }
     }
@@ -1631,6 +1658,14 @@ esp_err_t cerberus_usb_console_stop(void)
             vTaskDelay(pdMS_TO_TICKS(10));
         }
         console_task_handle = NULL;
+    }
+
+    /* A timed-out stop returns above, preserving the active writer's buffer.
+     * Once quiescent, neither the task nor the USB driver borrows these bytes:
+     * write_bytes copies them into the driver's TX ring before returning. */
+    if (console_output != NULL) {
+        heap_caps_free(console_output);
+        console_output = NULL;
     }
 
     /* Secondary ESP-IDF logging also uses this VFS. Detach it before freeing

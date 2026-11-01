@@ -60,7 +60,7 @@ symbol_text = "\n".join(f"{address:08x} l F .flash.text {size:08x} {name}"
                         for name, (address, size) in symbols.items())
 
 
-def check_case(label, text, expected=None, *, drop_ble_call=False, ble_frame=160):
+def check_case(label, text, expected=None, *, drop_ble_call=False, ble_frame=160, formatter_frame=64):
     console_path.write_bytes(text.encode("utf-8"))
 
     def fake_output(command, **kwargs):
@@ -80,7 +80,7 @@ def check_case(label, text, expected=None, *, drop_ble_call=False, ble_frame=160
             elif name == "console_printf": children = ["vsnprintf"]
             elif name == "vsnprintf": children = ["_vsnprintf_r"]
             elif name == "_vsnprintf_r": children = ["_svfprintf_r"]
-            frame = ble_frame if name == "print_dual_ble" else 64
+            frame = ble_frame if name == "print_dual_ble" else formatter_frame if name == "console_printf" else 64
             body = f"0x{address:x} <{name}+0>: entry a1, {frame}\n"
             for index, child in enumerate(children):
                 body += f"0x{address + (index + 1)*3:x} <{name}+{(index+1)*3}>: call8 0x{symbols[child][0]:x} <{child}>\n"
@@ -109,6 +109,7 @@ check_case("hidden definition", source.replace("static void print_dual_ble(void)
     "static __attribute__((noinline)) void print_dual_ble(void)\n"), "Missing isolated console symbols")
 check_case("unreachable new handler", source, "Console dispatch no longer calls", drop_ble_call=True)
 check_case("oversized new handler", source, "Known console frames leave less", ble_frame=3008)
+check_case("formatter stack array regression", source, "Console formatter frame exceeds", formatter_frame=848)
 console_path.write_bytes(source.encode("utf-8"))
 print("Actual native-stack parser accepts all three diagnostic handlers and rejects hidden, unisolated, unreachable and oversized handlers.")
 print("Synthetic parser contract only; native linked frame sizes remain unmeasured. All writes stayed under:", scratch)

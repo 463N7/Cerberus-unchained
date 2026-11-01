@@ -72,7 +72,8 @@ class MatchedConsoleProofChecks(unittest.TestCase):
             "source_sha256": packager.sha256(self.root / self.bound[1]),
             "checker_sha256": packager.sha256(self.root / self.bound[2]),
             "allocated_stack_bytes": 4096, "task_frame_limit_bytes": 192,
-            "frames_bytes": {"usb_console_task": 112}, "known_frame_bytes": 2848,
+            "formatter_frame_limit_bytes": 128,
+            "frames_bytes": {"usb_console_task": 112, "console_printf": 80}, "known_frame_bytes": 2848,
             "remaining_after_known_frames_bytes": 1248,
             "minimum_remaining_after_known_frames_bytes": 1024,
         }
@@ -110,6 +111,17 @@ class MatchedConsoleProofChecks(unittest.TestCase):
     def test_invalid_native_budget_cannot_be_packaged(self):
         self.proof["known_frame_bytes"] = 4096
         self.proof["remaining_after_known_frames_bytes"] = 0
+        with self.assertRaisesRegex(ValueError, "frame budget"):
+            packager.validate_console_proof(self.receipt)
+
+    def test_large_or_missing_formatter_frame_cannot_be_packaged(self):
+        for frame in (0, 144, 848):
+            with self.subTest(frame=frame):
+                self.proof["frames_bytes"]["console_printf"] = frame
+                with self.assertRaisesRegex(ValueError, "frame budget"):
+                    packager.validate_console_proof(self.receipt)
+        self.proof["frames_bytes"]["console_printf"] = 80
+        del self.proof["formatter_frame_limit_bytes"]
         with self.assertRaisesRegex(ValueError, "frame budget"):
             packager.validate_console_proof(self.receipt)
 
