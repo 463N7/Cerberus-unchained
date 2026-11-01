@@ -45,14 +45,17 @@ Rev111 removes a redundant response-mode dispatch from the passive C5 EXT
 receive path while preserving response invalidation and owner cleanup. It
 also reconciles stale Bluetooth/storage coverage notes with the implemented
 rev110 behavior. See [rev111](docs/DUAL_RADIO_REV111.md) for validation and
-installation status. Full parity and physical feature acceptance remain open.
+installation status. The matched rev111/C5 firmware67 update is installed with
+verified writes, paired boot and mounted SD. Full parity and physical feature
+acceptance remain open.
 
 Rev110 adds an explicit C5 response-request mode to BLE discovery and family
 views, while preserving passive as the default. S3 and C5 observations remain
 source-labelled; original advertisements and matched scan responses have
 independent live details and v6 SD evidence. The v1-v5 readers remain supported.
 See [the rev110 checkpoint](docs/DUAL_RADIO_REV110.md) for validation, memory
-costs and remaining physical checks. Rev109 remains installed.
+costs and remaining physical checks. These changes are included in installed
+rev111; physical response and saved-report acceptance remains pending.
 
 Rev109 carries the C5 full-original family record into v5 SD reports and
 offline HINTS. Older v1-v4 reports remain readable with missing evidence

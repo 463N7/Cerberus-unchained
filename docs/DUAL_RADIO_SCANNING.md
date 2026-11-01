@@ -2,7 +2,7 @@
 
 ## Current local checkpoint
 
-[Rev110](DUAL_RADIO_REV110.md) adds optional C5 BLE response collection and source-separated live/saved analysis. Passive remains the default, and S3 operates independently. Rev109 is the verified installed baseline. The rev97 description below is historical; its physical results do not establish rev110 acceptance.
+[Rev111](DUAL_RADIO_REV111.md) is installed with paired boot and SD mount verified. It includes [rev110's](DUAL_RADIO_REV110.md) optional C5 BLE response collection and source-separated live/saved analysis, plus the callback cleanup. Passive remains the default, and S3 operates independently. Physical response and UI acceptance remain pending. The rev97 description below is historical; its physical results do not establish rev111 acceptance.
 
 The rev97 source milestone extends the two-radio scanning introduced in rev94
 after the rev93 contribution. It retains onboard C5 protocol firmware 61.

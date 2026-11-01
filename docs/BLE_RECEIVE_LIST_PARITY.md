@@ -1,5 +1,9 @@
 # BLE receive-list parity audit
 
+The current installed checkpoint is [rev111](DUAL_RADIO_REV111.md), with paired
+boot verified and physical response/receive-list acceptance still pending.
+Earlier sections below preserve their revision-specific scope.
+
 ## Rev110 source checkpoint: C5 matched scan responses
 
 Opt-in response requests use active 1M and passive coded reception. Both receivers retain their independent observations. C5 now supports all-six response-only family admission, source-labelled ADV/RSP details and v6 SD retention with historical response ages. Passive is still the default. Rev109 remains installed; see [rev110](DUAL_RADIO_REV110.md) for local verification and physical limits.

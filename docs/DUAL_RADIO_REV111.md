@@ -1,5 +1,10 @@
 # Rev111: single C5 response dispatch per receive callback
 
+The matched **rev111 / C5 firmware67 update is installed**, with all image
+writes verified, paired application boot confirmed and SD mounted. Physical
+response acquisition, touchscreen behavior and saved-report acceptance remain
+pending. Boot verification does not promote any feature to full acceptance.
+
 Rev111 follows [rev110](DUAL_RADIO_REV110.md), which implemented optional C5
 response acquisition, source-separated live analysis and v6 SD evidence. This
 checkpoint removes a redundant mode check from complete passive EXT callbacks
@@ -14,7 +19,7 @@ original invalidation boundary and existing session/context checks.
 This removes one unnecessary helper call and mutex take/give from each
 complete passive EXT callback. RF intervals, windows, PHY choices, response
 matching, task count and wire protocol are unchanged. C5 capability firmware
-remains67; application version is `0.1.0-dev.rev111`. No measured radio speedup
+remains 67; application version is `0.1.0-dev.rev111`. No measured radio speedup
 is claimed.
 
 All 124 host suites and five native targets passed with unchanged, matching
@@ -50,6 +55,62 @@ The wider port remains incomplete. Physical response delivery, loaded memory,
 repeated UI transitions, saved-file acceptance, GPS and six-radio expansion
 remain separate from builds and source review. No PR or release is published
 as part of this checkpoint.
+
+## Verified installation
+
+The exact source commit is `df937a97bdc7e6da926a73440ef1f973b6ba92db`.
+The package/source digest is
+`d909b439aac47e5a54865175444b2317ab0c1b6d603d18739ed5fdf1b322eae3`;
+the manifest digest is
+`d8e51c178afa4bbc54ed373e1f71bbb6d99414b431960eeaf953ce769f1fcd8b`.
+Six identity-guard tests and twelve installation-helper tests passed after
+binding this exact source HEAD. Fresh pre-write diagnostics confirmed
+rev109/firmware66 idle, mounted SD, USB MSC off and no previous reset fault.
+
+Fresh first-two-MiB backups from both identified chips match the installed
+rev109 bootloader, partition table and application bytes and passed device
+verification. Their digests are:
+
+- S3: `488f018b8c09c0cb3cd05c181f9249eefcb4c11260cc64d3d532d67061366d81`
+- C5: `7b87f3f7a372d47c1c8667231837ee84d8defc23b38730fe692228bb05515538`
+
+Every erase-rounded write fits the verified backup coverage. The bridge,
+onboard C5 and final S3 stages each verified all three programmed image hashes.
+Exact USB/ROM/stub identities were checked before writes. No recovery was used.
+Higher flash regions and the prior stored crash record were retained.
+
+Post-installation captures completed at 13:03:12.825 and 13:04:01.620 UTC on
+2026-11-01, 48.795 seconds apart. Both report rev111/firmware67, protocol 2 online,
+buffered display, mounted SD, all radio owners idle and `previous_reset_fault=no`.
+S3 uptime advances from 34,641 to 83,438 ms and C5 uptime from 33,770 to 82,564 ms;
+C5 boot count remains 1. SPI exchanges advance from 143 to 367. Four initial-READY timeouts and four
+legacy fallbacks remain unchanged across these captures; mutex/fall/high
+timeouts and driver errors remain zero. This does not establish RF performance.
+
+| Sampled idle measurement | Before update, rev109 | Settled rev111 |
+| --- | ---: | ---: |
+| S3 internal free bytes | 134,140 | 133,372 |
+| Largest S3 internal block | 90,112 | 90,112 |
+| S3 PSRAM free bytes | 1,427,552 | 1,427,552 |
+| C5 snapshot free bytes | 56,964 | 56,948 |
+| S3 task count | 10 | 10 |
+| Observed console stack low-water bytes | 1,292 | 1,324 |
+
+These are sampled idle observations, not peak-load or worst-case stack claims.
+The C5 response context and the optional SD viewer/worker were not exercised.
+Resource demand under a live response scan still needs physical validation.
+
+`artifacts/device-rev111/installation-receipt.json` binds the writes, backups,
+preflight and both diagnostic captures. Its SHA-256 is
+`70b792304ceac1082a84cafba137aa8a94209e24109f6372e7eaa1b2ff2ebae7`.
+`idle-comparison.json` records the sampled stability checks. The local package
+receipt deliberately keeps its earlier `installed:false` state; the separate
+installation receipt establishes the later installed state.
+
+Post-installation documentation and coverage wording are recorded separately
+in `installation-editorial-verification.json`. The original build receipts
+remain immutable, firmware source bytes are unchanged, and no mode or
+workstream status is promoted by paired boot alone.
 
 The next planned receive-side work is the
 [dual-receiver Fox Hunt usability and cleanup milestone](BLE_DUAL_FOX_AUDIT.md).
