@@ -119,3 +119,32 @@ family changes and return-to-scan checks remain pending. Full raw-payload and
 session-history recording, C5 response acquisition, extended-format reception
 acceptance, sustained load and full Marauder feature parity remain incomplete.
 GPS and the six-radio backboard are not required for this report workflow.
+
+## Matched local package
+
+Implementation commit `f2253f2ea7c84766344da0ab7c3a9108764abcf2` is retained
+locally. Package
+`dist/cerberus-unchained-0.1.0-dev.rev109-20261101T114044Z` passes hash, chip
+header, partition and image-bound verification. Its S3, onboard C5 and bridge
+application hashes match the retained five-target native matrix. Package
+source hashes match the final host/native receipts and the clean implementation
+checkout.
+
+- Source SHA-256: `ec58013cc58c511e28aa0d540bc54ba09b9dd10955498e7d6eb9261b1a8c287b`.
+- Manifest SHA-256: `8c90136fc7028162f862d906d040522e520e3f3bc6e071c94a186fd18f999a08`.
+- S3 application: 1,919,136 bytes; C5: 1,672,176 bytes; bridge: 255,296 bytes.
+
+`artifacts/device-rev109/local-milestone.json` binds the exact implementation
+commit, package, retained ELFs and unchanged-input validation. Its `installed`
+field is false. Rev106 remains the last verified installed baseline; rev107,
+rev108 and rev109 are local candidates. This checkpoint did not access the
+device, flash firmware, push commits, open a pull request or select a public
+installer release.
+
+The next device acceptance should use a matched paired update, then selected
+and both-receiver saves, reopening after leaving discovery or rebooting,
+historical HINTS/RAW/RX INFO navigation, Stop/Back and a following normal Wi-Fi
+scan. Those checks require the physical device and remain pending while the
+user is unavailable. The checkpoint closes the decoded-family SD persistence
+gap; full Marauder feature parity and sustained dual-radio acceptance remain
+unfinished.
