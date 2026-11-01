@@ -43,17 +43,17 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 
 Rev112 addresses independent S3/C5 Bluetooth Fox Hunt startup, source-specific
 retry, separate signal/status presentation and retained Stop/Back cleanup.
-See [rev112](docs/DUAL_RADIO_REV112.md) for its local validation and remaining
-physical acceptance. Rev111 remains the verified installed baseline; local
-builds do not establish device acceptance or full Marauder parity.
+The matched rev112/C5 firmware67 update is installed with verified writes,
+paired boot and mounted SD. See [rev112](docs/DUAL_RADIO_REV112.md) for its
+validation and remaining physical acceptance. Paired boot does not establish
+full feature acceptance or complete Marauder parity.
 
 Rev111 removes a redundant response-mode dispatch from the passive C5 EXT
 receive path while preserving response invalidation and owner cleanup. It
 also reconciles stale Bluetooth/storage coverage notes with the implemented
 rev110 behavior. See [rev111](docs/DUAL_RADIO_REV111.md) for validation and
-installation status. The matched rev111/C5 firmware67 update is installed with
-verified writes, paired boot and mounted SD. Full parity and physical feature
-acceptance remain open.
+installation status. Rev111 was the verified installed baseline before the
+rev112 update. Full parity and physical feature acceptance remain open.
 
 Rev110 adds an explicit C5 response-request mode to BLE discovery and family
 views, while preserving passive as the default. S3 and C5 observations remain

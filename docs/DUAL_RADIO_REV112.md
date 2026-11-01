@@ -1,7 +1,7 @@
 # Rev112: independent dual-receiver Bluetooth Fox Hunt
 
-The **rev112 / C5 firmware67 local candidate is built and package-verified**.
-It is not flashed. Rev111 remains the last verified installed baseline.
+The **rev112 / C5 firmware67 update is installed**, with image writes, paired
+boot and mounted SD verified. Rev111 was the preceding installed baseline.
 This checkpoint addresses the source audit in
 [BLE_DUAL_FOX_AUDIT.md](BLE_DUAL_FOX_AUDIT.md), using the existing receive-side
 exact-address-and-type Fox Hunt. The wider Marauder port remains incomplete;
@@ -106,6 +106,65 @@ package, final host/native receipts and resource audit, with `installed:false`.
 Physical movement, single-receiver reception, repeated transitions, error
 recovery and loaded memory still require device acceptance. No RF speed,
 coverage improvement or full-feature validation follows from these checks.
-No device access, flash, PR, push or release was performed for this revision.
+Installation was performed afterward, as recorded below. No PR, push or release
+was performed for this revision.
 The coverage ledger retains the same 95 mode-status assignments and six
 workstream statuses; it is not a completion percentage.
+
+## Verified installation
+
+The exact installed source commit is
+`b0d6b60460f1b24e3897b3d914f61e53b6c0f7f0`. Six identity-guard tests and sixteen
+installation-helper tests passed against the final helper bytes. Fresh
+pre-write diagnostics at 13:46:45.560 UTC on 2026-11-01 confirmed rev111/firmware67,
+idle radio owners, mounted SD, USB storage off and no previous reset fault.
+Baseline and candidate both use capability firmware67; the package and image
+hashes distinguish the actual C5 versions.
+
+Fresh first-two-MiB backups match the installed rev111 bootloader, partition
+table and application and passed full device verification. They cover every
+erase-rounded update region. Their SHA-256 values are:
+
+- S3: `60254f98ac3d46c285214a6e2806662be52c2ce6b40805f9f4cefed20e8b6e22`
+- C5: `7c18c49e49d0fa1d9b386a3d5c03f60616be6e4bfcdca492e76850c80aef1552`
+
+All nine written images across the bridge, C5 and final S3 stages were verified.
+USB and ROM/stub identities were checked before writes. Higher flash regions
+and the prior stored crash record were retained. No recovery was used.
+
+Post-installation captures at 13:55:45.769 and 13:56:56.129 UTC are 70.360059
+seconds apart. Both report rev112/firmware67, protocol2 online, mounted SD and
+idle owners, with `previous_reset_fault=no`. S3 uptime advances from 40,051 to
+110,410 ms; C5 uptime advances from 39,178 to 109,539 ms with boot count 1 stable.
+SPI exchanges advance from 166 to 481. The four initial-READY timeouts and four
+legacy fallbacks remain unchanged; mutex/fall/high timeouts and driver errors
+remain zero.
+
+| Sampled idle measurement | Before update, rev111 | Settled rev112 |
+| --- | ---: | ---: |
+| S3 internal free bytes | 133,372 | 133,356 |
+| Largest S3 internal block | 90,112 | 90,112 |
+| S3 PSRAM free bytes | 1,427,552 | 1,427,552 |
+| C5 snapshot free bytes | 56,948 | 56,948 |
+| S3 task count | 10 | 10 |
+| Observed console stack low-water bytes | 1,292 | 1,372 |
+
+These are sampled idle observations, not loaded memory or worst-case stack
+claims. No Fox Hunt receiver test, touchscreen transition, RF performance test
+or real-card save/reopen acceptance was performed during installation.
+
+`artifacts/device-rev112/installation-receipt.json` binds the backups, all
+writes, preflight, captures and the independently recomputed idle comparison.
+Its SHA-256 is
+`528d559a691696fe9a8a7a996d62dab06aae1f7144ce9b8e34184f37c18c8007`.
+The earlier local milestone retains `installed:false`; this later receipt
+establishes the installed state. Post-installation coverage wording is recorded
+separately in `installation-editorial-verification.json`, leaving original
+host/native receipts immutable and all feature statuses unchanged.
+The follow-up `installation-editorial-links-verification.json` records three
+current-checkpoint link corrections and binds the first editorial receipt.
+
+The [next receive-side transfer audit](BLE_RESPONSE_TRANSFER_AUDIT.md) proposes
+reducing C5-to-S3 result reads for rows without a stored scan response, while
+preserving the existing evidence and compatibility checks. It is a proposal,
+not an implemented part of rev112 or a measured performance improvement.
