@@ -83,6 +83,8 @@ static void check_list_controls(const char *prefix)
     cerberus_c5_ble_result_t s3_before=ble_selected_result;
     dual_ble_ui_detail=false;dual_ble_ui_offset=0;dual_ble_ui_recent_only=false;
     dual_ble_ui_sort=CERBERUS_DUAL_BLE_SORT_SIGNAL;dual_ble_ui_store->count=6;clock_ms=1000;
+    dual_ble_ui_store->published_boot_id=17;dual_ble_ui_store->published_epoch=23;
+    dual_ble_ui_store->published_generation=0; /* Wrapped generation is valid. */
     for(unsigned i=0;i<6;++i){
         cerberus_dual_ble_row_t *r=&dual_ble_ui_store->rows[i];memset(r,0,sizeof(*r));
         memcpy(r->address,"ABCDEF",6);r->address_type=(uint8_t)(i%4);r->rssi=-60-(int)i;
@@ -96,10 +98,14 @@ static void check_list_controls(const char *prefix)
     save(prefix,"name-sorted");
     /* A bank replacement after paint must never redirect the selected source. */
     memset(dual_ble_ui_store->rows,0,sizeof(dual_ble_ui_store->rows));dual_ble_ui_store->count=0;
+    dual_ble_ui_store->published_boot_id=99;dual_ble_ui_store->published_epoch=100;
+    dual_ble_ui_store->published_generation=88;
     assert(dual_ble_ui_tap(20,160)==DUAL_BLE_UI_REDRAW);
     cerberus_c5_ble_result_t target;assert(dual_ble_ui_selected_peer(&target));
     assert(!strcmp(target.name,"Peer 0")&&target.address_type==1&&!memcmp(target.address,"ABCDEF",6));
     assert(dual_ble_ui_selected.raw[2]==5&&target.flags==0);
+    assert(dual_ble_ui_selected_provenance.boot_id==17&&dual_ble_ui_selected_provenance.epoch==23&&
+        dual_ble_ui_selected_provenance.generation==0&&dual_ble_ui_selected_provenance.index==5);
     assert(dual_ble_ui_tap(20,330)==DUAL_BLE_UI_REDRAW);
     paint_list();assert(dual_ble_ui_painted_count==0&&dual_ble_ui_offset==0);
     assert(dual_ble_ui_tap(20,160)==DUAL_BLE_UI_NONE);
@@ -200,6 +206,8 @@ int main(int argc,char **argv)
     assert(dual_ble_ui_store->error==ESP_ERR_NOT_SUPPORTED&&companion_exchanges==1);
     clock_ms=200;dual_ble_ui_sync(0,NULL,0,200);assert(companion_exchanges==1); /* Explicit retry only. */
     dual_ble_ui_store->error=0;dual_ble_ui_store->count=6;
+    dual_ble_ui_store->published_boot_id=7;dual_ble_ui_store->published_epoch=8;
+    dual_ble_ui_store->published_generation=9;
     for(unsigned i=0;i<6;++i){
         cerberus_dual_ble_row_t *r=&dual_ble_ui_store->rows[i];
         memset(r,0,sizeof(*r));memcpy(r->address,"ABCDEF",6);r->address_type=(uint8_t)(i%4);

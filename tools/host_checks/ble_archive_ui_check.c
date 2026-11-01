@@ -38,11 +38,17 @@ static void seed(unsigned count)
     source.saved_uptime_ms=1000000; source.count=(uint8_t)count;
     for(unsigned i=0;i<count;++i) {
         cerberus_ble_archive_row_t *r=&source.rows[i];
-        r->address[0]=(uint8_t)(i+1U);r->address[5]=0xC0;r->address_type=1;
+        r->receiver=i<32?CERBERUS_BLE_ARCHIVE_RECEIVER_S3:CERBERUS_BLE_ARCHIVE_RECEIVER_C5;
+        r->address[0]=(uint8_t)(i%32U+1U);r->address[5]=0xC0;r->address_type=1;
         snprintf(r->name,sizeof(r->name),"Saved advertiser %u",i+1U);
         r->rssi=-50;r->rssi_valid=true;r->manufacturer_id=0xFFFF;
         r->source_time_valid=true;r->original_source_uptime_ms=999000;r->copy_ceiling_ms=999500;
-        r->scan_epoch_valid=true;r->scan_epoch=123;r->generation=4;r->index=(uint8_t)i;r->reports_seen=5;
+        r->scan_epoch_valid=true;r->scan_epoch=123;r->generation=4;r->index=(uint8_t)(i%32U);r->reports_seen=5;
+        if(i>=32){
+            r->rssi_kind=CERBERUS_BLE_ARCHIVE_RSSI_LATEST_ADV;r->receiver_boot_id=UINT64_C(0xABCDEF0123456789);
+            r->source_time_valid=false;r->original_source_uptime_ms=r->copy_ceiling_ms=0;
+            r->age_upper_valid=true;r->age_upper_at_save_ms=1700;
+        }
         const uint8_t data[]={2,1,6,3,3,0x0F,0x18,4,0x09,'t','a','g',3,0xFF,0x4C,0};
         memcpy(r->advertisement,data,sizeof(data));r->advertisement_length=sizeof(data);
     }
@@ -146,6 +152,62 @@ static void test_paint_and_privacy(void)
     CHECK(strstr(drawn,"FEFEFEFEFEFEFEFEFEFEFEFEFEFEFEFE")&&strstr(drawn,"AGE AT SAVE: UNKNOWN"));
     CHECK(strstr(drawn,"RSSI UNAVAILABLE")&&strstr(drawn,"NO LOCATION OR WALL CLOCK"));
 }
+static void test_receivers(const char *directory)
+{
+    load(64);CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+    CHECK(strstr(drawn,"PAGE 1 OF 16")&&strstr(drawn,"S3 32 / C5 32 / LEGACY 0"));
+    CHECK(strstr(drawn,"S3 / Saved advertiser 1")&&strstr(drawn,"PEAK -50"));
+    preview(directory,"archive-both-first-page");
+    for(unsigned i=0;i<8;++i)CHECK(ble_archive_ui_tap(&viewer,164,374)==BLE_ARCHIVE_UI_REDRAW);
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+    CHECK(strstr(drawn,"C5 / Saved advertiser 33")&&strstr(drawn,"LAST -50")&&
+        strstr(drawn,"AGE AT SAVE <=1700ms"));
+    preview(directory,"archive-c5-list");
+    cerberus_ble_archive_row_t frozen=viewer.painted[0];
+    viewer.document.rows[32]=viewer.document.rows[0];viewer.document.saved_uptime_ms=3;
+    CHECK(ble_archive_ui_tap(&viewer,8,150)==BLE_ARCHIVE_UI_REDRAW);
+    CHECK(!memcmp(&frozen,&viewer.selected,sizeof(frozen))&&viewer.selected_age_ms==1700&&
+        viewer.selected_saved_uptime_ms==1000000);
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+    CHECK(strstr(drawn,"C5 / Saved advertiser 33")&&strstr(drawn,"LATEST ORIGINAL ADV")&&
+        strstr(drawn,"AGE AT SAVE: <= 1700 ms")&&strstr(drawn,"C5 BOOT ID: ABCDEF0123456789")&&
+        strstr(drawn,"NO LOCAL RX TIMESTAMP"));
+    CHECK(!strstr(drawn,"RAW ADV UPTIME: 0")&&!strstr(drawn,"ORIGINAL SWEEP PEAK"));
+    preview(directory,"archive-c5-detail");
+    viewer.selected_age_ms=UINT64_MAX;clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+    viewer.selected_age_valid=false;clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+    CHECK(strstr(drawn,"AGE AT SAVE: UNKNOWN"));
+    load(64);viewer.document.saved_uptime_ms=UINT64_MAX;
+    viewer.document.rows[0].original_source_uptime_ms=viewer.document.rows[0].copy_ceiling_ms=0;
+    viewer.document.rows[32].age_upper_at_save_ms=UINT64_MAX;
+    viewer.document.rows[33].age_upper_valid=false;viewer.document.rows[33].age_upper_at_save_ms=0;
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+    CHECK(strstr(drawn,"AGE AT SAVE 18446744073709551615ms"));
+    preview(directory,"archive-max-exact-age");
+    CHECK(ble_archive_ui_tap(&viewer,8,150)==BLE_ARCHIVE_UI_REDRAW);
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+    CHECK(strstr(drawn,"AGE AT SAVE: 18446744073709551615 ms"));
+    preview(directory,"archive-max-exact-detail");
+    CHECK(ble_archive_ui_tap(&viewer,64,426)==BLE_ARCHIVE_UI_REDRAW);viewer.page=8;
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+    CHECK(strstr(drawn,"AGE AT SAVE <=18446744073709551615ms")&&strstr(drawn,"AGE AT SAVE UNKNOWN"));
+    preview(directory,"archive-max-upper-age");
+    CHECK(ble_archive_ui_tap(&viewer,8,150)==BLE_ARCHIVE_UI_REDRAW);
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+    CHECK(strstr(drawn,"AGE AT SAVE: <= 18446744073709551615 ms"));
+    preview(directory,"archive-max-upper-detail");
+    load(1);viewer.document.rows[0].receiver=CERBERUS_BLE_ARCHIVE_RECEIVER_LEGACY;
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK&&strstr(drawn,"LEGACY / Saved advertiser 1"));
+    CHECK(strstr(drawn,"S3 0 / C5 0 / LEGACY 1"));preview(directory,"archive-legacy-receiver");
+    CHECK(ble_archive_ui_tap(&viewer,8,150)==BLE_ARCHIVE_UI_REDRAW);
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK&&strstr(drawn,"LEGACY /"));
+    CHECK(!strstr(drawn,"C5 BOOT ID"));
+    viewer.view=BLE_ARCHIVE_UI_JOB;viewer.release_pending=true;
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK&&strstr(drawn,"SD WRITE NOT STARTED"));
+    preview(directory,"archive-releasing");
+    CHECK(ble_archive_ui_tap(&viewer,8,150)==BLE_ARCHIVE_UI_NONE);
+    CHECK(ble_archive_ui_tap(&viewer,64,426)==BLE_ARCHIVE_UI_CANCEL&&!viewer.release_pending);
+}
 static void test_raw(const char *directory)
 {
     load(1);CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);CHECK(ble_archive_ui_tap(&viewer,8,150)==BLE_ARCHIVE_UI_REDRAW);
@@ -184,7 +246,8 @@ static void test_raw(const char *directory)
 }
 int main(int argc,char **argv)
 {
-    CHECK(argc==2);test_jobs(argv[1]);test_list(argv[1]);test_paint_and_privacy();test_raw(argv[1]);
-    printf("BLE archive UI PASS %u assertions; no clock, heap, SD, IO worker or radio linked\n",checks);
+    CHECK(argc==2);test_jobs(argv[1]);test_list(argv[1]);test_paint_and_privacy();test_raw(argv[1]);test_receivers(argv[1]);
+    printf("BLE archive UI PASS %u assertions; PSRAM model=%zu bytes; no clock, heap, SD, IO worker or radio linked\n",
+        checks,sizeof(ble_archive_ui_store_t));
     return 0;
 }

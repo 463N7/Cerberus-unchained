@@ -91,7 +91,12 @@ static uint64_t publish_bank(cerberus_dual_ble_scan_t *s, uint8_t count, uint64_
     uint64_t published = s->ops.now_ms ? s->ops.now_ms(s->ops.context) : now;
     if (published < now) s->discovery_clock_valid = false;
     memcpy(s->rows, s->staging, sizeof(s->rows));
-    s->count = count; s->published_epoch = s->remote.epoch;
+    /* Tick and consumers share one UI owner. Commit historical source identity
+     * with the bank, before mutable START/remote fields can move to another job. */
+    s->published_boot_id = s->start.boot_id;
+    s->published_epoch = s->remote.epoch;
+    s->published_generation = s->remote.generation;
+    s->count = count;
     if (s->snapshots != UINT32_MAX) ++s->snapshots;
     if (count && !s->has_first_result && s->discovery_clock_valid) {
         if (published >= s->discovery_started_ms && published - s->discovery_started_ms <= UINT32_MAX) {
@@ -442,6 +447,22 @@ bool cerberus_dual_ble_row(const cerberus_dual_ble_scan_t *s, uint8_t index, cer
     if (!out) return false;
     memset(out, 0, sizeof(*out)); if (!s || index >= s->count) return false;
     *out = s->rows[index]; return true;
+}
+
+bool cerberus_dual_ble_copy_row(const cerberus_dual_ble_scan_t *s, uint8_t index,
+    cerberus_dual_ble_row_t *out, cerberus_dual_ble_provenance_t *provenance)
+{
+    if (out) memset(out, 0, sizeof(*out));
+    if (provenance) memset(provenance, 0, sizeof(*provenance));
+    if (!out || !provenance || !s || index >= s->count ||
+        s->count > CERBERUS_DUAL_BLE_CAPACITY || !s->published_boot_id ||
+        !s->published_epoch) return false;
+    *out = s->rows[index];
+    *provenance = (cerberus_dual_ble_provenance_t){
+        .boot_id = s->published_boot_id, .epoch = s->published_epoch,
+        .generation = s->published_generation, .index = index,
+    };
+    return true;
 }
 
 void cerberus_dual_ble_track_view(const cerberus_dual_ble_scan_t *s, uint64_t now,

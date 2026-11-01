@@ -378,6 +378,78 @@ static void check_snapshot_faults_and_stop(void)
     drain(&s,&p);
     puts("dual BLE snapshot validation: 29 malformed/stale/body/fence cases, Stop in every transfer phase and exhausted counter passed");
 }
+static void assert_provenance(const cerberus_dual_ble_provenance_t *p,
+    uint64_t boot, uint64_t epoch, uint8_t generation, uint8_t index)
+{
+    assert(p->boot_id==boot && p->epoch==epoch && p->generation==generation && p->index==index);
+}
+static void check_published_provenance(void)
+{
+    for(unsigned version=1;version<=2;++version) {
+        cerberus_dual_ble_scan_t s;peer_t p;init(&s,&p);
+        p.version=(uint8_t)version;p.snapshot_capability=version==2;
+        p.boot=UINT64_C(0x1234567812345678);p.epoch=UINT64_C(0x100000000);p.generation=255;
+        start(&s,&p);
+        const uint64_t old_boot=p.boot, old_epoch=p.epoch;
+        const uint8_t old_generation=p.generation;
+        assert(old_generation==0); /* Wrapped byte is valid, not the identity fence. */
+        if(version==1)completed(&p);
+        await_snapshots(&s,&p,1);
+        cerberus_dual_ble_row_t selected, current;
+        cerberus_dual_ble_provenance_t selected_source, current_source;
+        unsigned frames=p.frames;
+        assert(cerberus_dual_ble_copy_row(&s,1,&selected,&selected_source));
+        assert(p.frames==frames);
+        assert_provenance(&selected_source,old_boot,old_epoch,old_generation,1);
+        drain(&s,&p);
+        assert(cerberus_dual_ble_copy_row(&s,1,&current,&current_source));
+        assert(!memcmp(&selected,&current,sizeof(selected)));
+        assert_provenance(&current_source,old_boot,old_epoch,old_generation,1);
+
+        /* A new boot/job changes mutable START/status immediately. The retained
+         * bank's provenance must remain old, including during partial transfer. */
+        p.boot+=UINT64_C(0x100000000);p.epoch+=UINT64_C(0x100000000);
+        assert(cerberus_dual_ble_begin(&s,0,NULL,0)==ESP_OK);
+        tick(&s,&p);
+        assert(s.start.boot_id==p.boot && s.start.boot_id!=old_boot);
+        assert(cerberus_dual_ble_copy_row(&s,1,&current,&current_source));
+        assert_provenance(&current_source,old_boot,old_epoch,old_generation,1);
+        if(version==1)completed(&p);
+        p.cost_ms=9;
+        for(unsigned i=0;i<200&&!s.copied;++i)fast_tick(&s,&p);
+        assert(s.copied&&!s.snapshots);
+        drain(&s,&p); /* Cancelled staging never publishes its source metadata. */
+        assert(cerberus_dual_ble_copy_row(&s,1,&current,&current_source));
+        assert_provenance(&current_source,old_boot,old_epoch,old_generation,1);
+        assert(!memcmp(&selected,&current,sizeof(selected)));
+
+        p.cost_ms=1;
+        assert(cerberus_dual_ble_begin(&s,0,NULL,0)==ESP_OK);tick(&s,&p);
+        const uint64_t new_epoch=p.epoch;const uint8_t new_generation=p.generation;
+        if(version==1)completed(&p);
+        await_snapshots(&s,&p,1);
+        assert(cerberus_dual_ble_copy_row(&s,1,&current,&current_source));
+        assert_provenance(&current_source,p.boot,new_epoch,new_generation,1);
+        assert_provenance(&selected_source,old_boot,old_epoch,old_generation,1);
+        assert(selected.request_started_ms<current.request_started_ms);
+        /* Invalid copies cannot leak a prior identity or half a row. */
+        memset(&current,0xa5,sizeof(current));memset(&current_source,0xa5,sizeof(current_source));
+        assert(!cerberus_dual_ble_copy_row(&s,32,&current,&current_source));
+        const cerberus_dual_ble_row_t empty={0};
+        assert(!memcmp(&current,&empty,sizeof(current)));
+        assert_provenance(&current_source,0,0,0,0);
+        assert(!cerberus_dual_ble_copy_row(&s,0,&current,NULL));
+        drain(&s,&p);
+    }
+    /* Lost BEGIN replies must not move the frozen row's original anchor. */
+    cerberus_dual_ble_scan_t s;peer_t p;init_live(&s,&p);p.lose_begin_replies=2;
+    start(&s,&p);await_snapshots(&s,&p,1);
+    cerberus_dual_ble_row_t row;cerberus_dual_ble_provenance_t source;
+    assert(cerberus_dual_ble_copy_row(&s,0,&row,&source));
+    assert(row.request_started_ms+1==p.snapshot_clock_ms && row.request_started_ms+200<=p.now);
+    assert_provenance(&source,p.boot,p.epoch,p.generation,0);drain(&s,&p);
+    puts("dual BLE publication provenance: v1/v2 full identities, generation wrap, retained/replaced/cancelled banks and lost-BEGIN anchor passed");
+}
 int main(void)
 {
     cerberus_dual_ble_scan_t s;peer_t p;
@@ -429,7 +501,7 @@ int main(void)
     assert(cerberus_dual_ble_age_upper(UINT32_MAX-1,10,12)==UINT32_MAX);
     assert(cerberus_dual_ble_age_upper(2,10,9)==UINT32_MAX);
     assert(cerberus_dual_ble_age_upper(2,10,12)==4);
-    check_live_snapshots();check_snapshot_faults_and_stop();
+    check_live_snapshots();check_snapshot_faults_and_stop();check_published_provenance();
     printf("dual BLE reader: owner/replay/fence/lost-reply/age/typed-row checks passed; store=%zu bytes\n",sizeof(s));
     return 0;
 }

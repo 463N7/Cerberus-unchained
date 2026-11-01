@@ -26,6 +26,7 @@ static ble_archive_io_context_t *archive_io_context;
 static cerberus_ble_archive_io_status_t archive_io_status;
 static uint64_t archive_io_last_job;
 static bool archive_io_release_requested;
+static uint16_t archive_io_readers;
 
 static bool archive_io_string_fits(const char *value, size_t capacity)
 {
@@ -102,7 +103,8 @@ static esp_err_t archive_io_start(const cerberus_ble_archive_t *document,
         !archive_io_string_fits(file_name, CERBERUS_BLE_ARCHIVE_IO_NAME_CAPACITY))))
         return ESP_ERR_INVALID_ARG;
     portENTER_CRITICAL(&archive_io_lock);
-    if (archive_io_status.worker_active || archive_io_context != NULL || archive_io_last_job == UINT64_MAX) {
+    if (archive_io_status.worker_active || archive_io_context != NULL || archive_io_readers ||
+        archive_io_last_job == UINT64_MAX) {
         portEXIT_CRITICAL(&archive_io_lock);
         return ESP_ERR_INVALID_STATE;
     }
@@ -160,16 +162,31 @@ void cerberus_ble_archive_io_get_status(cerberus_ble_archive_io_status_t *status
 esp_err_t cerberus_ble_archive_io_copy_result(uint64_t job_id, cerberus_ble_archive_t *document)
 {
     if (document == NULL) return ESP_ERR_INVALID_ARG;
+    ble_archive_io_context_t *borrowed = NULL;
     portENTER_CRITICAL(&archive_io_lock);
-    esp_err_t error = ESP_ERR_INVALID_STATE;
     if (job_id && job_id == archive_io_status.job_id && !archive_io_status.worker_active &&
         archive_io_status.result_ready && archive_io_context != NULL &&
-        archive_io_status.state == CERBERUS_BLE_ARCHIVE_IO_COMPLETE) {
-        *document = archive_io_context->document;
-        error = ESP_OK;
+        archive_io_status.state == CERBERUS_BLE_ARCHIVE_IO_COMPLETE && archive_io_readers != UINT16_MAX) {
+        borrowed = archive_io_context;
+        ++archive_io_readers;
     }
     portEXIT_CRITICAL(&archive_io_lock);
-    return error;
+    if (borrowed == NULL) return ESP_ERR_INVALID_STATE;
+
+    /* The completed document is immutable. Pin it while copying outside the
+     * interrupt-disabled lock; release cannot free it or admit another job. */
+    memcpy(document, &borrowed->document, sizeof(*document));
+    ble_archive_io_context_t *dispose = NULL;
+    portENTER_CRITICAL(&archive_io_lock);
+    --archive_io_readers;
+    if (!archive_io_readers && archive_io_release_requested && archive_io_context == borrowed) {
+        dispose = archive_io_context;
+        archive_io_context = NULL;
+        archive_io_status.result_ready = false;
+    }
+    portEXIT_CRITICAL(&archive_io_lock);
+    if (dispose != NULL) heap_caps_free(dispose);
+    return ESP_OK;
 }
 void cerberus_ble_archive_io_cancel(uint64_t job_id)
 {
@@ -186,6 +203,9 @@ void cerberus_ble_archive_io_release(uint64_t job_id)
         if (archive_io_status.worker_active) {
             archive_io_release_requested = true;
             archive_io_status.cancel_requested = true;
+        } else if (archive_io_readers) {
+            archive_io_release_requested = true;
+            archive_io_status.result_ready = false;
         } else {
             owned = archive_io_context;
             archive_io_context = NULL;

@@ -20,8 +20,9 @@ typedef struct {
     cerberus_ble_archive_row_t painted[4], selected;
     uint64_t job_id, painted_saved_uptime_ms, selected_saved_uptime_ms;
     uint64_t painted_age_ms[4], selected_age_ms;
+    uint64_t release_started_ms;
     bool painted_age_valid[4], selected_age_valid;
-    bool job_pending, saving, has_document, paint_valid, selected_valid;
+    bool job_pending, saving, has_document, paint_valid, selected_valid, release_pending;
     uint8_t page, raw_page, painted_count;
     ble_archive_ui_view_t view;
     esp_err_t error;
@@ -94,6 +95,12 @@ static inline void ble_archive_ui_name(const cerberus_ble_archive_row_t *row, ch
     out[i] = '\0';
 }
 
+static inline const char *ble_archive_ui_receiver(uint8_t receiver)
+{
+    return receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_S3 ? "S3" :
+        receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ? "C5" : "LEGACY";
+}
+
 static inline void ble_archive_ui_address(const cerberus_ble_archive_row_t *row, char out[18])
 {
     cerberus_privacy_format_ble_identifier(row->address, privacy_addresses_masked(), out, 18U);
@@ -138,21 +145,33 @@ static inline esp_err_t ble_archive_ui_list(ble_archive_ui_store_t *store)
     snprintf(line, sizeof(line), "%u OBSERVATIONS / PAGE %u OF %u", store->document.count,
         store->page + 1U, (store->document.count + 3U) / 4U);
     ESP_RETURN_ON_ERROR(draw_centered(118, line, UI_TEXT, 1), TAG, "archive count");
-    ESP_RETURN_ON_ERROR(draw_centered(134, "RETAINED ADDRESSES / NOT PHYSICAL DEVICES", UI_MUTED, 1), TAG, "archive identities");
+    unsigned sources[3] = {0};
+    for (uint8_t i = 0U; i < store->document.count; ++i)
+        if (store->document.rows[i].receiver <= CERBERUS_BLE_ARCHIVE_RECEIVER_C5)
+            ++sources[store->document.rows[i].receiver];
+    snprintf(line, sizeof(line), "S3 %u / C5 %u / LEGACY %u / NOT DEVICE COUNT",
+        sources[CERBERUS_BLE_ARCHIVE_RECEIVER_S3], sources[CERBERUS_BLE_ARCHIVE_RECEIVER_C5],
+        sources[CERBERUS_BLE_ARCHIVE_RECEIVER_LEGACY]);
+    ESP_RETURN_ON_ERROR(draw_centered(134, line, UI_MUTED, 1), TAG, "archive identities");
     for (unsigned row = 0U; row < 4U && (unsigned)store->page * 4U + row < store->document.count; ++row) {
         unsigned index = (unsigned)store->page * 4U + row;
         store->painted[row] = store->document.rows[index];
-        store->painted_age_valid[row] = cerberus_ble_archive_age_at_save(&store->document, index, &store->painted_age_ms[row]);
         const cerberus_ble_archive_row_t *item = &store->painted[row];
+        store->painted_age_valid[row] = item->receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ?
+            cerberus_ble_archive_age_upper_at_save(&store->document, index, &store->painted_age_ms[row]) :
+            cerberus_ble_archive_age_at_save(&store->document, index, &store->painted_age_ms[row]);
         char name[33], address[18];
         ble_archive_ui_name(item, name); ble_archive_ui_address(item, address);
         uint16_t y = 150U + row * 54U;
         ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(8, y, 304, 50, UI_PANEL), TAG, "archive row");
-        ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 6U, name[0] ? name : "[NO RETAINED NAME]", UI_TEXT, UI_PANEL, 1), TAG, "archive name");
-        if (item->rssi_valid) snprintf(line, sizeof(line), "%s / PEAK %d dBm", address, item->rssi);
+        snprintf(line, sizeof(line), "%s / %s", ble_archive_ui_receiver(item->receiver), name[0] ? name : "[NO RETAINED NAME]");
+        ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 6U, line, UI_TEXT, UI_PANEL, 1), TAG, "archive name");
+        if (item->rssi_valid) snprintf(line, sizeof(line), "%s / %s %d dBm", address,
+            item->rssi_kind == CERBERUS_BLE_ARCHIVE_RSSI_LATEST_ADV ? "LAST" : "PEAK", item->rssi);
         else snprintf(line, sizeof(line), "%s / RSSI UNKNOWN", address);
         ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 21U, line, UI_MUTED, UI_PANEL, 1), TAG, "archive address");
-        if (store->painted_age_valid[row]) snprintf(line, sizeof(line), "ADV %u BYTES / AGE AT SAVE %llums", item->advertisement_length,
+        if (store->painted_age_valid[row]) snprintf(line, sizeof(line), "ADV %u B / AGE AT SAVE %s%llums", item->advertisement_length,
+            item->receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ? "<=" : "",
             (unsigned long long)store->painted_age_ms[row]);
         else snprintf(line, sizeof(line), "ADV %u BYTES / AGE AT SAVE UNKNOWN", item->advertisement_length);
         ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 36U, line, UI_MUTED, UI_PANEL, 1), TAG, "archive age");
@@ -172,7 +191,7 @@ static inline esp_err_t ble_archive_ui_detail(ble_archive_ui_store_t *store)
     char line[53], name[33], address[18];
     ble_archive_ui_name(row, name); ble_archive_ui_address(row, address);
     ESP_RETURN_ON_ERROR(ble_archive_ui_clear("BLE OBSERVATION"), TAG, "archive detail");
-    snprintf(line, sizeof(line), "NAME: %s", name[0] ? name : "[NO RETAINED NAME]");
+    snprintf(line, sizeof(line), "%s / %s", ble_archive_ui_receiver(row->receiver), name[0] ? name : "[NO RETAINED NAME]");
     ESP_RETURN_ON_ERROR(draw_centered(60, line, UI_TEXT, 1), TAG, "archive detail name");
     for (unsigned n = 0U; n < 2U; ++n) {
         size_t used = (size_t)snprintf(line, sizeof(line), "NAME %02u: ", n * 16U);
@@ -184,7 +203,8 @@ static inline esp_err_t ble_archive_ui_detail(ble_archive_ui_store_t *store)
     ESP_RETURN_ON_ERROR(draw_centered(112, "NAME IS RETAINED PEER TEXT / MAY BE PARTIAL", UI_MUTED, 1), TAG, "archive name scope");
     ESP_RETURN_ON_ERROR(draw_centered(134, address, UI_TEXT, 1), TAG, "archive detail address");
     ESP_RETURN_ON_ERROR(draw_centered(150, ble_archive_ui_address_kind(row), UI_MUTED, 1), TAG, "archive address kind");
-    if (row->rssi_valid) snprintf(line, sizeof(line), "RSSI %d dBm / ORIGINAL SWEEP PEAK", row->rssi);
+    if (row->rssi_valid) snprintf(line, sizeof(line), "RSSI %d dBm / %s", row->rssi,
+        row->rssi_kind == CERBERUS_BLE_ARCHIVE_RSSI_LATEST_ADV ? "LATEST ORIGINAL ADV" : "ORIGINAL SWEEP PEAK");
     else snprintf(line, sizeof(line), "RSSI UNAVAILABLE");
     ESP_RETURN_ON_ERROR(draw_centered(172, line, UI_TEXT, 1), TAG, "archive detail rssi");
     if (row->manufacturer_id == UINT16_MAX) snprintf(line, sizeof(line), "MANUFACTURER UNKNOWN / PEER FLAGS %02X", row->peer_flags);
@@ -195,15 +215,20 @@ static inline esp_err_t ble_archive_ui_detail(ble_archive_ui_store_t *store)
         used += (size_t)snprintf(line + used, sizeof(line) - used, "%02X", row->uuid[i]);
     if (!row->uuid_length) snprintf(line + used, sizeof(line) - used, "NOT RETAINED");
     ESP_RETURN_ON_ERROR(draw_centered(206, line, UI_MUTED, 1), TAG, "archive peer uuid");
-    if (store->selected_age_valid) snprintf(line, sizeof(line), "AGE AT SAVE: %llu ms", (unsigned long long)store->selected_age_ms);
+    if (store->selected_age_valid) snprintf(line, sizeof(line), "AGE AT SAVE: %s%llu ms",
+        row->receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ? "<= " : "", (unsigned long long)store->selected_age_ms);
     else snprintf(line, sizeof(line), "AGE AT SAVE: UNKNOWN");
     ESP_RETURN_ON_ERROR(draw_centered(230, line, UI_TEXT, 1), TAG, "archive historical age");
     snprintf(line, sizeof(line), "SAVED BOOT UPTIME: %llu ms", (unsigned long long)store->selected_saved_uptime_ms);
     ESP_RETURN_ON_ERROR(draw_centered(248, line, UI_MUTED, 1), TAG, "archive saved clock");
-    if (row->source_time_valid) snprintf(line, sizeof(line), "RAW ADV UPTIME: %llu ms", (unsigned long long)row->original_source_uptime_ms);
+    if (row->receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5)
+        snprintf(line, sizeof(line), "C5 BOOT ID: %016llX", (unsigned long long)row->receiver_boot_id);
+    else if (row->source_time_valid) snprintf(line, sizeof(line), "RAW ADV UPTIME: %llu ms", (unsigned long long)row->original_source_uptime_ms);
     else snprintf(line, sizeof(line), "RAW ADV UPTIME: UNKNOWN");
     ESP_RETURN_ON_ERROR(draw_centered(266, line, UI_MUTED, 1), TAG, "archive source clock");
-    if (row->source_time_valid) snprintf(line, sizeof(line), "COPY CEILING: %llu ms", (unsigned long long)row->copy_ceiling_ms);
+    if (row->receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5)
+        snprintf(line, sizeof(line), "REMOTE AGE BOUND / NO LOCAL RX TIMESTAMP");
+    else if (row->source_time_valid) snprintf(line, sizeof(line), "COPY CEILING: %llu ms", (unsigned long long)row->copy_ceiling_ms);
     else snprintf(line, sizeof(line), "COPY CEILING: UNKNOWN");
     ESP_RETURN_ON_ERROR(draw_centered(284, line, UI_MUTED, 1), TAG, "archive copy ceiling");
     if (row->scan_epoch_valid) snprintf(line, sizeof(line), "SAVED SCAN EPOCH: %llu", (unsigned long long)row->scan_epoch);
@@ -316,7 +341,11 @@ static inline esp_err_t ble_archive_ui_draw(ble_archive_ui_store_t *store, esp_e
     if (store && store->selected_valid && store->view == BLE_ARCHIVE_UI_DETAIL) return ble_archive_ui_detail(store);
     if (store && store->selected_valid && store->view == BLE_ARCHIVE_UI_RAW) return ble_archive_ui_raw(store);
     ESP_RETURN_ON_ERROR(ble_archive_ui_clear("BLE SD ARCHIVE"), TAG, "archive status");
-    if (store && store->view == BLE_ARCHIVE_UI_JOB && store->job_pending) {
+    if (store && store->release_pending) {
+        ESP_RETURN_ON_ERROR(draw_centered(160, "RELEASING RECEIVERS", UI_TEXT, 2), TAG, "archive release");
+        ESP_RETURN_ON_ERROR(draw_centered(204, "SNAPSHOT FROZEN / SD WRITE NOT STARTED", UI_MUTED, 1), TAG, "archive frozen");
+        ESP_RETURN_ON_ERROR(draw_centered(244, "BACK CANCELS SAVE / RECEIVERS STAY STOPPED", UI_MUTED, 1), TAG, "archive release cancel");
+    } else if (store && store->view == BLE_ARCHIVE_UI_JOB && store->job_pending) {
         ESP_RETURN_ON_ERROR(draw_centered(160, store->saving ? "SAVING SNAPSHOT" : "LOADING SNAPSHOT", UI_TEXT, 2), TAG, "archive working");
         ESP_RETURN_ON_ERROR(draw_centered(204, "READ-ONLY HISTORICAL OBSERVATIONS", UI_MUTED, 1), TAG, "archive working scope");
         ESP_RETURN_ON_ERROR(draw_centered(244, store->saving ? "BACK CANCELS WAIT / A SAVE MAY FINISH" :
@@ -340,12 +369,14 @@ static inline ble_archive_ui_action_t ble_archive_ui_tap(ble_archive_ui_store_t 
     if (x >= 64U && x < 256U && y >= 426U && y < 470U) {
         if (!store) return BLE_ARCHIVE_UI_BACK;
         store->paint_valid = false;
-        if (store->job_pending) { store->job_pending = false; return BLE_ARCHIVE_UI_CANCEL; }
+        if (store->release_pending || store->job_pending) {
+            store->release_pending = store->job_pending = false; return BLE_ARCHIVE_UI_CANCEL;
+        }
         if (store->view == BLE_ARCHIVE_UI_RAW) { store->view = BLE_ARCHIVE_UI_DETAIL; return BLE_ARCHIVE_UI_REDRAW; }
         if (store->view == BLE_ARCHIVE_UI_DETAIL) { store->view = BLE_ARCHIVE_UI_LIST; return BLE_ARCHIVE_UI_REDRAW; }
         return BLE_ARCHIVE_UI_BACK;
     }
-    if (!store || store->job_pending || !store->has_document) return BLE_ARCHIVE_UI_NONE;
+    if (!store || store->release_pending || store->job_pending || !store->has_document) return BLE_ARCHIVE_UI_NONE;
     if (store->view == BLE_ARCHIVE_UI_ERROR && x >= 64U && x < 256U && y >= 374U && y < 418U) {
         store->view = BLE_ARCHIVE_UI_LIST; store->paint_valid = false; return BLE_ARCHIVE_UI_REDRAW;
     }

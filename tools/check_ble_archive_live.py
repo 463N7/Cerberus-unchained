@@ -21,17 +21,33 @@ frame = frame.replace('    if(!*text)return ESP_OK;', '    drawn_size += (size_t
 (out / 'archive_framebuffer.h').write_text(frame, encoding='utf-8')
 prefix = (root / 'tools/host_checks/ble_archive_ui_check.c').read_text(encoding='utf-8').split('#include "ble_archive_ui.h"', 1)[0]
 (out / 'archive_live_adapters.h').write_text(prefix, encoding='utf-8')
+ui = (root / 's3_main/main/ui.c').read_text(encoding='utf-8')
+def block(needle):
+    begin = ui.index(needle)
+    opening = ui.index('{', begin)
+    depth = 1
+    end = opening + 1
+    while depth:
+        depth += (ui[end] == '{') - (ui[end] == '}')
+        end += 1
+    return ui[begin:end]
+(out / 'archive_c5_footer.h').write_text(
+    'static esp_err_t archive_root_footer_draw(void) {\n' +
+    block('if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5) {') +
+    '\nreturn ESP_OK;\n}\nstatic void archive_root_footer_tap(uint16_t x,uint16_t y) {\n' +
+    block('if (!ui_capability_blocked && current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5 &&') +
+    '\n}\n', encoding='utf-8')
 exe = out / ('ble-archive-live-check.exe' if os.name == 'nt' else 'ble-archive-live-check')
 env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(out / 'zig-global'), ZIG_LOCAL_CACHE_DIR=str(out / 'zig-local'))
 subprocess.run([sys.executable, '-m', 'ziglang', 'cc', '-std=c11', '-O1', '-Wall', '-Wextra', '-Werror',
     '-I', str(out), '-I', str(root / 'tools/host_checks/stubs'), '-I', str(root / 's3_main/main'),
     '-I', str(root / 'shared'), str(root / 'tools/host_checks/ble_archive_live_check.c'),
-    str(root / 's3_main/main/ble_archive.c'), '-o', str(exe)], check=True, env=env)
+    str(root / 's3_main/main/ble_archive.c'), str(root / 's3_main/main/dual_ble_scan.c'),
+    '-o', str(exe)], check=True, env=env)
 subprocess.run([str(exe)], check=True, env=env)
 
 # Bind the exercised adapter to actual entry points, rather than assuming an
 # isolated renderer makes the feature reachable. Live behavior is tested above.
-ui = (root / 's3_main/main/ui.c').read_text(encoding='utf-8')
 for route in ('#include "ble_archive_live_ui.h"',
               'if (current_page == UI_PAGE_BLE_ARCHIVE) return ble_archive_draw();',
               'ble_archive_open_file(file_path, file_entries[index].name);',

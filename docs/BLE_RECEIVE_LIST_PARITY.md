@@ -1,5 +1,37 @@
 # BLE receive-list parity audit
 
+## Rev99 source milestone: one SD report from both receivers
+
+The candidate adds **SAVE BOTH RECEIVERS** to the existing BLE SD snapshots
+workflow and **SAVE SD** to a selected C5 observation. One v2 report can retain
+64 source observations, at most 32 per receiver. The same typed address heard
+by S3 and C5 remains two source-labelled observations. The existing browser
+also reads v1 files as `LEGACY` source, without inventing a receiver label.
+
+S3 evidence retains sweep-peak RSSI and exact historical age at save. C5
+evidence retains latest-original-ADV RSSI, committed full-width boot/epoch
+provenance and an optional conservative age upper bound. C5 exact S3 source
+times remain absent. Published-bank metadata and painted/selected metadata
+are copied together, so a later sweep or peer restart cannot rebind saved
+rows to newer provenance. Neither source supplies raw scan-response bytes.
+
+Save freezes the existing evidence, lets normal radio-owner cleanup finish,
+then submits the existing immutable PSRAM file worker. A pending save can be
+canceled before submission; an in-flight filesystem save reports its actual
+outcome. Completed-document copies now hold a bounded reader pin and perform
+the large memcpy outside the interrupt-disabled lock. Host measurements are
+10,768 bytes per document and 20,784 bytes per worker context; these are not
+native peak-memory or hardware-performance claims.
+
+See [BLE SD snapshots](BLE_SD_SNAPSHOTS.md), [format details](BLE_ARCHIVE_FORMAT.md)
+and [the rev99 checkpoint](DUAL_RADIO_REV99.md) for source/host evidence and
+current build/installation status. Physical save/reopen, old-file compatibility
+on-device and repeated owner transitions remain acceptance work. Source
+filtering, longer history/session recording, full raw/scan-response evidence,
+family behavior and extended/coded reception still prevent a full-parity claim.
+The following revision sections retain their historical limitations; in
+particular, rev97's exclusion of C5 archive rows predates this candidate.
+
 ## Rev97 source milestone: C5 list controls
 
 Ordinary BLE discovery now uses S3 and C5 concurrently, with separate source

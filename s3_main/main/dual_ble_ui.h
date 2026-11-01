@@ -1,5 +1,6 @@
 /* Included by ui.c after its draw helpers. This companion view deliberately
- * does not insert C5 packets into S3's evidence, archive or action namespace. */
+ * does not insert C5 packets into S3's evidence or action namespace. Archives
+ * retain their receiver identity and the provenance frozen with each row. */
 #pragma once
 #include "dual_ble_scan.h"
 #include "dual_ble_list.h"
@@ -9,6 +10,7 @@ enum { DUAL_BLE_UI_NONE, DUAL_BLE_UI_REDRAW, DUAL_BLE_UI_BACK_S3,
     DUAL_BLE_UI_TOGGLE, DUAL_BLE_UI_FOX };
 static cerberus_dual_ble_scan_t *dual_ble_ui_store;
 static cerberus_dual_ble_row_t dual_ble_ui_painted[4], dual_ble_ui_selected;
+static cerberus_dual_ble_provenance_t dual_ble_ui_painted_provenance[4], dual_ble_ui_selected_provenance;
 static uint8_t dual_ble_ui_painted_count, dual_ble_ui_offset;
 static uint8_t dual_ble_ui_visible_count;
 static cerberus_dual_ble_sort_t dual_ble_ui_sort = CERBERUS_DUAL_BLE_SORT_SIGNAL;
@@ -152,7 +154,8 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
         for (uint8_t i = 0U; i < 4U; ++i) {
             cerberus_dual_ble_row_t *row = &dual_ble_ui_painted[i];
             if (dual_ble_ui_offset + i >= dual_ble_ui_visible_count ||
-                !cerberus_dual_ble_row(dual_ble_ui_store, order[dual_ble_ui_offset + i], row)) break;
+                !cerberus_dual_ble_copy_row(dual_ble_ui_store, order[dual_ble_ui_offset + i], row,
+                    &dual_ble_ui_painted_provenance[i])) break;
             uint16_t y = (uint16_t)(150U + i * 42U);
             ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(8, y, 304, 40, UI_PANEL), TAG, "C5 BLE row");
             cerberus_dual_ble_list_label(row, name);
@@ -206,7 +209,9 @@ static int dual_ble_ui_tap(uint16_t x, uint16_t y)
         if (x >= 8U && x < 312U && y >= 150U && y < 318U) {
             uint8_t row = (uint8_t)((y - 150U) / 42U);
             if (row < dual_ble_ui_painted_count && (y - 150U) % 42U < 40U) {
-                dual_ble_ui_selected = dual_ble_ui_painted[row]; dual_ble_ui_detail = true;
+                dual_ble_ui_selected = dual_ble_ui_painted[row];
+                dual_ble_ui_selected_provenance = dual_ble_ui_painted_provenance[row];
+                dual_ble_ui_detail = true;
                 return DUAL_BLE_UI_REDRAW;
             }
         }

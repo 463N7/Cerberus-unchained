@@ -21,6 +21,8 @@ static inline bool cerberus_ble_archive_capture_row(cerberus_ble_archive_row_t *
     const char *end = memchr(peer->name, 0, sizeof(peer->name));
     if (!end) return false;
     cerberus_ble_archive_row_t row = {0};
+    row.receiver = CERBERUS_BLE_ARCHIVE_RECEIVER_S3;
+    row.rssi_kind = CERBERUS_BLE_ARCHIVE_RSSI_SWEEP_PEAK;
     memcpy(row.address, peer->address, sizeof(row.address));
     row.address_type = peer->address_type;
     memcpy(row.name, peer->name, (size_t)(end - peer->name));

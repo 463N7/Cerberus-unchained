@@ -3,6 +3,10 @@
 #include "ble_archive_ui.h"
 #include "ble_archive_io.h"
 #include "ble_archive_capture.h"
+#include "dual_ble_archive_capture.h"
+
+enum { BLE_ARCHIVE_BOTH, BLE_ARCHIVE_S3_SELECTED, BLE_ARCHIVE_C5_SELECTED };
+#define BLE_ARCHIVE_RELEASE_TIMEOUT_MS UINT64_C(12000)
 
 static ble_archive_ui_store_t *ble_archive_view;
 static esp_err_t ble_archive_open_error;
@@ -68,7 +72,7 @@ static void ble_archive_open_menu(void)
     ESP_ERROR_CHECK(draw_detail_page());
 }
 
-static esp_err_t ble_archive_capture(bool selected)
+static esp_err_t ble_archive_capture(unsigned scope)
 {
     if (!ble_archive_view) return ESP_ERR_NO_MEM;
     int64_t stamp = esp_timer_get_time();
@@ -76,7 +80,13 @@ static esp_err_t ble_archive_capture(bool selected)
     cerberus_ble_archive_t *out = &ble_archive_view->incoming;
     memset(out, 0, sizeof(*out));
     out->saved_uptime_ms = (uint64_t)stamp / 1000U;
-    if (selected) {
+    if (scope == BLE_ARCHIVE_C5_SELECTED) {
+        if (!dual_ble_ui_detail) return ESP_ERR_NOT_FOUND;
+        if (!cerberus_dual_ble_archive_capture_row(&out->rows[0], &dual_ble_ui_selected,
+                &dual_ble_ui_selected_provenance, out->saved_uptime_ms))
+            return ESP_ERR_INVALID_RESPONSE;
+        out->count = 1U;
+    } else if (scope == BLE_ARCHIVE_S3_SELECTED) {
         if (!ble_selection_valid || !ble_selected_raw_frozen ||
             ble_findmy_selected.peer.address_type != ble_selected_result.address_type ||
             memcmp(ble_findmy_selected.peer.address, ble_selected_result.address, 6U))
@@ -87,12 +97,14 @@ static esp_err_t ble_archive_capture(bool selected)
                 ble_selected_source_ceiling_ms64, ble_selected_original_time64_valid))
             return ESP_ERR_INVALID_RESPONSE;
         out->count = 1U;
-    } else {
-        if (!ble_discovery_live || !ble_discovery_live->inventory.initialized ||
-            !ble_discovery_live->inventory.count) return ESP_ERR_NOT_FOUND;
-        const cerberus_s3_ble_discovery_inventory_t *inventory = &ble_discovery_live->inventory;
-        if (inventory->count > CERBERUS_BLE_ARCHIVE_MAX_ROWS) return ESP_ERR_INVALID_SIZE;
-        for (uint8_t i = 0; i < inventory->count; ++i) {
+    } else if (scope == BLE_ARCHIVE_BOTH) {
+        const cerberus_s3_ble_discovery_inventory_t *inventory = ble_discovery_live &&
+            ble_discovery_live->inventory.initialized ? &ble_discovery_live->inventory : NULL;
+        const uint8_t s3_count = inventory ? inventory->count : 0U;
+        const uint8_t c5_count = dual_ble_ui_store ? dual_ble_ui_store->count : 0U;
+        if (s3_count > CERBERUS_BLE_ARCHIVE_MAX_ROWS_PER_RECEIVER ||
+            c5_count > CERBERUS_BLE_ARCHIVE_MAX_ROWS_PER_RECEIVER) return ESP_ERR_INVALID_SIZE;
+        for (uint8_t i = 0; i < s3_count; ++i) {
             const cerberus_s3_ble_discovery_entry_t *entry = &inventory->entries[i];
             const cerberus_s3_ble_discovery_record_t *record = &entry->record;
             if (!cerberus_ble_archive_capture_row(&out->rows[i], &record->peer,
@@ -100,17 +112,28 @@ static esp_err_t ble_archive_capture(bool selected)
                     entry->epoch, true, entry->original_source_ms, entry->source_now_ms, true))
                 return ESP_ERR_INVALID_RESPONSE;
         }
-        out->count = inventory->count;
-    }
+        out->count = s3_count;
+        /* UI task owns both publications. No step/clock/SPI calls can replace
+         * either bank during this bounded copy; uncommitted staging is ignored. */
+        for (uint8_t i = 0U; i < c5_count; ++i) {
+            cerberus_dual_ble_row_t row;
+            cerberus_dual_ble_provenance_t provenance;
+            if (!cerberus_dual_ble_copy_row(dual_ble_ui_store, i, &row, &provenance) ||
+                !cerberus_dual_ble_archive_capture_row(&out->rows[out->count], &row,
+                    &provenance, out->saved_uptime_ms)) return ESP_ERR_INVALID_RESPONSE;
+            ++out->count;
+        }
+        if (!out->count) return ESP_ERR_NOT_FOUND;
+    } else return ESP_ERR_INVALID_ARG;
     return cerberus_ble_archive_validate(out) ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }
 
-static void ble_archive_save(bool selected)
+static void ble_archive_submit(void)
 {
-    ble_archive_enter();
-    esp_err_t error = ble_archive_capture(selected);
+    if (!ble_archive_view || !ble_archive_view->release_pending) return;
+    ble_archive_view->release_pending = false;
     uint64_t job = 0U;
-    if (error == ESP_OK) error = cerberus_ble_archive_io_save(&ble_archive_view->incoming, &job);
+    esp_err_t error = cerberus_ble_archive_io_save(&ble_archive_view->incoming, &job);
     if (ble_archive_view) {
         if (error == ESP_OK && !ble_archive_ui_begin(ble_archive_view, job, true)) {
             cerberus_ble_archive_io_cancel(job);
@@ -120,10 +143,30 @@ static void ble_archive_save(bool selected)
         if (error != ESP_OK) ble_archive_ui_error(ble_archive_view, error);
     }
     ble_archive_open_error = error;
+}
+
+static void ble_archive_save(unsigned scope)
+{
+    if (ble_archive_view && (ble_archive_view->release_pending || ble_archive_view->job_pending)) return;
+    ble_archive_enter();
+    esp_err_t error = ble_archive_capture(scope);
+    if (error == ESP_OK) {
+        ble_archive_view->release_pending = true;
+        ble_archive_view->release_started_ms = ble_archive_view->incoming.saved_uptime_ms;
+        ble_archive_view->view = BLE_ARCHIVE_UI_JOB;
+        ble_archive_view->saving = true;
+        ble_archive_view->paint_valid = ble_archive_view->selected_valid = false;
+        ble_archive_view->error = ESP_OK;
+        ble_discovery_leave();
+        if (dual_ble_ui_store) cerberus_dual_ble_stop(dual_ble_ui_store);
+    } else if (ble_archive_view) ble_archive_ui_error(ble_archive_view, error);
+    ble_archive_open_error = error;
     ESP_ERROR_CHECK(draw_detail_page());
 }
 
-static void ble_archive_save_selected(void) { ble_archive_save(true); }
+static void ble_archive_save_selected(void) { ble_archive_save(BLE_ARCHIVE_S3_SELECTED); }
+static void ble_archive_save_c5(bool selected)
+{ ble_archive_save(selected ? BLE_ARCHIVE_C5_SELECTED : BLE_ARCHIVE_BOTH); }
 
 static void ble_archive_open_file(const char *path, const char *name)
 {
@@ -150,11 +193,11 @@ static esp_err_t ble_archive_draw(void)
     ESP_RETURN_ON_ERROR(draw_header("BLE SD SNAPSHOTS"), TAG, "archive header");
     ESP_RETURN_ON_ERROR(draw_centered(78, "SAVE RETAINED OBSERVATIONS FOR LATER", UI_TEXT, 1), TAG, "archive scope");
     ESP_RETURN_ON_ERROR(draw_centered(102, "NO GPS REQUIRED / ORIGINAL ADV BYTES", UI_MUTED, 1), TAG, "archive source");
-    ESP_RETURN_ON_ERROR(draw_button(24, 144, 272, 48, "SAVE RETAINED LIST"), TAG, "archive list save");
-    ESP_RETURN_ON_ERROR(draw_button(24, 208, 272, 48, "SAVE SELECTED DEVICE"), TAG, "archive selected save");
+    ESP_RETURN_ON_ERROR(draw_button(24, 144, 272, 48, "SAVE BOTH RECEIVERS"), TAG, "archive list save");
+    ESP_RETURN_ON_ERROR(draw_button(24, 208, 272, 48, "SAVE SELECTED S3 ROW"), TAG, "archive selected save");
     ESP_RETURN_ON_ERROR(draw_button(24, 272, 272, 48, "BROWSE SD FILES"), TAG, "archive browse");
     ESP_RETURN_ON_ERROR(draw_centered(346, "FILES: /CERBERUS/BLE/B00001.BLE", UI_MUTED, 1), TAG, "archive path");
-    ESP_RETURN_ON_ERROR(draw_centered(370, "LIST MAY INCLUDE EARLIER OBSERVATIONS", UI_MUTED, 1), TAG, "archive history");
+    ESP_RETURN_ON_ERROR(draw_centered(370, "RETAINED S3 + C5 / UP TO 32 ROWS EACH", UI_MUTED, 1), TAG, "archive history");
     return draw_button(64, 426, 192, 44, "BACK TO BLUETOOTH");
 }
 
@@ -162,8 +205,8 @@ static void ble_archive_tap(uint16_t x, uint16_t y)
 {
     if (ble_archive_menu && ble_archive_view) {
         if (x >= 24U && x < 296U) {
-            if (y >= 144U && y < 192U) { ble_archive_save(false); return; }
-            if (y >= 208U && y < 256U) { ble_archive_save(true); return; }
+            if (y >= 144U && y < 192U) { ble_archive_save(BLE_ARCHIVE_BOTH); return; }
+            if (y >= 208U && y < 256U) { ble_archive_save(BLE_ARCHIVE_S3_SELECTED); return; }
             if (y >= 272U && y < 320U) {
                 ble_archive_dispose();
                 file_mode = UI_FILE_MODE_LIST;
@@ -183,6 +226,22 @@ static void ble_archive_tap(uint16_t x, uint16_t y)
 static void ble_archive_tick(bool asleep)
 {
     if (current_page != UI_PAGE_BLE_ARCHIVE) { ble_archive_dispose(); return; }
+    if (ble_archive_view && ble_archive_view->release_pending) {
+        int64_t clock = esp_timer_get_time();
+        uint64_t now = clock >= 0 ? (uint64_t)clock / 1000U : 0U;
+        esp_err_t error = asleep || clock < 0 || now < ble_archive_view->release_started_ms ?
+            ESP_ERR_INVALID_STATE : now - ble_archive_view->release_started_ms >= BLE_ARCHIVE_RELEASE_TIMEOUT_MS ?
+            ESP_ERR_TIMEOUT : ESP_OK;
+        if (error != ESP_OK) {
+            ble_archive_view->release_pending = false;
+            ble_archive_ui_error(ble_archive_view, error);
+            ble_archive_open_error = error;
+        } else if (dual_ble_live_discovery_released() && dual_ble_ui_released()) {
+            ble_archive_submit();
+        } else return; /* Global owner ticks continue release; this getter never drives RF. */
+        if (!asleep) ESP_ERROR_CHECK(draw_detail_page());
+        return;
+    }
     if (!ble_archive_view || !ble_archive_view->job_pending) return;
     cerberus_ble_archive_io_status_t status;
     cerberus_ble_archive_io_get_status(&status);

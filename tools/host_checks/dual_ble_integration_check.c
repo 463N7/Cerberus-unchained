@@ -101,6 +101,9 @@ int main(void)
     assert(s.snapshots==1&&s.count==1&&s.sweeps==0&&dual_radio_active&&starts==1&&!stops);
     assert(s.has_first_result&&s.first_result_ms<8000U&&s.live_updates&&i.begin_calls>=2&&i.mutated);
     cerberus_dual_ble_row_t row;assert(cerberus_dual_ble_row(&s,0,&row));
+    cerberus_dual_ble_provenance_t source;
+    assert(cerberus_dual_ble_copy_row(&s,0,&row,&source));
+    assert(source.boot_id==dual_boot_id&&source.epoch==dual_epoch&&source.generation==scan_status.generation&&source.index==0);
     assert(row.rssi==-30&&row.reports==1&&row.raw_length==3&&row.raw[2]==6);
     assert(!strcmp(row.name,"REAL")&&row.uuid_length==2&&row.manufacturer_id==0x004c);
     assert(row.request_started_ms==i.first_begin_ms);
@@ -113,6 +116,8 @@ int main(void)
     s.enabled=false;
     for(unsigned tick=0;tick<20U&&!cerberus_dual_ble_released(&s);++tick)integration_tick(&i,&s);
     assert(cerberus_dual_ble_released(&s)&&!dual_attached&&!dual_snapshot.valid&&i.releases&&starts==1&&!stops);
+    assert(cerberus_dual_ble_copy_row(&s,0,&row,&source));
+    assert(source.boot_id==s.published_boot_id&&source.epoch==s.published_epoch&&!s.remote.epoch&&!s.start.job_id);
 
     integration_reset(&i,&s,false);
     for(unsigned tick=0;tick<100U&&!i.reads;++tick)integration_tick(&i,&s);
@@ -127,6 +132,8 @@ int main(void)
     for(unsigned tick=0;tick<250U&&!s.sweeps;++tick)integration_tick(&i,&s);
     assert(s.sweeps==1&&s.count==1&&!s.live_updates&&!i.begin_calls&&!i.reads);
     assert(cerberus_dual_ble_row(&s,0,&row)&&row.rssi==-30&&!strcmp(row.name,"REAL")&&row.raw[2]==6);
+    assert(cerberus_dual_ble_copy_row(&s,0,&row,&source));
+    assert(source.boot_id==dual_boot_id&&source.epoch==dual_epoch&&source.generation==scan_status.generation&&source.index==0);
     s.enabled=false;
     for(unsigned tick=0;tick<20U&&!cerberus_dual_ble_released(&s);++tick)integration_tick(&i,&s);
     assert(cerberus_dual_ble_released(&s)&&!dual_attached&&starts==1&&!stops);

@@ -358,6 +358,7 @@ static void ble_archive_tap(uint16_t x, uint16_t y);
 static void ble_archive_tick(bool asleep);
 static void ble_archive_open_menu(void);
 static void ble_archive_save_selected(void);
+static void ble_archive_save_c5(bool selected);
 static void ble_archive_open_file(const char *path, const char *name);
 static bool ble_archive_is_file(const char *name);
 static bool wardrive_recent_is_open(void);
@@ -8106,8 +8107,11 @@ static esp_err_t draw_detail_page(void)
     }
     if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_DUAL && !ui_capability_blocked)
         return ESP_OK; /* This view owns both its Back and Stop controls. */
-    if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5)
-        back_label = "BACK TO S3";
+    if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5) {
+        ESP_RETURN_ON_ERROR(draw_button(8, UI_BACK_Y, 148, UI_BACK_HEIGHT, "BACK TO S3"), TAG, "C5 BLE back");
+        return draw_button(164, UI_BACK_Y, 148, UI_BACK_HEIGHT,
+            dual_ble_ui_detail ? "SAVE SD" : "SAVE BOTH");
+    }
     if (live_is_view()) back_label = tool_parent_page == UI_PAGE_TOOLS ? "DEVICE TOOLS" : "HOME";
     if (learning_tool_active) {
         return draw_button(12, UI_BACK_Y, 296, UI_BACK_HEIGHT, "RETURN TO LESSON");
@@ -11705,8 +11709,11 @@ static void handle_tap(uint16_t x, uint16_t y)
     }
     if (!ui_capability_blocked && current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5 &&
         y >= UI_BACK_Y && y < UI_BACK_Y + UI_BACK_HEIGHT) {
-        ble_mode = UI_BLE_MODE_LIST;
-        ESP_ERROR_CHECK(draw_detail_page());
+        if (x >= 164U && x < 312U) ble_archive_save_c5(dual_ble_ui_detail);
+        else if (x >= 8U && x < 156U) {
+            ble_mode = UI_BLE_MODE_LIST;
+            ESP_ERROR_CHECK(draw_detail_page());
+        }
         return;
     }
     if (learning_tool_active &&

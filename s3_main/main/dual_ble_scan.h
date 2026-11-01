@@ -16,6 +16,13 @@ typedef struct {
     uint32_t callback_age_ms;
     uint64_t request_started_ms;
 } cerberus_dual_ble_row_t;
+/* Historical identity of the published bank, not the currently running job.
+ * Freeze beside a copied row. Generation zero is valid after wrap; the full
+ * boot/epoch pair carries source identity. These fields grant no live owner. */
+typedef struct {
+    uint64_t boot_id, epoch;
+    uint8_t generation, index;
+} cerberus_dual_ble_provenance_t;
 typedef struct {
     void *context;
     esp_err_t (*exchange)(void *, uint8_t, const void *, size_t, void *, size_t);
@@ -34,7 +41,7 @@ typedef struct {
     cerberus_dual_ble_snapshot_status_t snapshot;
     cerberus_dual_ble_snapshot_row_t snapshot_row;
     uint64_t snapshot_request_id, snapshot_request_started_ms, next_snapshot_ms;
-    uint64_t published_epoch, track_request_ms, next_poll_ms, last_tick_ms;
+    uint64_t published_epoch, published_boot_id, track_request_ms, next_poll_ms, last_tick_ms;
     uint32_t job_counter;
     /* Current public begin: completed RF sweeps, coherent published banks (empty included),
      * and latency to its first new nonempty C5 publication. Retained rows do
@@ -42,7 +49,7 @@ typedef struct {
     uint32_t sweeps, snapshots, first_result_ms;
     uint64_t discovery_started_ms;
     esp_err_t error;
-    uint8_t phase, count, read_index, copied, retries;
+    uint8_t phase, count, read_index, copied, retries, published_generation;
     bool enabled, extended, has_track, stop_requested;
     bool has_first_result, live_updates, discovery_clock_valid, snapshot_anchor_valid, snapshots_capable;
 } cerberus_dual_ble_scan_t;
@@ -71,6 +78,11 @@ void cerberus_dual_ble_tick(cerberus_dual_ble_scan_t *, uint64_t now_ms);
 void cerberus_dual_ble_view(const cerberus_dual_ble_scan_t *, cerberus_dual_ble_view_t *);
 bool cerberus_dual_ble_row(const cerberus_dual_ble_scan_t *, uint8_t index,
     cerberus_dual_ble_row_t *out);
+/* Call on the same UI owner as tick. Row and provenance are copied together
+ * from the last fully published bank; neither a new START nor Stop replaces
+ * them. No transport, clock or allocation. Failed copies clear both outputs. */
+bool cerberus_dual_ble_copy_row(const cerberus_dual_ble_scan_t *, uint8_t index,
+    cerberus_dual_ble_row_t *out, cerberus_dual_ble_provenance_t *provenance);
 void cerberus_dual_ble_track_view(const cerberus_dual_ble_scan_t *, uint64_t now_ms,
     cerberus_dual_ble_track_view_t *out);
 bool cerberus_dual_ble_released(const cerberus_dual_ble_scan_t *);

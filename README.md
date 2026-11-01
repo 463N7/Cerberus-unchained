@@ -1,6 +1,6 @@
 # Cerberus Unchained
 
-Experimental Cerberus firmware for the expanded rev98 feature set: integrated
+Experimental Cerberus firmware for the expanded rev99 feature set: integrated
 wardriving, C5 Wi-Fi capture and analysis, S3 BLE discovery and tools, Remote ID
 receive workflows, AP/client navigation, and optional expansion radios.
 
@@ -9,7 +9,7 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev98`, paired with onboard
+**Current source version: `0.1.0-dev.rev99` (candidate), paired with onboard
 C5 protocol firmware revision 62. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -40,6 +40,16 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev99 extends the existing BLE SD archive to one report containing up to 32
+observations per receiver. New v2 files preserve receiver identity, S3 peak
+versus C5 latest-ADV RSSI, and exact historical time versus conservative age
+bounds. Old v1 files remain readable as LEGACY. Save freezes selected evidence
+and waits for normal receiver cleanup before starting the SD worker; larger
+result copies run outside the interrupt-disabled critical section. All 120 host
+suites and five native targets pass on matching unchanged inputs. See
+[the rev99 checkpoint](docs/DUAL_RADIO_REV99.md)
+for current build, installation and acceptance evidence.
 
 Rev98 adds coherent C5 Bluetooth snapshots during the existing
 eight-second listening sweep. S3 transfers and publishes a frozen bank while

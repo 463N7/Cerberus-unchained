@@ -6,7 +6,9 @@ enum {
     ROW_RSSI_VALID = 1U << 0,
     ROW_SOURCE_TIME_VALID = 1U << 1,
     ROW_SCAN_EPOCH_VALID = 1U << 2,
+    ROW_AGE_UPPER_VALID = 1U << 3,
     ROW_VALIDITY_MASK = ROW_RSSI_VALID | ROW_SOURCE_TIME_VALID | ROW_SCAN_EPOCH_VALID,
+    ROW_V2_VALIDITY_MASK = ROW_VALIDITY_MASK | ROW_AGE_UPPER_VALID,
 };
 
 static const uint8_t archive_magic[8] = {'C', 'B', 'L', 'E', 'A', 'R', 'C', 0};
@@ -27,7 +29,8 @@ static size_t name_length(const char *name)
 
 static bool row_valid(const cerberus_ble_archive_row_t *r, uint64_t saved_ms)
 {
-    if (r->address_type > 3U || r->index >= CERBERUS_BLE_ARCHIVE_MAX_ROWS ||
+    if (r->address_type > 3U || r->index >= CERBERUS_BLE_ARCHIVE_MAX_ROWS_PER_RECEIVER ||
+        r->receiver > CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ||
         name_length(r->name) > CERBERUS_BLE_ARCHIVE_NAME_MAX ||
         (r->uuid_length != 0U && r->uuid_length != 2U &&
          r->uuid_length != 4U && r->uuid_length != CERBERUS_BLE_ARCHIVE_UUID_MAX) ||
@@ -39,6 +42,12 @@ static bool row_valid(const cerberus_ble_archive_row_t *r, uint64_t saved_ms)
         if (r->original_source_uptime_ms > r->copy_ceiling_ms ||
             r->copy_ceiling_ms > saved_ms) return false;
     } else if (r->original_source_uptime_ms || r->copy_ceiling_ms) return false;
+    if (r->receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5) {
+        if (r->rssi_kind != CERBERUS_BLE_ARCHIVE_RSSI_LATEST_ADV ||
+            !r->receiver_boot_id || !r->scan_epoch_valid || r->source_time_valid ||
+            (!r->age_upper_valid && r->age_upper_at_save_ms)) return false;
+    } else if (r->rssi_kind != CERBERUS_BLE_ARCHIVE_RSSI_SWEEP_PEAK ||
+        r->receiver_boot_id || r->age_upper_valid || r->age_upper_at_save_ms) return false;
     return true;
 }
 
@@ -46,11 +55,14 @@ bool cerberus_ble_archive_validate(const cerberus_ble_archive_t *document)
 {
     if (!document || !document->count || document->count > CERBERUS_BLE_ARCHIVE_MAX_ROWS)
         return false;
+    uint8_t counts[3] = {0};
     for (size_t i = 0; i < document->count; ++i) {
         const cerberus_ble_archive_row_t *row = &document->rows[i];
         if (!row_valid(row, document->saved_uptime_ms)) return false;
+        if (++counts[row->receiver] > CERBERUS_BLE_ARCHIVE_MAX_ROWS_PER_RECEIVER) return false;
         for (size_t j = 0; j < i; ++j)
-            if (row->address_type == document->rows[j].address_type &&
+            if (row->receiver == document->rows[j].receiver &&
+                row->address_type == document->rows[j].address_type &&
                 !memcmp(row->address, document->rows[j].address, sizeof(row->address))) return false;
     }
     return true;
@@ -108,7 +120,8 @@ static void encode_row(const cerberus_ble_archive_row_t *r, uint8_t *out)
     out[6] = r->address_type;
     out[7] = (r->rssi_valid ? ROW_RSSI_VALID : 0U) |
         (r->source_time_valid ? ROW_SOURCE_TIME_VALID : 0U) |
-        (r->scan_epoch_valid ? ROW_SCAN_EPOCH_VALID : 0U);
+        (r->scan_epoch_valid ? ROW_SCAN_EPOCH_VALID : 0U) |
+        (r->age_upper_valid ? ROW_AGE_UPPER_VALID : 0U);
     out[8] = (uint8_t)name_size;
     out[9] = (uint8_t)r->rssi;
     out[10] = r->peer_flags;
@@ -119,13 +132,17 @@ static void encode_row(const cerberus_ble_archive_row_t *r, uint8_t *out)
     out[16] = r->advertisement_flags;
     out[17] = r->generation;
     out[18] = r->index;
+    out[19] = r->receiver;
     put16(out + 20, r->reports_seen);
+    out[22] = r->rssi_kind;
     put64(out + 24, r->scan_epoch);
     put64(out + 32, r->original_source_uptime_ms);
     put64(out + 40, r->copy_ceiling_ms);
     memcpy(out + 48, r->name, name_size);
     memcpy(out + 80, r->uuid, r->uuid_length);
     memcpy(out + 96, r->advertisement, r->advertisement_length);
+    put64(out + 128, r->age_upper_at_save_ms);
+    put64(out + 136, r->receiver_boot_id);
 }
 
 static bool all_zero(const uint8_t *bytes, size_t length)
@@ -134,11 +151,12 @@ static bool all_zero(const uint8_t *bytes, size_t length)
     return true;
 }
 
-static bool decode_row(const uint8_t *p, uint64_t saved_ms, cerberus_ble_archive_row_t *r)
+static bool decode_row(const uint8_t *p, uint64_t saved_ms, bool legacy,
+    cerberus_ble_archive_row_t *r)
 {
-    if ((p[7] & ~ROW_VALIDITY_MASK) || p[8] > CERBERUS_BLE_ARCHIVE_NAME_MAX ||
+    if ((p[7] & ~(legacy ? ROW_VALIDITY_MASK : ROW_V2_VALIDITY_MASK)) || p[8] > CERBERUS_BLE_ARCHIVE_NAME_MAX ||
         p[11] > CERBERUS_BLE_ARCHIVE_UUID_MAX || p[14] > CERBERUS_BLE_ARCHIVE_ADV_MAX ||
-        p[19] || p[22] || p[23] || p[127] ||
+        (legacy && (p[19] || p[22])) || p[23] || p[127] ||
         !all_zero(p + 48 + p[8], CERBERUS_BLE_ARCHIVE_NAME_MAX - p[8]) ||
         !all_zero(p + 80 + p[11], CERBERUS_BLE_ARCHIVE_UUID_MAX - p[11]) ||
         !all_zero(p + 96 + p[14], CERBERUS_BLE_ARCHIVE_ADV_MAX - p[14])) return false;
@@ -149,6 +167,7 @@ static bool decode_row(const uint8_t *p, uint64_t saved_ms, cerberus_ble_archive
     r->rssi_valid = (p[7] & ROW_RSSI_VALID) != 0;
     r->source_time_valid = (p[7] & ROW_SOURCE_TIME_VALID) != 0;
     r->scan_epoch_valid = (p[7] & ROW_SCAN_EPOCH_VALID) != 0;
+    r->age_upper_valid = (p[7] & ROW_AGE_UPPER_VALID) != 0;
     /* Avoid implementation-defined unsigned-to-signed narrowing for RSSI. */
     r->rssi = p[9] <= INT8_MAX ? (int8_t)p[9] : (int8_t)((int)p[9] - 256);
     r->peer_flags = p[10];
@@ -159,6 +178,8 @@ static bool decode_row(const uint8_t *p, uint64_t saved_ms, cerberus_ble_archive
     r->advertisement_flags = p[16];
     r->generation = p[17];
     r->index = p[18];
+    r->receiver = legacy ? CERBERUS_BLE_ARCHIVE_RECEIVER_LEGACY : p[19];
+    r->rssi_kind = legacy ? CERBERUS_BLE_ARCHIVE_RSSI_SWEEP_PEAK : p[22];
     r->reports_seen = get16(p + 20);
     r->scan_epoch = get64(p + 24);
     r->original_source_uptime_ms = get64(p + 32);
@@ -166,6 +187,10 @@ static bool decode_row(const uint8_t *p, uint64_t saved_ms, cerberus_ble_archive
     memcpy(r->name, p + 48, p[8]);
     memcpy(r->uuid, p + 80, p[11]);
     memcpy(r->advertisement, p + 96, p[14]);
+    if (!legacy) {
+        r->age_upper_at_save_ms = get64(p + 128);
+        r->receiver_boot_id = get64(p + 136);
+    }
     return row_valid(r, saved_ms);
 }
 
@@ -204,21 +229,27 @@ bool cerberus_ble_archive_decode(const uint8_t *input, size_t length,
         length > CERBERUS_BLE_ARCHIVE_MAX_SIZE ||
         overlaps(input, length, document, sizeof(*document)) ||
         memcmp(input, archive_magic, sizeof(archive_magic)) ||
-        get16(input + 8) != CERBERUS_BLE_ARCHIVE_VERSION ||
-        get16(input + 10) != CERBERUS_BLE_ARCHIVE_HEADER_SIZE ||
-        get16(input + 12) != CERBERUS_BLE_ARCHIVE_ROW_SIZE) return false;
+        get16(input + 10) != CERBERUS_BLE_ARCHIVE_HEADER_SIZE) return false;
+    const uint16_t version = get16(input + 8);
+    const bool legacy = version == CERBERUS_BLE_ARCHIVE_LEGACY_VERSION;
+    if (!legacy && version != CERBERUS_BLE_ARCHIVE_VERSION) return false;
+    const uint16_t row_size = legacy ? CERBERUS_BLE_ARCHIVE_LEGACY_ROW_SIZE : CERBERUS_BLE_ARCHIVE_ROW_SIZE;
+    if (get16(input + 12) != row_size) return false;
     const uint16_t count = get16(input + 14);
     const uint64_t saved_ms = get64(input + 20);
-    if (!count || count > CERBERUS_BLE_ARCHIVE_MAX_ROWS ||
-        length != CERBERUS_BLE_ARCHIVE_HEADER_SIZE + (size_t)count * CERBERUS_BLE_ARCHIVE_ROW_SIZE ||
+    if (!count || count > (legacy ? CERBERUS_BLE_ARCHIVE_MAX_ROWS_PER_RECEIVER : CERBERUS_BLE_ARCHIVE_MAX_ROWS) ||
+        length != CERBERUS_BLE_ARCHIVE_HEADER_SIZE + (size_t)count * row_size ||
         get32(input + 16) != length || get32(input + 28) != archive_crc(input, length)) return false;
     cerberus_ble_archive_row_t row;
+    uint8_t counts[3] = {0};
     for (size_t i = 0; i < count; ++i) {
-        const uint8_t *encoded = input + CERBERUS_BLE_ARCHIVE_HEADER_SIZE + i * CERBERUS_BLE_ARCHIVE_ROW_SIZE;
-        if (!decode_row(encoded, saved_ms, &row)) return false;
+        const uint8_t *encoded = input + CERBERUS_BLE_ARCHIVE_HEADER_SIZE + i * row_size;
+        if (!decode_row(encoded, saved_ms, legacy, &row) ||
+            ++counts[row.receiver] > CERBERUS_BLE_ARCHIVE_MAX_ROWS_PER_RECEIVER) return false;
         for (size_t j = 0; j < i; ++j)
             if (!memcmp(encoded, input + CERBERUS_BLE_ARCHIVE_HEADER_SIZE +
-                j * CERBERUS_BLE_ARCHIVE_ROW_SIZE, 7)) return false;
+                j * row_size, 7) && (legacy || encoded[19] ==
+                input[CERBERUS_BLE_ARCHIVE_HEADER_SIZE + j * row_size + 19])) return false;
     }
     /* Publication occurs only after every row and the complete file passed. */
     memset(document, 0, sizeof(*document));
@@ -226,7 +257,7 @@ bool cerberus_ble_archive_decode(const uint8_t *input, size_t length,
     document->count = (uint8_t)count;
     for (size_t i = 0; i < count; ++i)
         (void)decode_row(input + CERBERUS_BLE_ARCHIVE_HEADER_SIZE +
-            i * CERBERUS_BLE_ARCHIVE_ROW_SIZE, saved_ms, &document->rows[i]);
+            i * row_size, saved_ms, legacy, &document->rows[i]);
     return true;
 }
 
@@ -237,5 +268,16 @@ bool cerberus_ble_archive_age_at_save(const cerberus_ble_archive_t *document,
         index >= document->count || !row_valid(&document->rows[index], document->saved_uptime_ms) ||
         !document->rows[index].source_time_valid) return false;
     *age_ms = document->saved_uptime_ms - document->rows[index].original_source_uptime_ms;
+    return true;
+}
+
+bool cerberus_ble_archive_age_upper_at_save(const cerberus_ble_archive_t *document,
+    size_t index, uint64_t *age_ms)
+{
+    if (!document || !age_ms || !document->count || document->count > CERBERUS_BLE_ARCHIVE_MAX_ROWS ||
+        index >= document->count || !row_valid(&document->rows[index], document->saved_uptime_ms) ||
+        document->rows[index].receiver != CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ||
+        !document->rows[index].age_upper_valid) return false;
+    *age_ms = document->rows[index].age_upper_at_save_ms;
     return true;
 }

@@ -228,8 +228,8 @@ int main(void)
     for(unsigned kind=0;kind<6;++kind){
         setup();put("sdcard/CERBERUS/BLE/B00001.BLE",payload,128);
         if(kind==0)stat_size_delta=1;if(kind==1)stat_size_delta=-1;if(kind==2)extra_error=true;
-        if(kind==3)no_eof=true;if(kind==4){short_read=true;zero_read_at=3;}if(kind==5)stat_size_delta=6144;
-        CHECK(load(&got)!=ESP_OK);failure_output(got);clean();
+        if(kind==3)no_eof=true;if(kind==4){short_read=true;zero_read_at=3;}if(kind==5)stat_size_delta=CERBERUS_STORAGE_BLE_ARCHIVE_MAX_BYTES;
+        CHECK(load(&got)!=ESP_OK);if(kind==5)CHECK(!calls[FOPEN]);failure_output(got);clean();
     }
     setup();CHECK(load(&got)==ESP_ERR_NOT_FOUND);failure_output(got);
     put("sdcard/CERBERUS/BLE/B00001.BLE",payload,0);CHECK(load(&got)==ESP_ERR_INVALID_SIZE);failure_output(got);

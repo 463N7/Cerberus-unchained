@@ -8,15 +8,28 @@
  * ESP-IDF types, native struct serialization, or active-target eligibility.
  * This is a saved snapshot, not a callback stream or a live scanner bank. */
 enum {
-    CERBERUS_BLE_ARCHIVE_VERSION = 1,
-    CERBERUS_BLE_ARCHIVE_MAX_ROWS = 32,
+    CERBERUS_BLE_ARCHIVE_LEGACY_VERSION = 1,
+    CERBERUS_BLE_ARCHIVE_VERSION = 2,
+    CERBERUS_BLE_ARCHIVE_MAX_ROWS_PER_RECEIVER = 32,
+    CERBERUS_BLE_ARCHIVE_MAX_ROWS = 64,
     CERBERUS_BLE_ARCHIVE_NAME_MAX = 32,
     CERBERUS_BLE_ARCHIVE_UUID_MAX = 16,
     CERBERUS_BLE_ARCHIVE_ADV_MAX = 31,
     CERBERUS_BLE_ARCHIVE_HEADER_SIZE = 32,
-    CERBERUS_BLE_ARCHIVE_ROW_SIZE = 128,
-    CERBERUS_BLE_ARCHIVE_MAX_SIZE = 4128,
+    CERBERUS_BLE_ARCHIVE_LEGACY_ROW_SIZE = 128,
+    CERBERUS_BLE_ARCHIVE_LEGACY_MAX_SIZE = 4128,
+    CERBERUS_BLE_ARCHIVE_ROW_SIZE = 144,
+    CERBERUS_BLE_ARCHIVE_MAX_SIZE = 9248,
     CERBERUS_BLE_ARCHIVE_RSSI_UNAVAILABLE = 127,
+};
+enum {
+    CERBERUS_BLE_ARCHIVE_RECEIVER_LEGACY = 0,
+    CERBERUS_BLE_ARCHIVE_RECEIVER_S3 = 1,
+    CERBERUS_BLE_ARCHIVE_RECEIVER_C5 = 2,
+};
+enum {
+    CERBERUS_BLE_ARCHIVE_RSSI_SWEEP_PEAK = 0,
+    CERBERUS_BLE_ARCHIVE_RSSI_LATEST_ADV = 1,
 };
 
 typedef struct {
@@ -28,7 +41,7 @@ typedef struct {
      * Non-ASCII/control bytes remain intact here; rendering must sanitize. */
     char name[CERBERUS_BLE_ARCHIVE_NAME_MAX + 1];
     int8_t rssi;
-    bool rssi_valid; /* Original-report sweep peak, not necessarily raw ADV RSSI. */
+    bool rssi_valid; /* Semantics are explicit in rssi_kind below. */
     uint16_t manufacturer_id;
     uint8_t peer_flags;
     uint8_t uuid_length, uuid[CERBERUS_BLE_ARCHIVE_UUID_MAX];
@@ -46,17 +59,26 @@ typedef struct {
      * Invalid source/epoch fields must be zero; invalid RSSI must be 127. */
     uint64_t original_source_uptime_ms, copy_ceiling_ms;
     bool source_time_valid;
+    /* LEGACY is v1's unspecified receiver; never infer a new S3 source label.
+     * C5 carries latest original-ADV RSSI, its committed boot/epoch identity,
+     * and an optional conservative age at SAVE. Its exact S3 time fields must
+     * be zero/invalid. That upper bound may exceed saved S3 uptime. S3/LEGACY
+     * use peak RSSI and must leave C5 bound/boot fields zero/invalid. */
+    uint8_t receiver, rssi_kind;
+    uint64_t age_upper_at_save_ms, receiver_boot_id;
+    bool age_upper_valid;
 } cerberus_ble_archive_row_t;
 
 typedef struct {
     uint64_t saved_uptime_ms;
-    uint8_t count; /* 1..32; duplicate (address,address_type) pairs are rejected. */
+    uint8_t count; /* 1..64, at most32/source; duplicate receiver+typed addresses rejected. */
     cerberus_ble_archive_row_t rows[CERBERUS_BLE_ARCHIVE_MAX_ROWS];
 } cerberus_ble_archive_t;
 
 bool cerberus_ble_archive_validate(const cerberus_ble_archive_t *document);
 
-/* Header32 + count*row128, little-endian integers, fixed version, zero padding
+/* Encode v2: header32 + count*row144. Decode also accepts v1 row128/count<=32
+ * and maps its unspecified source to LEGACY. Little-endian integers, zero padding
  * and reserved bytes. CRC-32/ISO-HDLC covers ALL encoded bytes, treating the
  * header CRC field as zero. This detects corruption, not authenticity.
  * Encode failure leaves output bytes unchanged and sets *written=0 when given
@@ -74,4 +96,9 @@ bool cerberus_ble_archive_decode(const uint8_t *input, size_t length,
  * boot's clock or present it as current freshness. Zero age is valid.
  * Failure leaves *age_ms unchanged. */
 bool cerberus_ble_archive_age_at_save(const cerberus_ble_archive_t *document,
+    size_t index, uint64_t *age_ms);
+/* C5 conservative age at SAVE, never an exact packet timestamp. Exact-age
+ * helper above rejects C5; this helper rejects S3/LEGACY and unknown bounds.
+ * Neither helper uses the loading boot's clock. Failure leaves output intact. */
+bool cerberus_ble_archive_age_upper_at_save(const cerberus_ble_archive_t *document,
     size_t index, uint64_t *age_ms);

@@ -43,7 +43,9 @@ esp_err_t cerberus_ble_archive_io_load(const char *relative_path,
     const char *file_name, uint64_t *job_id);
 void cerberus_ble_archive_io_get_status(cerberus_ble_archive_io_status_t *status);
 /* Copies only a fully validated completed SAVE or LOAD, without changing output on
- * failure. Historical data never becomes a live scan or active target. */
+ * failure. The immutable result is pinned and copied outside the critical section;
+ * a concurrent Release prevents new readers and defers disposal until all accepted
+ * copies return. Historical data never becomes a live scan or active target. */
 esp_err_t cerberus_ble_archive_io_copy_result(uint64_t job_id,
     cerberus_ble_archive_t *document);
 /* Cancel before storage skips it. An in-flight filesystem call is not

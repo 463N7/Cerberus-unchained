@@ -68,7 +68,21 @@ static esp_err_t cerberus_storage_ble_archive_load(const char*path,const char*na
     if(storage_error==ESP_OK){memcpy(data,storage_bytes,storage_length);*length=storage_length;}else *length=0;
     storage_active=false;return storage_error;
 }
+/* Interleave Release and nested readers at the actual large copy. No document
+ * bytes may be copied while interrupts are disabled, nor freed while pinned. */
+static void (*copy_hook)(void);
+static unsigned document_copies;
+static void *archive_checked_copy(void *out,const void *in,size_t bytes)
+{
+    if(bytes==sizeof(cerberus_ble_archive_t)){
+        CHECK(!locked);++document_copies;
+        void(*hook)(void)=copy_hook;copy_hook=NULL;if(hook)hook();
+    }
+    return memcpy(out,in,bytes);
+}
+#define memcpy archive_checked_copy
 #include "archive_io_impl.h"
+#undef memcpy
 
 static char console_text[1600];
 static size_t console_length;
@@ -102,24 +116,31 @@ static void console_check(cerberus_ble_archive_io_state_t expected_state)
 #undef FIELD
 }
 
-static cerberus_ble_archive_t input,expected,output,untouched;
+static cerberus_ble_archive_t input,expected,output,untouched,nested_output;
 static void fill(unsigned count)
 {
     memset(&input,0,sizeof(input));input.saved_uptime_ms=100000;input.count=(uint8_t)count;
     for(unsigned i=0;i<count;++i){
-        cerberus_ble_archive_row_t *r=&input.rows[i];r->address[0]=(uint8_t)i;r->address[5]=0xA1;r->address_type=i%4;
+        cerberus_ble_archive_row_t *r=&input.rows[i];r->address[0]=(uint8_t)(i%32);r->address[5]=0xA1;r->address_type=i%4;
         snprintf(r->name,sizeof(r->name),"test-%u",i);r->rssi=-42;r->rssi_valid=true;
         r->advertisement_length=31;for(unsigned j=0;j<31;++j)r->advertisement[j]=(uint8_t)(i+j);
         r->copy_ceiling_ms=99999;r->source_time_valid=true;r->original_source_uptime_ms=90000;
+        r->receiver=CERBERUS_BLE_ARCHIVE_RECEIVER_S3;r->index=(uint8_t)(i%32);
+        if(i>=32){
+            r->receiver=CERBERUS_BLE_ARCHIVE_RECEIVER_C5;r->rssi_kind=CERBERUS_BLE_ARCHIVE_RSSI_LATEST_ADV;
+            r->source_time_valid=false;r->copy_ceiling_ms=r->original_source_uptime_ms=0;
+            r->receiver_boot_id=0xC501;r->scan_epoch_valid=true;r->scan_epoch=55;r->generation=7;
+            r->age_upper_valid=true;r->age_upper_at_save_ms=123+i;
+        }
     }
     CHECK(cerberus_ble_archive_validate(&input));expected=input;
 }
 static void reset(void)
 {
-    CHECK(!locked&&!pending_task&&!storage_active&&!status().worker_active);
+    CHECK(!locked&&!pending_task&&!storage_active&&!status().worker_active&&!archive_io_readers);
     cerberus_ble_archive_io_release(status().job_id);CHECK(!outstanding&&!archive_io_context);
     free_internal=100000;largest_internal=50000;fail_alloc=fail_task=immediate_task=release_in_alloc=false;
-    storage_hook=NULL;storage_error=ESP_OK;partial_save=false;saves=loads=0;last_path[0]=last_name[0]=0;
+    storage_hook=copy_hook=NULL;storage_error=ESP_OK;partial_save=false;saves=loads=0;last_path[0]=last_name[0]=0;
     memset(&output,0xA5,sizeof(output));untouched=output;
 }
 static void run_worker(void)
@@ -139,6 +160,23 @@ static void release_hook(void)
     CHECK(cerberus_ble_archive_io_copy_result(id,&output)==ESP_ERR_INVALID_STATE&&!memcmp(&output,&untouched,sizeof(output)));
 }
 static void cancel_hook(void){cerberus_ble_archive_io_cancel(status().job_id);CHECK(status().cancel_requested&&outstanding==1);}
+static void release_during_copy(void)
+{
+    CHECK(!locked&&archive_io_readers>0&&outstanding==1);
+    unsigned before=frees;uint64_t id=status().job_id;
+    cerberus_ble_archive_io_release(id);
+    CHECK(frees==before&&outstanding==1&&archive_io_context&&!status().result_ready);
+    uint64_t refused=99;
+    CHECK(cerberus_ble_archive_io_save(&input,&refused)==ESP_ERR_INVALID_STATE&&refused==0);
+    CHECK(cerberus_ble_archive_io_copy_result(id,&untouched)==ESP_ERR_INVALID_STATE);
+}
+static void nested_copy_then_release(void)
+{
+    CHECK(archive_io_readers==1&&outstanding==1);
+    copy_hook=release_during_copy;
+    CHECK(cerberus_ble_archive_io_copy_result(status().job_id,&nested_output)==ESP_OK);
+    CHECK(!memcmp(&nested_output,&expected,sizeof(expected))&&archive_io_readers==1&&outstanding==1);
+}
 
 int main(void)
 {
@@ -146,14 +184,14 @@ int main(void)
     CHECK(!strcmp(console_text,"ble_archive_state=IDLE\r\nble_archive_active=0\r\nble_archive_error=0\r\n"
         "ble_archive_job_id=0\r\nble_archive_operation=0\r\nble_archive_cancel_requested=0\r\n"
         "ble_archive_result_ready=0\r\nble_archive_bytes=0\r\nble_archive_rows=0\r\nble_archive_path=\r\nble_archive_file=\r\n"));
-    for(unsigned count=1;count<=32;++count){
+    for(unsigned count=1;count<=64;++count){
         reset();fill(count);uint64_t id=start_save();CHECK(!saves&&!loads&&status().worker_active&&outstanding==1);
         console_check(CERBERUS_BLE_ARCHIVE_IO_STARTING);
         CHECK(cerberus_ble_archive_io_copy_result(id,&output)==ESP_ERR_INVALID_STATE&&!memcmp(&output,&untouched,sizeof(output)));
         input.rows[0].name[0]='!';uint64_t unused;CHECK(cerberus_ble_archive_io_save(&input,&unused)==ESP_ERR_INVALID_STATE);
         run_worker();CHECK(status().state==CERBERUS_BLE_ARCHIVE_IO_COMPLETE&&status().result_ready&&status().count==count);
         console_check(CERBERUS_BLE_ARCHIVE_IO_COMPLETE);
-        CHECK(status().bytes==32+128*count&&!strcmp(status().relative_path,"/CERBERUS/BLE")&&!strcmp(status().file_name,"B00001.BLE"));
+        CHECK(status().bytes==32+144*count&&!strcmp(status().relative_path,"/CERBERUS/BLE")&&!strcmp(status().file_name,"B00001.BLE"));
         CHECK(cerberus_ble_archive_io_copy_result(id,&output)==ESP_OK&&!memcmp(&output,&expected,sizeof(output)));
         cerberus_ble_archive_io_release(id);CHECK(!outstanding&&!status().result_ready);
         console_check(CERBERUS_BLE_ARCHIVE_IO_COMPLETE);
@@ -162,6 +200,18 @@ int main(void)
         CHECK(cerberus_ble_archive_io_copy_result(id,&output)==ESP_OK&&!memcmp(&output,&expected,sizeof(output)));
         CHECK(!strcmp(last_path,"/COPIED")&&!strcmp(last_name,"saved.ble"));
     }
+    for(unsigned nested=0;nested<2;++nested){
+        reset();fill(64);uint64_t copy_id=start_save();run_worker();
+        unsigned before=frees,copies=document_copies;
+        copy_hook=nested?nested_copy_then_release:release_during_copy;
+        CHECK(cerberus_ble_archive_io_copy_result(copy_id,&output)==ESP_OK);
+        CHECK(!memcmp(&output,&expected,sizeof(output))&&!archive_io_readers&&!archive_io_context&&!outstanding);
+        CHECK(frees==before+1&&document_copies==copies+1+nested);
+        cerberus_ble_archive_io_release(copy_id);CHECK(frees==before+1);
+    }
+    reset();fill(64);uint64_t saturated_id=start_save();run_worker();archive_io_readers=UINT16_MAX;
+    CHECK(cerberus_ble_archive_io_copy_result(saturated_id,&output)==ESP_ERR_INVALID_STATE&&!memcmp(&output,&untouched,sizeof(output)));
+    archive_io_readers=0;cerberus_ble_archive_io_release(saturated_id);
     reset();fill(1);input.count=0;uint64_t id=start_save();run_worker();CHECK(status().state==CERBERUS_BLE_ARCHIVE_IO_ERROR&&!saves&&!outstanding);
     for(unsigned kind=0;kind<5;++kind){
         reset();fill(2);if(kind==0)free_internal=24575;if(kind==1)largest_internal=8191;if(kind==2)fail_alloc=true;if(kind==3)fail_task=true;
