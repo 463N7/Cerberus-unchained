@@ -1,8 +1,10 @@
 # Rev109: saved C5 full-original family evidence
 
-This local candidate carries rev108's decoded C5 family evidence through SD
-save, reopen and offline analysis. Rev106 is the last verified installed
-build. Rev109 has not been flashed or accepted on the physical device.
+This development candidate carries rev108's decoded C5 family evidence through
+SD save, reopen and offline analysis. Its paired S3/C5 images were installed
+and boot-verified on 2026-11-01. Rev109 is now the last verified installed
+baseline. Physical acceptance of the new scan and saved-report workflows
+remains pending; boot verification does not establish feature parity.
 
 ## Evidence and file contract
 
@@ -136,15 +138,75 @@ checkout.
 
 `artifacts/device-rev109/local-milestone.json` binds the exact implementation
 commit, package, retained ELFs and unchanged-input validation. Its `installed`
-field is false. Rev106 remains the last verified installed baseline; rev107,
-rev108 and rev109 are local candidates. This checkpoint did not access the
-device, flash firmware, push commits, open a pull request or select a public
-installer release.
+field remains false because it records the initial local packaging checkpoint.
+It is preserved unchanged. The subsequent installation receipt below records
+the paired update; rev107 and rev108 were not separately installed. No commits
+were pushed, pull request opened or public installer release selected.
 
-The next device acceptance should use a matched paired update, then selected
-and both-receiver saves, reopening after leaving discovery or rebooting,
+The next device acceptance should exercise selected and both-receiver saves,
+reopening after leaving discovery or rebooting,
 historical HINTS/RAW/RX INFO navigation, Stop/Back and a following normal Wi-Fi
 scan. Those checks require the physical device and remain pending while the
 user is unavailable. The checkpoint closes the decoded-family SD persistence
 gap; full Marauder feature parity and sustained dual-radio acceptance remain
 unfinished.
+
+## Verified paired installation
+
+The exact package above was installed on the identified Cerberus on
+2026-11-01. Before any write, a read-only capture confirmed rev106/C5 firmware65,
+mounted SD, idle radio/storage owners and no previous-reset fault. Fresh
+2 MiB backups of both chips matched that installed package and passed device
+verification. These backups cover every erase-rounded update region; higher
+flash, including the existing S3 crash record, was not erased.
+
+The temporary bridge, C5 and final S3 stages completed with all nine image
+hashes verified. Guards checked the actual chip and base MAC before the stub
+and again before writes, alongside the exact USB endpoint. No recovery stage
+was needed. The six synthetic identity checks and ten installer checks passed,
+including rejection of wrong endpoints, stale/busy captures, altered backups
+and unreviewed checkout changes. The installer separately binds source commit
+`f2253f2ea7c84766344da0ab7c3a9108764abcf2` and its exact documentation-only child
+`ee862d3306f1baf1827c51cf4ff7a1cf786fbb0d`; it does not rewrite the local milestone.
+
+Boot and settled captures completed at 11:53:55.636 UTC and 11:54:32.837 UTC.
+Both show rev109, C5 firmware66/protocol2 online, buffered display, mounted SD,
+USB storage off, released owners, idle recorders and `previous_reset_fault=no`.
+S3 and C5 uptime advance normally, with C5 boot count one. SPI exchanges grow
+from 82 to 256. The four initial READY timeouts/four legacy fallbacks remain
+unchanged, matching the pre-update startup counts; mutex, fall/high READY and
+driver error counters remain zero. This does not prove transport behavior
+under RF load.
+
+| Idle observation | Installed rev106 before update | Settled rev109 |
+| --- | ---: | ---: |
+| S3 internal free | 134,380 B | 134,140 B |
+| S3 internal minimum free | 133,700 B | 133,460 B |
+| Largest internal block | 94,208 B | 90,112 B |
+| PSRAM free | 1,427,552 B | 1,427,552 B |
+| C5 exact snapshot free | 60,036 B | 56,964 B |
+| Task count | 10 | 10 |
+| Main task observed stack low-water | 5,432 B | 5,432 B |
+| Console observed stack low-water | 1,324 B | 1,292 B |
+
+The settled heap figures match the first candidate capture. The differences
+from rev106 include the intervening full-family implementation in rev108;
+the earlier native table compares rev108 to rev109 instead. Largest-block
+and console-watermark differences are recorded without claiming a leak or
+improved headroom. The optional companion/archive stores were not allocated
+during these captures, so their larger live demand remains untested on hardware.
+
+`artifacts/device-rev109/installation-receipt.json` binds the backups, verified
+writes, boot captures, helper hashes and source/package identities. It records
+`full_feature_acceptance=false`. Touchscreen family changes, Stop/Back,
+post-BLE Wi-Fi scanning, real-card save/reopen, extended reception and sustained
+operation remain pending. Neither these checks nor the host matrix establish
+complete Marauder parity.
+
+The installation receipt SHA-256 is
+`04359c8e4e9cff8419980b7d3832348b43b4f24ef90e157245ec0efd737986ba`.
+The later installation-status documentation changes do not alter packaged
+firmware source. `installation-editorial-verification.json` verifies that only
+the editorial coverage scope and generated ledger differ among fingerprinted
+inputs. The ledger check passes, all feature statuses remain unchanged, and
+the original host/native receipts remain tied to their frozen source state.

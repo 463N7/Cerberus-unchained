@@ -46,7 +46,9 @@ offline HINTS. Older v1-v4 reports remain readable with missing evidence
 explicit. Source identity, original previews, S3 responses and historical
 ages keep their separate meanings. Implementation, validation and resource
 costs are tracked in [the rev109 checkpoint](docs/DUAL_RADIO_REV109.md).
-Rev106 remains last verified installed; this candidate is not hardware accepted.
+The matched rev109/C5 firmware66 update is installed with verified writes,
+paired boot and mounted SD. Physical scan/saved-report acceptance remains
+pending; boot confirmation is not complete feature validation.
 
 Rev108 adds C5 full-original classification and focused admission for the six
 passive BLE family views. The S3 retains its independent evidence and controls
@@ -55,8 +57,8 @@ Analyzer avoid the additional family parsing and transfer. All 124 host suites
 and five native targets pass. Measured additions are 3,312 bytes across optional
 S3 PSRAM stores, 240 S3 internal bytes and 3,072 C5 internal bytes. Behavior,
 resource costs and limits are tracked in
-[the rev108 checkpoint](docs/DUAL_RADIO_REV108.md). Rev106 remains the last
-installed build; this candidate is not hardware accepted.
+[the rev108 checkpoint](docs/DUAL_RADIO_REV108.md). These changes are included
+in the installed rev109 update; their physical feature checks remain pending.
 
 Rev107 extends the existing concurrent receivers into source-labelled BLE
 family lists and C5 original-advertisement hint details. It reuses committed
@@ -64,7 +66,7 @@ observations and the existing strict parsers. The complete retained-report
 requirement, remaining C5 retention gaps and validation are tracked in
 [the rev107 checkpoint](docs/DUAL_RADIO_REV107.md). All 124 host suites and five
 native targets pass. The optional discovery store grows by 48 PSRAM bytes;
-fixed S3/C5 data and BSS are unchanged. Rev106 remains installed; physical
+fixed S3/C5 data and BSS are unchanged. Included in installed rev109; physical
 acceptance of this local checkpoint is pending.
 
 Rev106 adds a dedicated passive C5 activity path beside the S3 BLE Analyzer.
@@ -73,7 +75,7 @@ receivers' rates, counter scopes and gaps separate. All 123 host suites and five
 native targets pass. The companion state grows by 424 PSRAM bytes; fixed
 data/BSS grows by 16 bytes on S3 and 48 bytes on C5. Local validation and limits
 are tracked in [the rev106 checkpoint](docs/DUAL_RADIO_REV106.md).
-The matched rev106/C5 firmware65 update is installed with verified writes,
+The matched rev106/C5 firmware65 update was installed with verified writes,
 both chips online and SD mounted. Touchscreen, RF and loaded-memory acceptance
 remain pending.
 

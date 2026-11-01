@@ -1,7 +1,7 @@
 {
   "format": 2,
   "audit_checkpoint": "rev109-source",
-  "scope": "Editorial source/workflow status through rev109 saved full-original C5 family evidence. Rev106/C5 firmware65 remains last verified installed; rev109 is an unflashed local candidate paired with C5 firmware66. See DUAL_RADIO_REV109.md for source, validation and limits. Full Marauder parity remains incomplete. The rev107 GitHub develop check on 2026-11-01 resolved to 79cc6bcba1db6679baee1dab2b0c1ad5010e6363, matching the pinned source.",
+  "scope": "Editorial source/workflow status through rev109 saved full-original C5 family evidence. The matched rev109/C5 firmware66 update is installed with verified writes, paired boot and mounted SD; physical family-scan and saved-report acceptance remains pending. Frozen build evidence and subsequent installation evidence are recorded separately. See DUAL_RADIO_REV109.md for source, validation and limits. Full Marauder parity remains incomplete. The rev107 GitHub develop check on 2026-11-01 resolved to 79cc6bcba1db6679baee1dab2b0c1ad5010e6363, matching the pinned source.",
   "contribution_summary": "docs/CONTRIBUTION_REV93.md",
   "prior_public_contribution": "docs/CONTRIBUTION_REV81.md",
   "upstream": "https://github.com/justcallmekoko/ESP32Marauder",

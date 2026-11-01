@@ -2,9 +2,10 @@
 
 Current source work in [rev109](DUAL_RADIO_REV109.md) extends saved reports to
 v5 with the frozen C5 full-original family record and offline HINTS, while
-retaining v1-v4 readers. The raw preview remains 31 bytes. Rev106 is the last
-verified installed build; rev109 is an unflashed local candidate. The sections
-below retain their earlier revision-specific implementation and evidence.
+retaining v1-v4 readers. The raw preview remains 31 bytes. The matched rev109
+update is installed with paired boot and SD mount verified; physical save/reopen
+and touchscreen acceptance remain pending. The sections below retain their
+earlier revision-specific implementation and evidence.
 
 Rev105's local viewer adds **SOURCE ALL / S3 / C5 / LEGACY** and
 **FILE ORDER / NAME A-Z / SIGNAL** controls above the saved rows. The summary
