@@ -111,10 +111,14 @@ static void wifi_archive_open_file(const char *path, const char *name)
 }
 
 static esp_err_t wifi_archive_draw(void)
-{ return wifi_archive_ui_draw(wifi_archive_view, wifi_archive_open_error); }
+{
+    if (wifi_interchange_is_open()) return wifi_interchange_draw();
+    return wifi_archive_ui_draw(wifi_archive_view, wifi_archive_open_error);
+}
 
 static void wifi_archive_tap(uint16_t x, uint16_t y)
 {
+    if (wifi_interchange_is_open()) { wifi_interchange_tap(x, y); return; }
     wifi_archive_ui_action_t action = wifi_archive_ui_tap(wifi_archive_view, x, y);
     if (action == WIFI_ARCHIVE_BACK) { wifi_archive_close(true); return; }
     if (action == WIFI_ARCHIVE_NEW_SCAN) {
@@ -122,11 +126,13 @@ static void wifi_archive_tap(uint16_t x, uint16_t y)
         ESP_ERROR_CHECK(draw_detail_page()); return;
     }
     if (action == WIFI_ARCHIVE_SAVE) wifi_archive_start_save();
+    if (action == WIFI_ARCHIVE_EXPORT) { wifi_interchange_open_export(); return; }
     if (action != WIFI_ARCHIVE_NONE) ESP_ERROR_CHECK(draw_detail_page());
 }
 
 static void wifi_archive_tick(bool asleep)
 {
+    if (wifi_interchange_tick(asleep)) return;
     if (!wifi_archive_opened) return;
     if (current_page != UI_PAGE_WIFI_ARCHIVE) { wifi_archive_dispose(); return; }
     if (asleep) { wifi_archive_close(false); return; }

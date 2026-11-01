@@ -40,6 +40,7 @@ idf_component_register(
         "airtag_json.c"
         "wifi_archive.c"
         "wifi_archive_capture.c"
+        "wifi_marauder.c"
         "ble_archive_io.c"
         "../../shared/cerberus_watch_capture.c"
         "../../shared/sentinel_watch_protocol.c"

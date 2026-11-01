@@ -9,7 +9,7 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev124`, paired with onboard
+**Current source version: `0.1.0-dev.rev125`, paired with onboard
 C5 protocol firmware revision 69. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -40,6 +40,17 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev125 implements offline Marauder AP JSON and SSID text import, details,
+copy saving and export from native combined S3/C5 Wi-Fi reports. It preserves
+optional-field presence, duplicates, station lists and name bytes, maps security
+values explicitly and reports format information loss. All 136 host suites and
+five native targets pass on 1,118 unchanged inputs. The linked resource audit
+measures 32 additional fixed S3 bytes; existing Recon, scan and archive
+allocations are unchanged, with optional interchange costs tracked separately.
+Matched packaging is next; the installed pair remains rev124.
+See [rev125](docs/DUAL_RADIO_REV125.md) and
+[the interchange contract](docs/WIFI_MARAUDER_INTERCHANGE.md).
 
 Rev124 implements combined S3/C5 Wi-Fi results with SD save/reopen,
 AP/SSID views and copy saving, and Recon gains a factual dashboard in place

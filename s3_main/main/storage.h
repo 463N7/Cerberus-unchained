@@ -34,6 +34,8 @@ extern "C" {
 #define CERBERUS_STORAGE_WIFI_ARCHIVE_PATH "/CERBERUS/WIFI"
 /* v1: header96 + up to64 source-tagged rows of80 bytes. */
 #define CERBERUS_STORAGE_WIFI_ARCHIVE_MAX_BYTES 5216U
+#define CERBERUS_STORAGE_AP_JSON_MAX_BYTES 65536U
+#define CERBERUS_STORAGE_SSID_TEXT_MAX_BYTES 2112U
 
 typedef struct {
     bool mounted;
@@ -206,6 +208,18 @@ esp_err_t cerberus_storage_airtag_json_load(const char *relative_path,
 esp_err_t cerberus_storage_wifi_archive_save(const uint8_t *data, size_t length,
     char *file_name, size_t capacity);
 esp_err_t cerberus_storage_wifi_archive_load(const char *relative_path,
+    const char *file_name, uint8_t *data, size_t capacity, size_t *length);
+/* Offline interchange shares the Wi-Fi directory but has independent names:
+ * Pnnnnn.LOG (AP JSON) / Snnnnn.TXT (SSID bytes), each via exclusive .TMP.
+ * Inputs accept safe .LOG/.JSON or .LOG/.TXT respectively. Only SSID text
+ * permits zero bytes, representing an empty list; EOF is still checked. */
+esp_err_t cerberus_storage_ap_json_save(const uint8_t *data, size_t length,
+    char *file_name, size_t capacity);
+esp_err_t cerberus_storage_ap_json_load(const char *relative_path,
+    const char *file_name, uint8_t *data, size_t capacity, size_t *length);
+esp_err_t cerberus_storage_ssid_text_save(const uint8_t *data, size_t length,
+    char *file_name, size_t capacity);
+esp_err_t cerberus_storage_ssid_text_load(const char *relative_path,
     const char *file_name, uint8_t *data, size_t capacity, size_t *length);
 esp_err_t cerberus_storage_write_qr_bmp(
     const uint8_t *modules,

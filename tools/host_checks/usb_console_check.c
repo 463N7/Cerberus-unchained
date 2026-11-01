@@ -392,17 +392,17 @@ static void archive_maximum_output(void)
         "ble_archive_state=ERROR\r\nble_archive_active=1\r\nble_archive_error=-2147483648\r\n"
         "ble_archive_job_id=18446744073709551615\r\nble_archive_operation=1\r\n"
         "ble_archive_cancel_requested=1\r\nble_archive_result_ready=1\r\n"
-        "ble_archive_bytes=4294967295\r\nble_archive_rows=255\r\n"
+        "ble_archive_bytes=4294967295\r\nble_archive_rows=255\r\nble_archive_format=BLE\r\n"
         "ble_archive_path=%s\r\nble_archive_file=%s\r\n", path, file);
     CHECK(size > 768 && (size_t)size < sizeof(expected));
     /* Partial writes exercise that each subsequent formatted part follows the
      * completed previous part instead of replacing an in-flight buffer. */
     write_plan[0] = 3; write_plan[1] = 7; write_plan[2] = 13; write_plan_count = 3;
     print_ble_archive();
-    CHECK(archive_reads == 1 && format_calls == 3 && allocations == 1 && !frees);
+    CHECK(archive_reads == 1 && format_calls == 4 && allocations == 1 && !frees);
     CHECK(written_size == (size_t)size && !strcmp(written, expected)); canaries();
     const char *keys[] = {"state", "active", "error", "job_id", "operation", "cancel_requested",
-        "result_ready", "bytes", "rows", "path", "file"};
+        "result_ready", "bytes", "rows", "format", "path", "file"};
     const char *cursor = written;
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
         char key[64]; CHECK(snprintf(key, sizeof(key), "ble_archive_%s=", keys[i]) > 0);
@@ -412,10 +412,50 @@ static void archive_maximum_output(void)
     }
     CHECK(!*cursor && !strstr(written, "changed-after-snapshot"));
 }
+static void archive_format_output(void)
+{
+    const char *names[] = {"BLE", "AIRTAG_JSON", "WIFI_NATIVE", "AP_JSON", "SSID_TEXT", "UNKNOWN"};
+    for (unsigned format = 0; format < 6; ++format) {
+        reset(); start(); archive_reads = 0;
+        memset(&archive_status, 0, sizeof(archive_status));
+        archive_status.state = CERBERUS_BLE_ARCHIVE_IO_COMPLETE;
+        archive_status.format = (cerberus_ble_archive_io_format_t)format;
+        archive_status.wifi_result = CERBERUS_WIFI_MARAUDER_UNREPRESENTABLE;
+        archive_status.wifi_export_stats = (cerberus_wifi_marauder_export_stats_t){
+            .loss_flags = UINT32_MAX, .records = UINT16_MAX, .security_unmapped = UINT16_MAX,
+            .rssi_omitted = UINT16_MAX, .names_absent = UINT16_MAX};
+        if (format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_AIRTAG_JSON)
+            archive_status.export_stats = (cerberus_airtag_json_export_stats_t){
+                .eligible = 65535, .filtered = 65534, .incomplete = 65533};
+        strcpy(archive_status.file_name, "retained.LOG");
+        write_plan[0] = 2; write_plan[1] = 5; write_plan_count = 2;
+        print_ble_archive();
+        char expected[64]; snprintf(expected, sizeof(expected), "ble_archive_format=%s\r\n", names[format]);
+        CHECK(archive_reads == 1 && strstr(written, expected));
+        CHECK(strstr(written, "ble_archive_file=retained.LOG\r\n") && !strstr(written, "changed-after-snapshot"));
+        bool wifi = format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_AP_JSON || format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_SSID_TEXT;
+        CHECK((strstr(written, "ble_archive_wifi_codec_result=") != NULL) == wifi);
+        CHECK((strstr(written, "ble_archive_json_eligible=") != NULL) == (format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_AIRTAG_JSON));
+        if (wifi) {
+            CHECK(strstr(written, "ble_archive_wifi_codec_result=3\r\n"));
+            CHECK(strstr(written, "ble_archive_wifi_loss_flags=4294967295\r\n"));
+            CHECK(strstr(written, "ble_archive_wifi_records=65535\r\n"));
+            CHECK(strstr(written, "ble_archive_wifi_security_unmapped=65535\r\n"));
+            CHECK(strstr(written, "ble_archive_wifi_rssi_omitted=65535\r\n"));
+            CHECK(strstr(written, "ble_archive_wifi_names_absent=65535\r\n"));
+        } else if (format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_AIRTAG_JSON) {
+            CHECK(strstr(written, "ble_archive_json_eligible=65535\r\n"));
+            CHECK(strstr(written, "ble_archive_json_filtered=65534\r\n"));
+            CHECK(strstr(written, "ble_archive_json_incomplete=65533\r\n"));
+        }
+        CHECK(format_calls == (wifi || format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_AIRTAG_JSON ? 5U : 4U));
+        canaries();
+    }
+}
 int main(void)
 {
     formatting(); partial_output(); startup_failures(); lifecycle(); timeout_and_late_exit();
-    cleanup_failures_and_reuse(); task_commands_and_quiescence(); archive_maximum_output(); reset();
+    cleanup_failures_and_reuse(); task_commands_and_quiescence(); archive_maximum_output(); archive_format_output(); reset();
     printf("USB console PASS: %u assertions; actual formatter/task/start/stop, PSRAM lifetime and injected interleavings\n", checks);
     return 0;
 }

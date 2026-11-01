@@ -67,6 +67,11 @@ static void begin_file_name_input(int op,const char *name) { CHECK(op==UI_FILE_O
 static void stage_file_clipboard(bool move) { (void)move;++clipboard_calls; }
 static esp_err_t cerberus_storage_inspect_firmware_package(const char *name,int *out)
 { CHECK(name&&out);++inspect_calls;return ESP_OK; }
+/* Explicit Wi-Fi parser choices have their actual route/renderer suite. The
+ * existing AirTag fixture must never dispatch into either unrelated format. */
+static bool wifi_interchange_can_open(const char *name,bool ap_json) { (void)name;(void)ap_json;return false; }
+static void wifi_interchange_open_file(const char *path,const char *name,bool ap_json)
+{ (void)path;(void)name;(void)ap_json;CHECK(false); }
 #include "airtag_file_routes.h"
 
 static void reset(void)

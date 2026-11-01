@@ -77,6 +77,13 @@ esp_err_t cerberus_ble_archive_io_copy_wifi(uint64_t job,cerberus_wifi_archive_t
 void cerberus_ble_archive_io_get_status(cerberus_ble_archive_io_status_t *out) { *out=io; }
 void cerberus_ble_archive_io_cancel(uint64_t job) { ++cancels;canceled_job=job; }
 void cerberus_ble_archive_io_release(uint64_t job) { ++releases;released_job=job;if(job==io.job_id)io.result_ready=false; }
+/* Optional interchange overlay is tested by check_wifi_interchange_ui.py.
+ * This native .WFI controller fixture keeps that independent page closed. */
+static bool wifi_interchange_is_open(void) { return false; }
+static bool wifi_interchange_tick(bool asleep) { (void)asleep;return false; }
+static esp_err_t wifi_interchange_draw(void) { CHECK(false);return ESP_FAIL; }
+static void wifi_interchange_tap(uint16_t x,uint16_t y) { (void)x;(void)y;CHECK(false); }
+static void wifi_interchange_open_export(void) { CHECK(false); }
 #include "wifi_archive_live_ui.h"
 #include "wifi_page_routes.h"
 static void clear_draw(void) { calls=drawn_size=fail_after=0;drawn[0]=0; }

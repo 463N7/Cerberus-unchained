@@ -360,6 +360,13 @@ static void wifi_archive_save_live(bool selected_only);
 static esp_err_t wifi_archive_draw(void);
 static void wifi_archive_tap(uint16_t x, uint16_t y);
 static void wifi_archive_tick(bool asleep);
+static bool wifi_interchange_can_open(const char *name, bool ap_json);
+static void wifi_interchange_open_file(const char *path, const char *name, bool ap_json);
+static void wifi_interchange_open_export(void);
+static bool wifi_interchange_is_open(void);
+static esp_err_t wifi_interchange_draw(void);
+static void wifi_interchange_tap(uint16_t x, uint16_t y);
+static bool wifi_interchange_tick(bool asleep);
 static esp_err_t ble_archive_draw(void);
 static bool airtag_json_is_file(const char *name);
 static bool airtag_json_is_open(void);
@@ -6077,14 +6084,20 @@ static esp_err_t draw_file_actions(void)
     ESP_RETURN_ON_ERROR(draw_button(168, 184, 136, 52, "DELETE"), TAG, "delete action failed");
     if (!file_selected_entry.is_directory && strcmp(file_selected_path, CERBERUS_STORAGE_FIRMWARE_PATH) == 0) {
         ESP_RETURN_ON_ERROR(draw_button(48, 258, 224, 52, "INSPECT PACKAGE"), TAG, "package action failed");
-    } else if (!file_selected_entry.is_directory && airtag_json_is_file(file_selected_entry.name)) {
-        ESP_RETURN_ON_ERROR(draw_button(48, 258, 224, 52, "OPEN AIRTAG JSON"), TAG, "JSON action failed");
+    } else if (!file_selected_entry.is_directory && (airtag_json_is_file(file_selected_entry.name) ||
+        wifi_interchange_can_open(file_selected_entry.name, false))) {
+        if (airtag_json_is_file(file_selected_entry.name))
+            ESP_RETURN_ON_ERROR(draw_button(48, 250, 224, 40, "OPEN AIRTAG JSON"), TAG, "JSON action failed");
+        if (wifi_interchange_can_open(file_selected_entry.name, true))
+            ESP_RETURN_ON_ERROR(draw_button(48, 296, 224, 40, "OPEN AP JSON"), TAG, "AP JSON action failed");
+        if (wifi_interchange_can_open(file_selected_entry.name, false))
+            ESP_RETURN_ON_ERROR(draw_button(48, 342, 224, 40, "OPEN SSID TEXT"), TAG, "SSID action failed");
     } else {
         ESP_RETURN_ON_ERROR(draw_centered(278, "COPY/MOVE: CHOOSE DESTINATION", UI_MUTED, 1), TAG, "actions help failed");
         ESP_RETURN_ON_ERROR(draw_centered(296, "THEN TAP PASTE", UI_MUTED, 1), TAG, "actions paste help failed");
     }
     if (file_action_message[0] != '\0') {
-        ESP_RETURN_ON_ERROR(draw_centered(334, file_action_message, file_action_color, 1), TAG, "actions status failed");
+        ESP_RETURN_ON_ERROR(draw_centered(404, file_action_message, file_action_color, 1), TAG, "actions status failed");
     }
     return ESP_OK;
 }
@@ -10620,9 +10633,14 @@ static void handle_file_actions_tap(uint16_t x, uint16_t y)
             file_selected_entry.name, &file_package_info);
         file_mode = UI_FILE_MODE_PACKAGE_INFO;
         ESP_ERROR_CHECK(draw_detail_page());
-    } else if (x >= 48U && x < 272U && y >= 258U && y < 310U &&
-        !file_selected_entry.is_directory && airtag_json_is_file(file_selected_entry.name)) {
-        airtag_json_open_file(file_selected_path, file_selected_entry.name);
+    } else if (x >= 48U && x < 272U && !file_selected_entry.is_directory &&
+        strcmp(file_selected_path, CERBERUS_STORAGE_FIRMWARE_PATH) != 0) {
+        if (y >= 250U && y < 290U && airtag_json_is_file(file_selected_entry.name))
+            airtag_json_open_file(file_selected_path, file_selected_entry.name);
+        else if (y >= 296U && y < 336U && wifi_interchange_can_open(file_selected_entry.name, true))
+            wifi_interchange_open_file(file_selected_path, file_selected_entry.name, true);
+        else if (y >= 342U && y < 382U && wifi_interchange_can_open(file_selected_entry.name, false))
+            wifi_interchange_open_file(file_selected_path, file_selected_entry.name, false);
     }
 }
 
@@ -11358,6 +11376,7 @@ static void handle_scripts_tap(uint16_t x, uint16_t y)
 #include "sentinel_live_ui.h"
 #include "dual_wifi_live_ui.h"
 #include "wifi_archive_live_ui.h"
+#include "wifi_interchange_live_ui.h"
 #include "dual_ble_live_ui.h"
 #include "ble_analyzer_live_ui.h"
 #include "s3_findmy_monitor_ui.h"

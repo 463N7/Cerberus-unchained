@@ -2964,3 +2964,121 @@ esp_err_t cerberus_storage_wifi_archive_load(const char *relative_path,
     release_storage_mutex();
     return error;
 }
+
+/* These are explicit offline formats, never inferred from arbitrary contents.
+ * New namespaces retain failed temporary files and never overwrite imports. */
+static unsigned sd_ap_json_next_index = 1U;
+static unsigned sd_ssid_text_next_index = 1U;
+
+static esp_err_t wifi_interchange_storage_save(const uint8_t *data, size_t length,
+    char *file_name, size_t capacity, bool ssid)
+{
+    if (file_name != NULL && capacity) file_name[0] = '\0';
+    const size_t maximum = ssid ? CERBERUS_STORAGE_SSID_TEXT_MAX_BYTES : CERBERUS_STORAGE_AP_JSON_MAX_BYTES;
+    if (data == NULL || (!ssid && !length) || length > maximum ||
+        file_name == NULL || capacity < 11U) return ESP_ERR_INVALID_ARG;
+    ESP_RETURN_ON_ERROR(take_storage_mutex(), TAG, "Wi-Fi interchange save lock failed");
+    esp_err_t error = ble_archive_storage_available() ? ESP_OK : ESP_ERR_INVALID_STATE;
+    if (error == ESP_OK) error = recon_storage_directory(CERBERUS_STORAGE_MOUNT_PATH "/CERBERUS");
+    if (error == ESP_OK) error = recon_storage_directory(CERBERUS_STORAGE_MOUNT_PATH CERBERUS_STORAGE_WIFI_ARCHIVE_PATH);
+    char temporary[96], final[96], name[11];
+    const char prefix = ssid ? 'S' : 'P';
+    const char *extension = ssid ? "TXT" : "LOG";
+    unsigned *next = ssid ? &sd_ssid_text_next_index : &sd_ap_json_next_index;
+    int descriptor = -1;
+    for (unsigned attempt = 0U; error == ESP_OK && attempt < SD_BLE_ARCHIVE_SEARCH_LIMIT; ++attempt) {
+        unsigned index = *next;
+        *next = index >= SD_BLE_ARCHIVE_FILE_LIMIT ? 1U : index + 1U;
+        int n = snprintf(name, sizeof(name), "%c%05u.%s", prefix, index, extension);
+        int f = snprintf(final, sizeof(final), "%s%s/%s", CERBERUS_STORAGE_MOUNT_PATH,
+            CERBERUS_STORAGE_WIFI_ARCHIVE_PATH, name);
+        int t = snprintf(temporary, sizeof(temporary), "%s%s/%c%05u.TMP", CERBERUS_STORAGE_MOUNT_PATH,
+            CERBERUS_STORAGE_WIFI_ARCHIVE_PATH, prefix, index);
+        if (n != 10 || f < 0 || (size_t)f >= sizeof(final) || t < 0 || (size_t)t >= sizeof(temporary)) {
+            error = ESP_ERR_INVALID_SIZE; break;
+        }
+        esp_err_t absent = recon_storage_absent(final);
+        if (absent == ESP_ERR_INVALID_STATE) continue;
+        if (absent != ESP_OK) { error = absent; break; }
+        absent = recon_storage_absent(temporary);
+        if (absent == ESP_ERR_INVALID_STATE) continue;
+        if (absent != ESP_OK) { error = absent; break; }
+        descriptor = open(temporary, O_WRONLY | O_CREAT | O_EXCL, 0664);
+        if (descriptor >= 0) {
+            memcpy(file_name, name, sizeof(name));
+            memcpy(file_name + 7U, "TMP", 4U);
+            break;
+        }
+        if (errno != EEXIST) { error = ESP_FAIL; break; }
+    }
+    if (error == ESP_OK && descriptor < 0) error = ESP_ERR_NOT_FOUND;
+    FILE *stream = NULL;
+    if (descriptor >= 0) {
+        stream = fdopen(descriptor, "wb");
+        if (stream == NULL) { (void)close(descriptor); error = ESP_FAIL; }
+    }
+    if (stream != NULL) {
+        if (fwrite(data, 1U, length, stream) != length || ferror(stream)) error = ESP_FAIL;
+        if (!recon_storage_flush(stream)) error = ESP_FAIL;
+        if (fclose(stream) != 0) error = ESP_FAIL;
+    }
+    if (error == ESP_OK) error = recon_storage_absent(final);
+    if (error == ESP_OK && rename(temporary, final) != 0) error = ESP_FAIL;
+    if (error == ESP_OK) memcpy(file_name, name, sizeof(name));
+    release_storage_mutex();
+    return error;
+}
+
+static esp_err_t wifi_interchange_storage_load(const char *relative_path,
+    const char *file_name, uint8_t *data, size_t capacity, size_t *length, bool ssid)
+{
+    const size_t maximum = ssid ? CERBERUS_STORAGE_SSID_TEXT_MAX_BYTES : CERBERUS_STORAGE_AP_JSON_MAX_BYTES;
+    if (length != NULL) *length = 0U;
+    if (data != NULL && capacity <= maximum) memset(data, 0, capacity);
+    if (!relative_path_is_safe(relative_path) || !file_name_is_safe(file_name) ||
+        data == NULL || !capacity || capacity > maximum || length == NULL) return ESP_ERR_INVALID_ARG;
+    size_t n = strlen(file_name);
+    bool suffix = n >= 5U && (strcasecmp(file_name + n - 4U, ".LOG") == 0 ||
+        (ssid && strcasecmp(file_name + n - 4U, ".TXT") == 0));
+    if (!ssid && n >= 6U && strcasecmp(file_name + n - 5U, ".JSON") == 0) suffix = true;
+    if (!suffix) return ESP_ERR_INVALID_ARG;
+    ESP_RETURN_ON_ERROR(take_storage_mutex(), TAG, "Wi-Fi interchange load lock failed");
+    esp_err_t error = ble_archive_storage_available() ? ESP_OK : ESP_ERR_INVALID_STATE;
+    if (error == ESP_OK) error = build_entry_path(sd_operation_source_path,
+        sizeof(sd_operation_source_path), relative_path, file_name);
+    struct stat item;
+    if (error == ESP_OK && stat(sd_operation_source_path, &item) != 0)
+        error = errno == ENOENT ? ESP_ERR_NOT_FOUND : ESP_FAIL;
+    if (error == ESP_OK && (!S_ISREG(item.st_mode) || item.st_size < 0 ||
+        (!ssid && item.st_size == 0) || (uint64_t)item.st_size > capacity)) error = ESP_ERR_INVALID_SIZE;
+    FILE *stream = error == ESP_OK ? fopen(sd_operation_source_path, "rb") : NULL;
+    if (error == ESP_OK && stream == NULL) error = ESP_FAIL;
+    size_t received = 0U;
+    if (stream != NULL) {
+        const size_t expected = (size_t)item.st_size;
+        while (received < expected && error == ESP_OK) {
+            size_t copied = fread(data + received, 1U, expected - received, stream);
+            received += copied;
+            if (ferror(stream) || !copied || (feof(stream) && received != expected)) error = ESP_FAIL;
+        }
+        if (error == ESP_OK && (fgetc(stream) != EOF || !feof(stream) || ferror(stream))) error = ESP_FAIL;
+        if (fclose(stream) != 0) error = ESP_FAIL;
+    }
+    if (error == ESP_OK) *length = received;
+    else memset(data, 0, capacity);
+    release_storage_mutex();
+    return error;
+}
+
+esp_err_t cerberus_storage_ap_json_save(const uint8_t *data, size_t length,
+    char *file_name, size_t capacity)
+{ return wifi_interchange_storage_save(data, length, file_name, capacity, false); }
+esp_err_t cerberus_storage_ap_json_load(const char *relative_path,
+    const char *file_name, uint8_t *data, size_t capacity, size_t *length)
+{ return wifi_interchange_storage_load(relative_path, file_name, data, capacity, length, false); }
+esp_err_t cerberus_storage_ssid_text_save(const uint8_t *data, size_t length,
+    char *file_name, size_t capacity)
+{ return wifi_interchange_storage_save(data, length, file_name, capacity, true); }
+esp_err_t cerberus_storage_ssid_text_load(const char *relative_path,
+    const char *file_name, uint8_t *data, size_t capacity, size_t *length)
+{ return wifi_interchange_storage_load(relative_path, file_name, data, capacity, length, true); }

@@ -9,7 +9,10 @@ behind or intervening commits. The response is retained at
 source check, not proof of complete porting or physical acceptance.
 
 The source milestones described below are now included in installed
-[rev123/C5 firmware69](DUAL_RADIO_REV123.md). Verified image writes, paired
+[rev124/C5 firmware69](DUAL_RADIO_REV124.md). Rev124 adds native saved Wi-Fi
+observations and the Recon field dashboard. Rev125 implements separate offline
+AP JSON/SSID text interchange; its full validation and installation status are
+tracked in [the rev125 checkpoint](DUAL_RADIO_REV125.md). Verified image writes, paired
 application boot, display buffering and SD mount establish the installed
 baseline; physical feature acceptance remains separate. The earlier milestone
 documents retain their original source and installation history.
@@ -165,8 +168,10 @@ continuous callback/history journaling, full original and response payload
 retention, and richer external exports that preserve native source/type/time
 proof. Current JSON intentionally loses that metadata; it cannot carry full
 Cerberus identity or replace the original `.BLE` evidence. Repeated snapshot
-rows are not a callback timeline. AP/SSID persistence and broader backup/restore
-also remain separate. Offline schema compatibility alone does not establish
+rows are not a callback timeline. Rev124 adds native AP/SSID report persistence,
+and rev125 implements separate AP JSON/SSID text interchange. Manual editing,
+load-to-live-list semantics and broader backup/restore remain separate. Offline
+schema compatibility alone does not establish
 full Marauder persistence parity or hardware acceptance.
 
 ## SHOW_INFO source review

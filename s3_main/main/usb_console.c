@@ -768,6 +768,30 @@ static void print_ble_archive(void)
         (int32_t)snapshot.error, snapshot.job_id, (unsigned)snapshot.operation,
         snapshot.cancel_requested ? 1U : 0U, snapshot.result_ready ? 1U : 0U,
         snapshot.bytes, (unsigned)snapshot.count);
+    const char *format = snapshot.format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_BLE ? "BLE" :
+        snapshot.format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_AIRTAG_JSON ? "AIRTAG_JSON" :
+        snapshot.format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_WIFI ? "WIFI_NATIVE" :
+        snapshot.format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_AP_JSON ? "AP_JSON" :
+        snapshot.format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_SSID_TEXT ? "SSID_TEXT" : "UNKNOWN";
+    console_printf("ble_archive_format=%s\r\n", format);
+    /* The union belongs to the captured format. Never interpret a different
+     * operation's counters as Wi-Fi conversion evidence. */
+    if (snapshot.format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_AP_JSON ||
+        snapshot.format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_SSID_TEXT) {
+        console_printf("ble_archive_wifi_codec_result=%u\r\n"
+            "ble_archive_wifi_loss_flags=%" PRIu32 "\r\n"
+            "ble_archive_wifi_records=%u\r\nble_archive_wifi_security_unmapped=%u\r\n"
+            "ble_archive_wifi_rssi_omitted=%u\r\nble_archive_wifi_names_absent=%u\r\n",
+            (unsigned)snapshot.wifi_result, snapshot.wifi_export_stats.loss_flags,
+            (unsigned)snapshot.wifi_export_stats.records,
+            (unsigned)snapshot.wifi_export_stats.security_unmapped,
+            (unsigned)snapshot.wifi_export_stats.rssi_omitted,
+            (unsigned)snapshot.wifi_export_stats.names_absent);
+    } else if (snapshot.format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_AIRTAG_JSON) {
+        console_printf("ble_archive_json_eligible=%u\r\nble_archive_json_filtered=%u\r\n"
+            "ble_archive_json_incomplete=%u\r\n", (unsigned)snapshot.export_stats.eligible,
+            (unsigned)snapshot.export_stats.filtered, (unsigned)snapshot.export_stats.incomplete);
+    }
     /* Each bounded path fits the unchanged formatter capacity independently;
      * their combined maximum plus scalar fields would truncate one call. */
     console_printf("ble_archive_path=%s\r\n", snapshot.relative_path);

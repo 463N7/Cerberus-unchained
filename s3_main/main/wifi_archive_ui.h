@@ -8,7 +8,7 @@
 typedef enum { WIFI_ARCHIVE_LIST, WIFI_ARCHIVE_DETAIL, WIFI_ARCHIVE_JOB,
     WIFI_ARCHIVE_ERROR } wifi_archive_ui_page_t;
 typedef enum { WIFI_ARCHIVE_NONE, WIFI_ARCHIVE_REDRAW, WIFI_ARCHIVE_BACK,
-    WIFI_ARCHIVE_SAVE, WIFI_ARCHIVE_NEW_SCAN } wifi_archive_ui_action_t;
+    WIFI_ARCHIVE_SAVE, WIFI_ARCHIVE_NEW_SCAN, WIFI_ARCHIVE_EXPORT } wifi_archive_ui_action_t;
 typedef struct {
     cerberus_wifi_archive_t document;
     cerberus_wifi_archive_row_t selected;
@@ -115,7 +115,11 @@ static void wifi_archive_ui_order(wifi_archive_ui_store_t *s)
 static esp_err_t wifi_archive_ui_footer(const char *right)
 {
     ESP_RETURN_ON_ERROR(draw_button(8, 426, 96, 44, "BACK"), TAG, "Wi-Fi file back");
-    return right ? draw_button(112, 426, 200, 44, right) : ESP_OK;
+    if (right) {
+        ESP_RETURN_ON_ERROR(draw_small_button(112, 426, 96, 44, "SAVE COPY"), TAG, "Wi-Fi file copy");
+        return draw_small_button(216, 426, 96, 44, "EXPORT");
+    }
+    return ESP_OK;
 }
 
 static esp_err_t wifi_archive_ui_draw(wifi_archive_ui_store_t *s, esp_err_t open_error)
@@ -243,7 +247,8 @@ static wifi_archive_ui_action_t wifi_archive_ui_tap(wifi_archive_ui_store_t *s, 
         }
         return WIFI_ARCHIVE_NONE;
     }
-    if (x >= 112U && x < 312U && y >= 426U && y < 470U) return WIFI_ARCHIVE_SAVE;
+    if (x >= 112U && x < 208U && y >= 426U && y < 470U) return WIFI_ARCHIVE_SAVE;
+    if (x >= 216U && x < 312U && y >= 426U && y < 470U) return WIFI_ARCHIVE_EXPORT;
     if (s->view == WIFI_ARCHIVE_DETAIL)
         return x >= 8U && x < 312U && y >= 374U && y < 418U ? WIFI_ARCHIVE_NEW_SCAN : WIFI_ARCHIVE_NONE;
     if (s->view != WIFI_ARCHIVE_LIST) return WIFI_ARCHIVE_NONE;

@@ -3,6 +3,7 @@
 #include "ble_archive.h"
 #include "airtag_json.h"
 #include "wifi_archive.h"
+#include "wifi_marauder.h"
 #include "esp_err.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -27,18 +28,31 @@ typedef enum {
     CERBERUS_BLE_ARCHIVE_IO_EXPORT_AIRTAG_JSON,
     CERBERUS_BLE_ARCHIVE_IO_SAVE_WIFI,
     CERBERUS_BLE_ARCHIVE_IO_LOAD_WIFI,
+    CERBERUS_BLE_ARCHIVE_IO_LOAD_AP_JSON,
+    CERBERUS_BLE_ARCHIVE_IO_SAVE_AP_JSON,
+    CERBERUS_BLE_ARCHIVE_IO_EXPORT_AP_JSON,
+    CERBERUS_BLE_ARCHIVE_IO_LOAD_SSID_TEXT,
+    CERBERUS_BLE_ARCHIVE_IO_SAVE_SSID_TEXT,
+    CERBERUS_BLE_ARCHIVE_IO_EXPORT_SSID_TEXT,
 } cerberus_ble_archive_io_operation_t;
 
 typedef enum {
     CERBERUS_BLE_ARCHIVE_IO_FORMAT_BLE = 0,
     CERBERUS_BLE_ARCHIVE_IO_FORMAT_AIRTAG_JSON,
     CERBERUS_BLE_ARCHIVE_IO_FORMAT_WIFI,
+    CERBERUS_BLE_ARCHIVE_IO_FORMAT_AP_JSON,
+    CERBERUS_BLE_ARCHIVE_IO_FORMAT_SSID_TEXT,
 } cerberus_ble_archive_io_format_t;
 typedef struct {
     cerberus_ble_archive_io_state_t state;
     cerberus_ble_archive_io_operation_t operation;
     cerberus_ble_archive_io_format_t format;
-    cerberus_airtag_json_export_stats_t export_stats;
+    union { /* Only the stats belonging to format are meaningful. */
+        cerberus_airtag_json_export_stats_t export_stats;
+        cerberus_wifi_marauder_export_stats_t wifi_export_stats;
+    };
+    cerberus_wifi_marauder_result_t wifi_result; /* AP/SSID codec outcome only;
+        ESP error still reports storage/allocation failures independently. */
     esp_err_t error;
     uint64_t job_id;
     bool worker_active, cancel_requested, result_ready;
@@ -78,9 +92,29 @@ esp_err_t cerberus_ble_archive_io_load_wifi(const char *relative_path,
     const char *file_name, uint64_t *job_id);
 esp_err_t cerberus_ble_archive_io_copy_wifi(uint64_t job_id,
     cerberus_wifi_archive_t *document);
+/* Explicit offline interchange: no type guessed from a filename or payload.
+ * Export freezes a native WFI document before return, then converts in the
+ * worker. AP JSON/SSID text never become live APs, targets or trust rules.
+ * Save Copy keeps order/duplicates/presence/framing in the imported model. */
+esp_err_t cerberus_ble_archive_io_load_ap_json(const char *relative_path,
+    const char *file_name, uint64_t *job_id);
+esp_err_t cerberus_ble_archive_io_save_ap_json(const cerberus_wifi_marauder_ap_t *document,
+    uint64_t *job_id);
+esp_err_t cerberus_ble_archive_io_export_ap_json(const cerberus_wifi_archive_t *document,
+    uint64_t *job_id);
+esp_err_t cerberus_ble_archive_io_copy_ap_json(uint64_t job_id,
+    cerberus_wifi_marauder_ap_t *document);
+esp_err_t cerberus_ble_archive_io_load_ssid_text(const char *relative_path,
+    const char *file_name, uint64_t *job_id);
+esp_err_t cerberus_ble_archive_io_save_ssid_text(const cerberus_wifi_marauder_ssid_t *document,
+    uint64_t *job_id);
+esp_err_t cerberus_ble_archive_io_export_ssid_text(const cerberus_wifi_archive_t *document,
+    uint64_t *job_id);
+esp_err_t cerberus_ble_archive_io_copy_ssid_text(uint64_t job_id,
+    cerberus_wifi_marauder_ssid_t *document);
 void cerberus_ble_archive_io_get_status(cerberus_ble_archive_io_status_t *status);
 /* Copies only a fully validated completed native BLE SAVE or LOAD. JSON jobs
- * require copy_airtag_json and Wi-Fi jobs require copy_wifi. Typed getters reject
+ * require copy_airtag_json and Wi-Fi jobs require their matching typed copy. Getters reject
  * other formats without changing output. The immutable result is pinned and
  * copied outside the critical section; a concurrent Release prevents new readers
  * and defers disposal until accepted copies return. Historical data never becomes

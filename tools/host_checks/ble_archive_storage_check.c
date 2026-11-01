@@ -87,7 +87,7 @@ static int wrapped_stat(const char *path,struct stat *item)
 {
     if(event(STAT)){errno=EIO;return -1;}
     const char *leaf=strrchr(path,'/');
-    if(collide_all&&leaf&&strlen(leaf)==11&&(leaf[1]=='B'||leaf[1]=='A'||leaf[1]=='W')){memset(item,0,sizeof(*item));item->st_mode=S_IFREG;return 0;}
+    if(collide_all&&leaf&&strlen(leaf)==11&&(leaf[1]=='B'||leaf[1]=='A'||leaf[1]=='W'||leaf[1]=='P'||leaf[1]=='S')){memset(item,0,sizeof(*item));item->st_mode=S_IFREG;return 0;}
     int result=stat(path,item);
     if(result==0&&S_ISREG(item->st_mode))item->st_size+=stat_size_delta;
     return result;
@@ -107,7 +107,7 @@ static int wrapped_close(int fd){bool fail=event(RAW_CLOSE);CHECK(descriptors);-
 static FILE *wrapped_fopen(const char *path,const char *mode)
 {CHECK(!strcmp(mode,"rb"));if(event(FOPEN))return NULL;FILE*f=fopen(path,mode);if(f)++streams;return f;}
 static size_t wrapped_write(const void *data,size_t size,size_t count,FILE *stream)
-{CHECK(size==1&&count&&streams);bool fail=event(WRITE);return fwrite(data,size,fail?count/2:count,stream);}
+{CHECK(size==1&&streams);bool fail=event(WRITE);return fwrite(data,size,fail?count/2:count,stream);}
 static int wrapped_ferror(FILE *stream){return extra_error||ferror(stream);}
 static int wrapped_feof(FILE *stream){return no_eof?0:feof(stream);}
 static int wrapped_flush(FILE *stream){if(event(FLUSH))return EOF;return fflush(stream);}
@@ -172,7 +172,7 @@ static void setup(void)
     CHECK(native_mkdir(directory)==0&&native_chdir(directory)==0&&native_mkdir("sdcard")==0);
     CHECK(native_mkdir("sdcard/CERBERUS")==0&&native_mkdir("sdcard/CERBERUS/BLE")==0&&native_mkdir("sdcard/CERBERUS/WIFI")==0);
     storage_mutex=&mutex_token;sd_mounted=true;storage_owner=CERBERUS_STORAGE_OWNER_FIRMWARE;
-    sd_recon.active=wardrive_busy=fail_lock=fail_mutex=false;sd_wifi_capture_file=NULL;sd_ble_archive_next_index=sd_airtag_json_next_index=sd_wifi_archive_next_index=1;
+    sd_recon.active=wardrive_busy=fail_lock=fail_mutex=false;sd_wifi_capture_file=NULL;sd_ble_archive_next_index=sd_airtag_json_next_index=sd_wifi_archive_next_index=sd_ap_json_next_index=sd_ssid_text_next_index=1;
     race_final_path="sdcard/CERBERUS/BLE/B00001.BLE";
     extra_error=no_eof=short_read=collide_all=race_temp=race_final=false;zero_read_at=0;stat_size_delta=0;
     handoff_probes=unmounts=0;probe_handoff=false;
@@ -435,8 +435,11 @@ static void check_full_wifi_document(void)
     wifi_failure(got);
 }
 
+#include "wifi_interchange_storage_check.h"
+
 int main(void)
 {
+    check_wifi_interchange_storage();
     check_full_v6_document();
     check_json_storage();
     check_wifi_storage();

@@ -78,8 +78,10 @@ The Cerberus `.WFI` format and implementation are original and preserve the
 two receivers' provenance. They are not Marauder `/APs_0.log` JSON or
 `/SSIDs_0.log` text interoperability.
 
-Marauder AP/SSID import/export, manual list editing, full option parity and
-load-to-live-list behavior remain separate work. Saving reports does not
+Rev125 adds a separate [Marauder AP JSON/SSID text interchange workflow](WIFI_MARAUDER_INTERCHANGE.md)
+with explicit information loss; `.WFI` remains the source-preserving format.
+Manual list editing, full option parity and load-to-live-list behavior remain
+separate work. Saving reports does not
 resolve previously reported Wi-Fi action failures. Physical save/reopen,
 Stop/Back/sleep, repeated sessions and sustained resource acceptance must be
 distinguished from the host fixtures and native build results.
