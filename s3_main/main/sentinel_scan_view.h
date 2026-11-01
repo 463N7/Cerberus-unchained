@@ -47,6 +47,7 @@ typedef struct {
     const char *message;
     const char *hint; /* Capture age / context; always visible at y352 when nonempty. */
     const char *tools_label; /* Optional action for the bottom-right control. */
+    bool stop_action; /* An outstanding request can need Stop even in ERROR. */
     bool tools_disabled;
     bool selection_mode;
     bool band_control; /* Ordinary Wi-Fi left summary cycles the retained-band filter. */

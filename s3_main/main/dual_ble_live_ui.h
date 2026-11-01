@@ -4,7 +4,22 @@
 
 static bool dual_ble_live_enabled(void)
 {
-    return ble_discovery_live && ble_discovery_live->session.enabled;
+    return ble_discovery_requested();
+}
+
+/* Retry only the current ordinary request, never a historical bank or another
+ * mode's error. This cached predicate performs no owner or transport work. */
+static bool dual_ble_live_c5_retryable(void)
+{
+    if (!ble_discovery_ordinary_page() || !ble_discovery_requested() ||
+        (ble_mode == UI_BLE_MODE_C5 && (dual_ble_ui_detail || dual_ble_ui_selection_pending))) return false;
+    uint8_t family = (uint8_t)ble_filter;
+    int mode = family ? CERBERUS_DUAL_BLE_FAMILY : CERBERUS_DUAL_BLE_DISCOVERY;
+    if (dual_ble_ui_mode != mode || dual_ble_ui_family != family ||
+        dual_ble_ui_response_mode != dual_ble_ui_response_requests) return false;
+    cerberus_dual_ble_view_t view;
+    dual_ble_ui_get_view(&view);
+    return view.error != ESP_OK && !view.stopping;
 }
 
 static bool dual_ble_live_discovery_released(void)
@@ -71,16 +86,21 @@ static void dual_ble_live_tap(uint16_t x, uint16_t y)
 {
     int action = dual_ble_ui_tap(x, y);
     if (action == DUAL_BLE_UI_BACK_MONITOR) {
+        dual_ble_ui_cancel_selection();
         ble_findmy_monitor_return();
     } else if (action == DUAL_BLE_UI_BACK_S3) {
+        dual_ble_ui_cancel_selection();
         ble_mode = UI_BLE_MODE_LIST;
     } else if (action == DUAL_BLE_UI_TOGGLE) {
-        if (!ble_discovery_live && !ble_discovery_acquire()) return;
-        if (dual_ble_live_enabled()) ble_discovery_leave();
-        else {
-            (void)cerberus_ble_discovery_session_start(&ble_discovery_live->session);
-            dual_ble_ui_retry();
-        }
+        if (dual_ble_ui_selection_pending || dual_ble_live_enabled() ||
+            !dual_ble_live_discovery_released() || !dual_ble_ui_released()) ble_discovery_leave();
+        else (void)ble_discovery_request_start();
+    } else if (action == DUAL_BLE_UI_SELECT) {
+        ble_discovery_request_stop();
+    } else if (action == DUAL_BLE_UI_RETRY_S3) {
+        if (ble_discovery_s3_retryable()) (void)ble_discovery_retry_s3();
+    } else if (action == DUAL_BLE_UI_RETRY_C5) {
+        if (dual_ble_live_c5_retryable()) dual_ble_ui_retry();
     } else if (action == DUAL_BLE_UI_FOX) {
         cerberus_c5_ble_result_t peer;
         if (dual_ble_ui_selected_peer(&peer)) ble_fox_hunt_open_peer(&peer, true);
@@ -91,15 +111,13 @@ static void dual_ble_live_tap(uint16_t x, uint16_t y)
 static void dual_ble_live_tick(uint64_t now, bool asleep)
 {
     int mode = -1;
-    bool ordinary = !ui_capability_blocked && !ble_attack_selecting &&
-        current_page == UI_PAGE_BLE &&
-        (ble_mode == UI_BLE_MODE_LIST || ble_mode == UI_BLE_MODE_C5);
+    bool ordinary = ble_discovery_ordinary_page();
     bool monitor = !ui_capability_blocked && !ble_attack_selecting &&
         current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FINDMY_MONITOR;
     /* A selected monitor row remains an immutable stopped detail, including
      * after Fox Hunt. Only the monitor's explicit Start can resume discovery.
      * Its intent is independent of the S3 session's error/cleanup state. */
-    bool monitor_detail = ble_mode == UI_BLE_MODE_C5 && dual_ble_ui_from_monitor;
+    bool frozen_detail = ble_mode == UI_BLE_MODE_C5 && dual_ble_ui_detail;
     /* Old C5/S3 session owners must release before a companion is armed. */
     bool ready = live_session.active == SENTINEL_SCAN_NONE &&
         live_session.pending.kind == SENTINEL_SCAN_COMMAND_NONE &&
@@ -109,7 +127,7 @@ static void dual_ble_live_tick(uint64_t now, bool asleep)
     cerberus_dual_wifi_scan_get_status(&wifi);
     ready = ready && !dual_wifi_ui_busy(&wifi);
     if (!asleep && ready && ((monitor && ble_findmy_monitor_requested()) ||
-        (ordinary && !monitor_detail && dual_ble_live_enabled())))
+        (ordinary && !frozen_detail && !dual_ble_ui_selection_pending && dual_ble_live_enabled())))
         mode = CERBERUS_DUAL_BLE_DISCOVERY;
     else if (!asleep && ready && current_page == UI_PAGE_BLE &&
         ble_mode == UI_BLE_MODE_ANALYZER && ble_analyzer_started &&
@@ -124,6 +142,13 @@ static void dual_ble_live_tick(uint64_t now, bool asleep)
         dual_ble_ui_sync_family(monitor ? CERBERUS_S3_BLE_FILTER_FIND_MY : (uint8_t)ble_filter, now);
     else dual_ble_ui_sync(mode, mode == CERBERUS_DUAL_BLE_TRACK ?
         ble_fox_hunt_target.address : NULL, ble_fox_hunt_target.address_type, now);
+    if (dual_ble_ui_selection_pending) {
+        if (asleep || !ordinary || ble_mode != UI_BLE_MODE_C5)
+            dual_ble_ui_cancel_selection();
+        else if (!ble_discovery_requested() && dual_ble_ui_apply_selection()) {
+            ESP_ERROR_CHECK(draw_detail_page());
+        }
+    }
     dual_ble_publish_diagnostics(now, asleep);
     static uint64_t last_draw;
     if (ordinary && ble_mode == UI_BLE_MODE_C5 && !asleep && now - last_draw >= 500U) {

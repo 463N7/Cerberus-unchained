@@ -9,7 +9,8 @@
 #include "dual_ble_hint_ui.h"
 
 enum { DUAL_BLE_UI_NONE, DUAL_BLE_UI_REDRAW, DUAL_BLE_UI_BACK_S3,
-    DUAL_BLE_UI_TOGGLE, DUAL_BLE_UI_FOX, DUAL_BLE_UI_BACK_MONITOR };
+    DUAL_BLE_UI_TOGGLE, DUAL_BLE_UI_FOX, DUAL_BLE_UI_BACK_MONITOR,
+    DUAL_BLE_UI_SELECT, DUAL_BLE_UI_RETRY_S3, DUAL_BLE_UI_RETRY_C5 };
 static cerberus_dual_ble_scan_t *dual_ble_ui_store;
 static cerberus_dual_ble_row_t dual_ble_ui_painted[4], dual_ble_ui_selected;
 static cerberus_dual_ble_provenance_t dual_ble_ui_painted_provenance[4], dual_ble_ui_selected_provenance;
@@ -28,7 +29,16 @@ static bool dual_ble_ui_receive_info;
 static bool dual_ble_ui_hints;
 static uint8_t dual_ble_ui_hint_page, dual_ble_ui_hint_pages;
 static bool dual_ble_ui_from_unified, dual_ble_ui_from_monitor;
+static bool dual_ble_ui_selection_pending;
 static esp_err_t dual_ble_ui_error;
+
+/* Cancel deferred navigation only. A frozen selected proof is deliberately
+ * retained; neither this hook nor selection performs owner/transport work. */
+static void dual_ble_ui_cancel_selection(void)
+{
+    dual_ble_ui_selection_pending = false;
+    dual_ble_ui_painted_count = 0U;
+}
 
 static uint64_t dual_ble_ui_clock(void *context)
 { (void)context; return (uint64_t)(esp_timer_get_time() / 1000LL); }
@@ -85,7 +95,16 @@ static void dual_ble_ui_sync_request(int mode, uint8_t family,
         (type != dual_ble_ui_type || memcmp(address, dual_ble_ui_target, 6U))) ||
         family != dual_ble_ui_family;
     if (changed) {
-        dual_ble_ui_mode = mode; dual_ble_ui_attempted = false; dual_ble_ui_error = ESP_OK;
+        /* Changing discovery preferences is not Retry. Keep a failed source
+         * latched while remembering the configuration an explicit Retry will
+         * use; healthy sources still drain and rebind normally. */
+        esp_err_t previous_error = dual_ble_ui_error ? dual_ble_ui_error :
+            dual_ble_ui_store ? dual_ble_ui_store->error : ESP_OK;
+        bool retain_failure = dual_ble_ui_attempted && previous_error != ESP_OK &&
+            (dual_ble_ui_mode == CERBERUS_DUAL_BLE_DISCOVERY || dual_ble_ui_mode == CERBERUS_DUAL_BLE_FAMILY) &&
+            (mode == CERBERUS_DUAL_BLE_DISCOVERY || mode == CERBERUS_DUAL_BLE_FAMILY);
+        dual_ble_ui_mode = mode; dual_ble_ui_attempted = retain_failure;
+        dual_ble_ui_error = retain_failure ? previous_error : ESP_OK;
         dual_ble_ui_family = family; dual_ble_ui_response_mode = response;
         if (mode == CERBERUS_DUAL_BLE_TRACK) {
             memcpy(dual_ble_ui_target, address, 6U); dual_ble_ui_type = type;
@@ -131,6 +150,15 @@ static void dual_ble_ui_get_view(cerberus_dual_ble_view_t *out)
 static bool dual_ble_ui_released(void)
 { return cerberus_dual_ble_released(dual_ble_ui_store); }
 
+static bool dual_ble_ui_apply_selection(void)
+{
+    if (!dual_ble_ui_selection_pending || !dual_ble_live_discovery_released() ||
+        !dual_ble_ui_released()) return false;
+    dual_ble_ui_selection_pending = false;
+    dual_ble_ui_detail = true;
+    return true;
+}
+
 /* A local cached view only: rendering never advances the owner or does SPI. */
 static inline void dual_ble_ui_get_analyzer_view(cerberus_dual_ble_analyzer_view_t *out)
 {
@@ -140,6 +168,7 @@ static inline void dual_ble_ui_get_analyzer_view(cerberus_dual_ble_analyzer_view
 
 static void dual_ble_ui_open(bool reset_detail)
 {
+    dual_ble_ui_cancel_selection();
     dual_ble_ui_from_unified = false;
     dual_ble_ui_from_monitor = false;
     if (reset_detail) {
@@ -155,6 +184,7 @@ static void dual_ble_ui_select_frozen_from(const cerberus_dual_ble_row_t *row,
      * clock query may replace its identity, payload or receive metadata. */
     dual_ble_ui_selected = *row;
     dual_ble_ui_selected_provenance = *provenance;
+    dual_ble_ui_selection_pending = false;
     dual_ble_ui_detail = true;
     dual_ble_ui_receive_info = false;
     dual_ble_ui_hints = false; dual_ble_ui_hint_page = dual_ble_ui_hint_pages = 0U; dual_ble_ui_response_tab = false;
@@ -197,7 +227,7 @@ static void dual_ble_ui_label(const cerberus_dual_ble_row_t *row,
     else cerberus_dual_ble_list_label(row, out);
 }
 
-static esp_err_t dual_ble_ui_draw(bool s3_enabled)
+static esp_err_t dual_ble_ui_draw(bool requested)
 {
     char line[64], identifier[24], name[CERBERUS_BLE_NAME_MAX_LENGTH + 1U];
     uint8_t painted_count = 0U;
@@ -304,7 +334,7 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
             snprintf(line, sizeof(line), "FOCUS UNAVAILABLE / S3 VIEW AVAILABLE");
         else if (view.error == ESP_ERR_NO_MEM) snprintf(line, sizeof(line), "C5 NO MEMORY / S3 VIEW AVAILABLE");
         else if (view.error) snprintf(line, sizeof(line), "C5 ERROR %ld / S3 VIEW AVAILABLE", (long)view.error);
-        else if (!s3_enabled && !view.enabled && !view.receiving && !view.reading && !view.stopping)
+        else if (!requested && !view.enabled && !view.receiving && !view.reading && !view.stopping)
             snprintf(line, sizeof(line), "STOPPED / RETAINED %s", view.published_response ? "REQUESTS" : "PASSIVE");
         else if (dual_ble_ui_response_requests != view.requested_response || view.stopping)
             snprintf(line, sizeof(line), "MODE CHANGING / RETAINED %s", view.published_response ? "REQUESTS" : "PASSIVE");
@@ -322,9 +352,11 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
         ESP_RETURN_ON_ERROR(draw_centered(99, line, view.error ? UI_BAD : UI_MUTED, 1), TAG, "C5 BLE status");
         const char *sort_label = dual_ble_ui_sort == CERBERUS_DUAL_BLE_SORT_SIGNAL ? "SIGNAL >" :
             dual_ble_ui_sort == CERBERUS_DUAL_BLE_SORT_NAME ? "NAME A-Z >" : "SCAN ORDER >";
-        ESP_RETURN_ON_ERROR(draw_small_button(8, 114, 148, 30, sort_label), TAG, "C5 BLE sort");
-        ESP_RETURN_ON_ERROR(draw_small_button(164, 114, 148, 30, dual_ble_ui_recent_only ?
-            "WITHIN 30S >" : "ALL AGES >"), TAG, "C5 BLE recent");
+        ESP_RETURN_ON_ERROR(draw_small_button(8, 114, 148, 30,
+            ble_discovery_s3_retryable() ? "RETRY S3" : sort_label), TAG, "C5 BLE sort/retry");
+        ESP_RETURN_ON_ERROR(draw_small_button(164, 114, 148, 30,
+            dual_ble_live_c5_retryable() ? "RETRY C5" : dual_ble_ui_recent_only ?
+            "WITHIN 30S >" : "ALL AGES >"), TAG, "C5 BLE recent/retry");
         if (dual_ble_ui_offset >= dual_ble_ui_visible_count) dual_ble_ui_offset = 0U;
         for (uint8_t i = 0U; i < 4U; ++i) {
             cerberus_dual_ble_row_t *row = &dual_ble_ui_painted[i];
@@ -365,15 +397,19 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
         ESP_RETURN_ON_ERROR(draw_centered(318, line, UI_MUTED, 1), TAG, "C5 BLE inventory");
         ESP_RETURN_ON_ERROR(draw_small_button(8, 326, 148, 32, "PREVIOUS"), TAG, "C5 BLE previous");
         ESP_RETURN_ON_ERROR(draw_small_button(164, 326, 148, 32, "NEXT"), TAG, "C5 BLE next");
-        if (dual_ble_ui_response_requests) snprintf(line, sizeof(line), "1M REQUESTS / CODED PASSIVE");
+        if (dual_ble_ui_selection_pending) snprintf(line, sizeof(line), "RELEASING RECEIVERS FOR DETAIL");
+        else if (dual_ble_ui_response_requests) snprintf(line, sizeof(line), "1M REQUESTS / CODED PASSIVE");
         else if (view.has_first_result) snprintf(line, sizeof(line), "FIRST RESULTS IN %lu ms", (unsigned long)view.first_result_ms);
         else snprintf(line, sizeof(line), "NO NEW RESULTS THIS RUN");
         ESP_RETURN_ON_ERROR(draw_centered(360, line, UI_MUTED, 1), TAG, "C5 BLE reader latency");
     }
     ESP_RETURN_ON_ERROR(draw_button(20, 370, 280, 40,
         dual_ble_ui_from_monitor ? "BACK TO MONITOR" :
-        s3_enabled ? "STOP BOTH RECEIVERS" : "START BOTH RECEIVERS"), TAG, "C5 BLE control");
-    dual_ble_ui_painted_count = painted_count;
+        dual_ble_ui_detail ? "BACK TO BLE LIST" :
+        dual_ble_ui_selection_pending ? "CANCEL SELECTION" :
+        !requested && (!dual_ble_live_discovery_released() || !dual_ble_ui_released()) ? "STOPPING BOTH RECEIVERS" :
+        requested ? "STOP BOTH RECEIVERS" : "START BOTH RECEIVERS"), TAG, "C5 BLE control");
+    dual_ble_ui_painted_count = dual_ble_ui_selection_pending ? 0U : painted_count;
     dual_ble_ui_hint_pages = hint_pages;
     return ESP_OK;
 }
@@ -390,7 +426,8 @@ static int dual_ble_ui_tap(uint16_t x, uint16_t y)
         }
     }
     if (x >= 20U && x < 300U && y >= 370U && y < 410U)
-        return dual_ble_ui_from_monitor ? DUAL_BLE_UI_BACK_MONITOR : DUAL_BLE_UI_TOGGLE;
+        return dual_ble_ui_from_monitor ? DUAL_BLE_UI_BACK_MONITOR :
+            dual_ble_ui_detail ? DUAL_BLE_UI_BACK_S3 : DUAL_BLE_UI_TOGGLE;
     if (dual_ble_ui_detail) {
         if (y >= 174U && y < 196U) {
             if (x >= 8U && x < 156U) dual_ble_ui_response_tab = false;
@@ -423,6 +460,8 @@ static int dual_ble_ui_tap(uint16_t x, uint16_t y)
         }
     } else {
         if (y >= 114U && y < 144U) {
+            if (x >= 8U && x < 156U && ble_discovery_s3_retryable()) return DUAL_BLE_UI_RETRY_S3;
+            if (x >= 164U && x < 312U && dual_ble_live_c5_retryable()) return DUAL_BLE_UI_RETRY_C5;
             if (x >= 8U && x < 156U) dual_ble_ui_sort =
                 (cerberus_dual_ble_sort_t)(((unsigned)dual_ble_ui_sort + 1U) % CERBERUS_DUAL_BLE_SORT_COUNT);
             else if (x >= 164U && x < 312U) dual_ble_ui_recent_only = !dual_ble_ui_recent_only;
@@ -435,11 +474,13 @@ static int dual_ble_ui_tap(uint16_t x, uint16_t y)
             if (row < dual_ble_ui_painted_count && (y - 150U) % 42U < 40U) {
                 dual_ble_ui_selected = dual_ble_ui_painted[row];
                 dual_ble_ui_selected_provenance = dual_ble_ui_painted_provenance[row];
-                dual_ble_ui_detail = true;
+                dual_ble_ui_detail = false;
+                dual_ble_ui_selection_pending = true;
+                dual_ble_ui_painted_count = 0U;
                 dual_ble_ui_from_unified = dual_ble_ui_from_monitor = false;
                 dual_ble_ui_receive_info = false;
                 dual_ble_ui_hints = false; dual_ble_ui_hint_page = dual_ble_ui_hint_pages = 0U; dual_ble_ui_response_tab = false;
-                return DUAL_BLE_UI_REDRAW;
+                return DUAL_BLE_UI_SELECT;
             }
         }
         if (y >= 326U && y < 358U) {

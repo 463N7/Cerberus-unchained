@@ -49,6 +49,11 @@ typedef struct {
 
 static ble_discovery_live_store_t *ble_discovery_live;
 static esp_err_t ble_discovery_open_error;
+/* User intent survives either receiver failure, including optional-store OOM. */
+static bool ble_discovery_run_requested;
+/* Only used when the optional shared store could not be allocated. */
+static uint8_t ble_discovery_unallocated_destination;
+static uint64_t ble_discovery_unallocated_last_draw_ms;
 static void live_make_view(void);
 static esp_err_t live_paint(bool full);
 
@@ -63,11 +68,20 @@ static cerberus_s3_ble_filter_t ble_discovery_family(void)
     return ble_discovery_monitor_page() ? CERBERUS_S3_BLE_FILTER_FIND_MY : ble_filter;
 }
 
-static bool ble_discovery_page(void)
+static bool ble_discovery_ordinary_page(void)
 {
     return !ui_capability_blocked && current_page == UI_PAGE_BLE &&
-        (ble_mode == UI_BLE_MODE_LIST || ble_mode == UI_BLE_MODE_C5 ||
-         ble_mode == UI_BLE_MODE_FINDMY_MONITOR) && !ble_attack_selecting;
+        (ble_mode == UI_BLE_MODE_LIST || ble_mode == UI_BLE_MODE_C5) && !ble_attack_selecting;
+}
+
+static bool ble_discovery_requested(void)
+{
+    return ble_discovery_run_requested;
+}
+
+static bool ble_discovery_page(void)
+{
+    return ble_discovery_ordinary_page() || ble_discovery_monitor_page();
 }
 
 static bool ble_discovery_presenting(void)
@@ -84,8 +98,8 @@ static bool ble_discovery_unified(void)
 
 static bool ble_discovery_keeps_awake(void)
 {
-    return ble_discovery_page() && ble_discovery_live &&
-        (ble_discovery_live->session.enabled || ble_discovery_live->session.epoch != 0U);
+    return ble_discovery_page() && (ble_discovery_requested() ||
+        (ble_discovery_live && (ble_discovery_live->session.enabled || ble_discovery_live->session.epoch != 0U)));
 }
 
 /* The local BLE list must not wait for optional, synchronous SPI telemetry.
@@ -95,12 +109,43 @@ static bool ble_discovery_defers_c5_telemetry(void)
     return ble_discovery_page();
 }
 
-static void ble_discovery_leave(void)
+/* Intent cancellation is pure: the existing global ticks drain each owned
+ * radio. Pending frozen selection/destination survives until that drain ends. */
+static void ble_discovery_request_stop(void)
 {
+    ble_discovery_run_requested = false;
+    if (ble_discovery_live)
+        cerberus_ble_discovery_session_stop(&ble_discovery_live->session);
+    dual_ble_ui_cancel();
+}
+
+static void ble_discovery_cancel_navigation(void)
+{
+    dual_ble_ui_cancel_selection();
+    ble_discovery_unallocated_destination = 0U;
     if (!ble_discovery_live) return;
     ble_discovery_live->selection_pending = false;
-    ble_discovery_live->destination = 0U;
-    cerberus_ble_discovery_session_stop(&ble_discovery_live->session);
+    ble_discovery_live->selected_source = ble_discovery_live->destination = 0U;
+    ble_discovery_live->painted_count = 0U;
+}
+
+static void ble_discovery_leave(void)
+{
+    ble_discovery_request_stop();
+    ble_discovery_cancel_navigation();
+}
+
+static void ble_discovery_request_destination(uint8_t destination)
+{
+    if (!ble_discovery_ordinary_page() || destination < 1U || destination > 2U) return;
+    dual_ble_ui_cancel_selection();
+    ble_discovery_unallocated_destination = ble_discovery_live ? 0U : destination;
+    if (ble_discovery_live) {
+        ble_discovery_live->selection_pending = false;
+        ble_discovery_live->selected_source = ble_discovery_live->painted_count = 0U;
+        ble_discovery_live->destination = destination;
+    }
+    ble_discovery_request_stop();
 }
 
 _Static_assert(CERBERUS_BLE_DISCOVERY_FAMILY_COUNT == CERBERUS_S3_BLE_FILTER_COUNT,
@@ -218,11 +263,43 @@ static bool ble_discovery_acquire(void)
         .poll = ble_discovery_poll, .copy = ble_discovery_copy,
         .stop = ble_discovery_stop, .release = ble_discovery_release};
     ble_discovery_live->presentation.valid = true;
-    /* Entering Scan is an explicit discovery request; later Back/Stop does not
-     * silently rearm the retained list. Family changes preserve that intent. */
-    if (!ble_discovery_monitor_page())
-        (void)cerberus_ble_discovery_session_start(&ble_discovery_live->session);
     return true;
+}
+
+static esp_err_t ble_discovery_request_start(void)
+{
+    if (!ble_discovery_ordinary_page()) return ESP_ERR_INVALID_STATE;
+    /* A new explicit run also retries C5, even if S3 allocation fails. */
+    dual_ble_ui_retry();
+    ble_discovery_run_requested = true;
+    ble_discovery_unallocated_destination = 0U;
+    ble_discovery_open_error = ESP_OK;
+    dual_ble_ui_cancel_selection();
+    if (!ble_discovery_acquire()) return ble_discovery_open_error;
+    ble_discovery_live_store_t *store = ble_discovery_live;
+    store->selection_pending = false;
+    store->selected_source = store->destination = store->painted_count = 0U;
+    (void)cerberus_ble_discovery_session_select(&store->session, (uint8_t)ble_discovery_family());
+    (void)cerberus_ble_discovery_session_start(&store->session);
+    store->dirty = true;
+    return ESP_OK;
+}
+
+static bool ble_discovery_s3_retryable(void)
+{
+    return ble_discovery_requested() && ble_discovery_ordinary_page() &&
+        (ble_discovery_open_error != ESP_OK || (ble_discovery_live &&
+         ble_discovery_live->session.faulted));
+}
+
+static esp_err_t ble_discovery_retry_s3(void)
+{
+    if (!ble_discovery_s3_retryable()) return ESP_ERR_INVALID_STATE;
+    ble_discovery_open_error = ESP_OK;
+    if (!ble_discovery_acquire()) return ble_discovery_open_error;
+    (void)cerberus_ble_discovery_session_start(&ble_discovery_live->session);
+    ble_discovery_live->dirty = true;
+    return ESP_OK;
 }
 
 /* Monitor intent is controlled separately by its page. Allocation and return
@@ -230,6 +307,8 @@ static bool ble_discovery_acquire(void)
 static esp_err_t ble_discovery_monitor_start(void)
 {
     if (!ble_discovery_monitor_page()) return ESP_ERR_INVALID_STATE;
+    ble_discovery_run_requested = false;
+    ble_discovery_unallocated_destination = 0U;
     ble_discovery_open_error = ESP_OK;
     if (!ble_discovery_acquire()) return ble_discovery_open_error;
     ble_discovery_live_store_t *store = ble_discovery_live;
@@ -290,44 +369,66 @@ static bool ble_discovery_monitor_apply_selection(void)
 static void ble_discovery_select_painted(unsigned row)
 {
     ble_discovery_live_store_t *store = ble_discovery_live;
-    if (!store || !ble_discovery_presenting() || row >= store->painted_count) return;
-    if (store->painted_source[row] == CERBERUS_BLE_DISCOVERY_LIST_C5) {
-        store->selection_pending = false;
-        store->destination = 0U;
+    if (!store || !ble_discovery_presenting() || store->selection_pending || store->destination ||
+        row >= store->painted_count || row >= 4U) return;
+    uint8_t source = store->painted_source[row];
+    if (source == CERBERUS_BLE_DISCOVERY_LIST_C5)
         dual_ble_ui_select_frozen(&store->painted_c5[row], &store->painted_c5_provenance[row]);
-        ble_mode = UI_BLE_MODE_C5;
-        return;
-    }
-    store->selected = store->painted[row];
+    else if (source == CERBERUS_BLE_DISCOVERY_LIST_S3)
+        store->selected = store->painted[row];
+    else return;
+    store->selected_source = source;
     store->selection_pending = true;
-    store->destination = 0U;
-    cerberus_ble_discovery_session_stop(&store->session);
+    store->painted_count = store->destination = 0U;
+    ble_discovery_request_stop();
     store->dirty = true;
 }
 
 static void ble_discovery_toggle(void)
 {
-    const bool already_allocated = ble_discovery_live != NULL;
-    ble_discovery_open_error = ESP_OK;
-    if (!ble_discovery_acquire()) return;
-    ble_discovery_live_store_t *store = ble_discovery_live;
-    if (!already_allocated) {
-        store->dirty = true;
-        return;
-    }
-    store->selection_pending = false;
-    store->destination = 0U;
-    if (store->session.enabled || !cerberus_ble_discovery_session_released(&store->session))
-        cerberus_ble_discovery_session_stop(&store->session);
-    else
-        (void)cerberus_ble_discovery_session_start(&store->session);
-    store->dirty = true;
+    if (ble_discovery_requested() || !dual_ble_ui_released() ||
+        (ble_discovery_live && !cerberus_ble_discovery_session_released(&ble_discovery_live->session)))
+        ble_discovery_leave();
+    else (void)ble_discovery_request_start();
+}
+
+/* An unavailable S3 store cannot own the repaint clock. Keep only this small
+ * UI timestamp outside PSRAM so cached C5 progress remains visible. Painting
+ * does not allocate the shared store or advance either radio controller. */
+static void ble_discovery_paint_unallocated(uint64_t now_ms)
+{
+    if (!ble_discovery_ordinary_page() || ble_mode != UI_BLE_MODE_LIST || ble_discovery_live ||
+        now_ms - ble_discovery_unallocated_last_draw_ms < 200U) return;
+    ble_discovery_unallocated_last_draw_ms = now_ms;
+    ++live_frame;
+    live_make_view();
+    ESP_ERROR_CHECK(live_paint(false));
 }
 
 static void ble_discovery_tick(uint64_t now_ms, bool asleep)
 {
     bool visible = ble_discovery_page() && !asleep;
-    if (visible && !ble_discovery_acquire()) return;
+    /* A hidden ordinary request must be canceled even when its allocation
+     * failed. Do not cancel a monitor/Fox/Analyzer request that replaced it. */
+    if ((!ble_discovery_ordinary_page() || asleep) &&
+        (ble_discovery_requested() || ble_discovery_unallocated_destination || (ble_discovery_live &&
+         (ble_discovery_live->selection_pending || ble_discovery_live->destination))))
+        ble_discovery_leave();
+    if (visible && ble_discovery_unallocated_destination) {
+        if (dual_ble_ui_released() && (!ble_discovery_live ||
+            cerberus_ble_discovery_session_released(&ble_discovery_live->session))) {
+            uint8_t destination = ble_discovery_unallocated_destination;
+            ble_discovery_unallocated_destination = 0U;
+            if (destination == 2U) ble_findmy_monitor_open();
+            else ble_mode = UI_BLE_MODE_MENU;
+            ESP_ERROR_CHECK(draw_current_page());
+        } else ble_discovery_paint_unallocated(now_ms);
+        return;
+    }
+    if (visible && !ble_discovery_acquire()) {
+        ble_discovery_paint_unallocated(now_ms);
+        return;
+    }
     ble_discovery_live_store_t *store = ble_discovery_live;
     if (!store) return;
     if (!visible) {
@@ -353,13 +454,21 @@ static void ble_discovery_tick(uint64_t now_ms, bool asleep)
         !cerberus_ble_discovery_session_released(&store->session) ?
         SENTINEL_SCAN_RUNNING : SENTINEL_SCAN_COMPLETE;
     if (visible && ble_discovery_presenting() && store->selection_pending &&
-        cerberus_ble_discovery_session_released(&store->session)) {
+        cerberus_ble_discovery_session_released(&store->session) && dual_ble_ui_released()) {
+        if (store->selected_source == CERBERUS_BLE_DISCOVERY_LIST_C5) {
+            store->selection_pending = false;
+            store->selected_source = 0U;
+            ble_mode = UI_BLE_MODE_C5;
+            ESP_ERROR_CHECK(draw_current_page());
+            return;
+        }
         const cerberus_s3_ble_discovery_record_t *proof = &store->selected.record;
         cerberus_findmy_monitor_record_t frozen = {
             .peer = proof->peer, .advertisement = proof->advertisement,
             .focus = proof->focus, .generation = proof->generation,
             .index = proof->index, .observed_ms = proof->observed_ms};
         store->selection_pending = false;
+        store->selected_source = 0U;
         ble_select_frozen_live(&frozen);
         ble_selected_original_time64_valid = true;
         ble_selected_scan_epoch = store->selected.epoch;
@@ -368,7 +477,7 @@ static void ble_discovery_tick(uint64_t now_ms, bool asleep)
         return;
     }
     if (visible && ble_discovery_presenting() && store->destination &&
-        cerberus_ble_discovery_session_released(&store->session)) {
+        cerberus_ble_discovery_session_released(&store->session) && dual_ble_ui_released()) {
         uint8_t destination = store->destination;
         store->destination = 0U;
         if (destination == 2U) ble_findmy_monitor_open();

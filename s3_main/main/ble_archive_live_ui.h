@@ -155,11 +155,18 @@ static void ble_archive_save(unsigned scope)
     if (ble_archive_view && (ble_archive_view->release_pending || ble_archive_view->job_pending)) return;
     ble_archive_enter();
     esp_err_t error = ble_archive_capture(scope);
-    /* Freeze the retained banks at the save clock before clearing acquisition
-     * intent. Even a failed capture must not rearm pending monitor work on Back. */
-    if (ble_archive_return_page == UI_PAGE_BLE &&
-        ble_archive_return_mode == UI_BLE_MODE_FINDMY_MONITOR)
-        ble_findmy_request_stop(false, false);
+    /* Freeze first, then cancel the acquisition/navigation owned by the page
+     * that requested Save. Failure still cancels intent: an immediate Back
+     * must not rearm pre-INFO work or apply an older pending row selection.
+     * A stale ordinary request must never cancel another page's receiver. */
+    if (ble_archive_return_page == UI_PAGE_BLE) {
+        if (ble_archive_return_mode == UI_BLE_MODE_FINDMY_MONITOR)
+            ble_findmy_request_stop(false, false);
+        else if (ble_archive_return_mode == UI_BLE_MODE_LIST ||
+            (ble_archive_return_mode == UI_BLE_MODE_C5 && !dual_ble_ui_from_monitor) ||
+            (ble_archive_return_mode == UI_BLE_MODE_DETAIL && !ble_selected_from_monitor))
+            ble_discovery_leave();
+    }
     if (error == ESP_OK) {
         ble_archive_view->release_pending = true;
         ble_archive_view->release_started_ms = ble_archive_view->incoming.saved_uptime_ms;
@@ -167,8 +174,6 @@ static void ble_archive_save(unsigned scope)
         ble_archive_view->saving = true;
         ble_archive_view->paint_valid = ble_archive_view->selected_valid = false;
         ble_archive_view->error = ESP_OK;
-        ble_discovery_leave();
-        if (dual_ble_ui_store) cerberus_dual_ble_stop(dual_ble_ui_store);
     } else if (ble_archive_view) ble_archive_ui_error(ble_archive_view, error);
     ble_archive_open_error = error;
     ESP_ERROR_CHECK(draw_detail_page());

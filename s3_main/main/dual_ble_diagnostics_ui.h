@@ -43,12 +43,23 @@ static void dual_ble_publish_diagnostics(uint64_t now, bool asleep)
         out.s3_state = ble_scan_status.state;
         out.s3_scan_error = ble_scan_error ? ble_scan_error : ble_scan_status.error_code;
     }
+    bool discovery_scope = ble_discovery_ordinary_page() || ble_discovery_monitor_page() ||
+        (ble_discovery_live && !cerberus_ble_discovery_session_released(&ble_discovery_live->session));
+    if (discovery_scope) {
+        /* A generic scanner's cached status may belong to a different owner.
+         * Keep the discovery error after release without inventing a current
+         * RF observation or attributing that other owner's state to this run. */
+        out.s3_scan_cached = false;
+        out.s3_state = 0U;
+        out.s3_scan_error = ble_discovery_open_error;
+    }
     if (ble_discovery_live) {
         const cerberus_ble_discovery_session_t *session = &ble_discovery_live->session;
         out.s3_discovery_enabled = session->enabled;
         out.s3_discovery_attached = !cerberus_ble_discovery_session_released(session);
         out.s3_discovery_owned = out.s3_discovery_attached && session->have_observation && session->observation.owned;
-        if (out.s3_discovery_attached && session->have_observation) {
+        if (discovery_scope && session->error) out.s3_scan_error = session->error;
+        if (discovery_scope && out.s3_discovery_attached && session->have_observation) {
             out.s3_scan_cached = true; out.s3_state = session->observation.state;
             out.s3_scan_error = session->error ? session->error : session->observation.error;
         }

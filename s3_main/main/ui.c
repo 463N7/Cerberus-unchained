@@ -375,6 +375,13 @@ static void dual_wifi_live_open(bool start_scan);
 static void dual_wifi_live_tick(uint32_t now, bool asleep);
 static void dual_wifi_live_tap(uint16_t x, uint16_t y);
 static bool dual_ble_live_enabled(void);
+static bool ble_discovery_ordinary_page(void);
+static bool ble_discovery_requested(void);
+static esp_err_t ble_discovery_request_start(void);
+static void ble_discovery_request_stop(void);
+static bool ble_discovery_s3_retryable(void);
+static esp_err_t ble_discovery_retry_s3(void);
+static bool dual_ble_live_c5_retryable(void);
 static void ble_discovery_leave(void);
 static bool dual_ble_live_discovery_released(void);
 static void dual_ble_live_tap(uint16_t x, uint16_t y);
@@ -9330,14 +9337,19 @@ static void handle_ble_tap(uint16_t x, uint16_t y)
         if (item == 7) { ble_archive_open_menu(); return; }
         if (item == 0) {
             ble_mode = UI_BLE_MODE_LIST;
+            (void)ble_discovery_request_start();
             (void)refresh_ble_scan_status();
         } else if (item == 1) {
             ble_mode = ble_selection_valid ? UI_BLE_MODE_DETAIL : UI_BLE_MODE_LIST;
-            if (!ble_selection_valid) (void)refresh_ble_scan_status();
+            if (!ble_selection_valid) {
+                (void)ble_discovery_request_start();
+                (void)refresh_ble_scan_status();
+            }
         } else if (item == 2) {
             (void)refresh_ble_connection_status();
             if (!ble_selection_valid) {
                 ble_mode = UI_BLE_MODE_LIST;
+                (void)ble_discovery_request_start();
                 (void)refresh_ble_scan_status();
             } else if (ble_connection_status.state == CERBERUS_BLE_CONNECTION_CONNECTED &&
                 ble_service_checked && ble_service_error == ESP_OK &&
@@ -9353,6 +9365,7 @@ static void handle_ble_tap(uint16_t x, uint16_t y)
         } else if (item == 3) {
             if (!ble_selection_valid) {
                 ble_mode = UI_BLE_MODE_LIST;
+                (void)ble_discovery_request_start();
                 (void)refresh_ble_scan_status();
             } else {
                 (void)refresh_ble_connection_status();
@@ -11295,6 +11308,8 @@ static void open_tool_page(ui_page_t page)
     }
     if (current_page == UI_PAGE_BLE) {
         ble_mode = UI_BLE_MODE_LIST;
+        if (!ui_capability_blocked && !ble_attack_selecting)
+            (void)ble_discovery_request_start();
     }
     if (current_page == UI_PAGE_BLE_ATTACK) {
         ble_attack_start_pending = false;
@@ -11837,6 +11852,7 @@ static void handle_tap(uint16_t x, uint16_t y)
         y >= UI_BACK_Y && y < UI_BACK_Y + UI_BACK_HEIGHT) {
         if (x >= 164U && x < 312U) ble_archive_save_c5(dual_ble_ui_detail);
         else if (x >= 8U && x < 156U) {
+            dual_ble_ui_cancel_selection();
             if (dual_ble_ui_from_monitor) ble_findmy_monitor_return();
             else ble_mode = UI_BLE_MODE_LIST;
             ESP_ERROR_CHECK(draw_detail_page());

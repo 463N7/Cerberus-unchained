@@ -81,9 +81,10 @@ static void wifi_relation_bind_selection(bool ordinary)
 static esp_err_t cerberus_s3_ble_scanner_start_active(cerberus_ble_scan_status_payload_t*s){(void)s;++active_starts;return ESP_OK;}
 static esp_err_t cerberus_s3_ble_scanner_start(cerberus_ble_scan_status_payload_t*s){(void)s;++passive_starts;return ESP_OK;}
 static esp_err_t cerberus_s3_ble_scanner_stop(cerberus_ble_scan_status_payload_t*s){(void)s;++stop_count;return ESP_OK;}
-/* This fixture exercises only the retained completed-bank route, with no
- * active discovery store. Compile the actual unified gate and keep every new
- * receiver boundary fail-fast; the discovery-live suite owns unified parity. */
+/* This fixture exercises only the legacy retained completed-bank route, with
+ * the ordinary discovery facade disabled. It does not model S3 store OOM:
+ * discovery-live covers that empty shell, both receivers and global ticks.
+ * Compile the actual unified gate and keep receiver boundaries fail-fast. */
 typedef struct {
     cerberus_s3_ble_discovery_inventory_t inventory;
     cerberus_ble_discovery_session_t session;
@@ -94,6 +95,10 @@ typedef struct {
 static ble_discovery_live_store_t *ble_discovery_live;
 static bool ble_discovery_presenting(void){return false;}
 static bool ble_discovery_page(void){return false;}
+static bool ble_discovery_ordinary_page(void){return false;}
+static void ble_discovery_cancel_navigation(void){assert(!"ordinary navigation in legacy fixture");}
+static void ble_discovery_request_destination(uint8_t destination)
+{(void)destination;assert(!"ordinary destination in legacy fixture");}
 static size_t ble_discovery_combined_order(void){assert(!"combined ordering in legacy fixture");return 0U;}
 static uint32_t ble_discovery_visible_mask(uint64_t now){(void)now;assert(!"live mask in legacy fixture");return 0U;}
 static void ble_discovery_toggle(void){assert(!"live toggle in legacy fixture");}

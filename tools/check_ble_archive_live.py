@@ -22,15 +22,19 @@ frame = frame.replace('    if(!*text)return ESP_OK;', '    drawn_size += (size_t
 prefix = (root / 'tools/host_checks/ble_archive_ui_check.c').read_text(encoding='utf-8').split('#include "ble_archive_ui.h"', 1)[0]
 (out / 'archive_live_adapters.h').write_text(prefix, encoding='utf-8')
 ui = (root / 's3_main/main/ui.c').read_text(encoding='utf-8')
-def block(needle):
-    begin = ui.index(needle)
-    opening = ui.index('{', begin)
+def block(needle, source=ui):
+    begin = source.index(needle)
+    opening = source.index('{', begin)
     depth = 1
     end = opening + 1
     while depth:
-        depth += (ui[end] == '{') - (ui[end] == '}')
+        depth += (source[end] == '{') - (source[end] == '}')
         end += 1
-    return ui[begin:end]
+    return source[begin:end]
+
+companion_ui = (root / 's3_main/main/dual_ble_ui.h').read_text(encoding='utf-8')
+(out / 'archive_pending_cancel.h').write_text(
+    block('static void dual_ble_ui_cancel_selection(void)', companion_ui), encoding='utf-8')
 (out / 'archive_c5_footer.h').write_text(
     'static esp_err_t archive_root_footer_draw(void) {\n' +
     block('if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5) {') +

@@ -211,6 +211,29 @@ esp_err_t cerberus_display_draw_mono_bitmap(uint16_t x,uint16_t y,uint16_t w,uin
         screen[(y+row)*320+x+col]=data[row*((w+7)/8)+col/8]&(0x80>>(col%8))?fg:bg;
     return ESP_OK;
 }
+static void check_error_stop_control(void)
+{
+    sentinel_scan_view_t view={.kind=SENTINEL_VIEW_BLE,.state=SENTINEL_VIEW_ERROR,
+        .stop_action=true,.subtitle="S3 ERROR / C5 ERROR / TAP C5",
+        .hint="RETRY EACH RECEIVER IN C5 VIEW"};
+    assert(sentinel_scan_view_draw(&view,0U)==ESP_OK);
+    assert_drawn_text(106U,381U,"STOP");
+    assert(sentinel_scan_view_hit_test(&view,100U,380U)==SENTINEL_VIEW_PAUSE);
+    static uint16_t before_screen[320U*480U];
+    memcpy(before_screen,screen,sizeof(screen));
+    unsigned before=calls;
+    view.stop_action=false;
+    assert(sentinel_scan_view_update(&view,1U)==ESP_OK&&calls>before);
+    assert_drawn_text(106U,381U,"SCAN");
+    for(unsigned y=0U;y<480U;++y)for(unsigned x=0U;x<320U;++x)
+        if(x<84U||x>=152U||y<364U||y>=406U)
+            assert(screen[y*320U+x]==before_screen[y*320U+x]);
+    before=calls;assert(sentinel_scan_view_update(&view,2U)==ESP_OK&&calls==before);
+    view.state=SENTINEL_VIEW_LIVE;
+    assert(sentinel_scan_view_update(&view,3U)==ESP_OK);
+    assert_drawn_text(106U,381U,"STOP"); /* Existing callers retain their default. */
+}
+
 int main(int argc,char **argv)
 {
     assert(argc==9);
@@ -265,6 +288,7 @@ int main(int argc,char **argv)
     assert(sentinel_scan_view_hit_test(&v,250,65)==SENTINEL_VIEW_NONE);
     check_age_controls(&v,argv[3],argv[4],argv[5]);
     check_wifi_age_controls(argv[6],argv[7],argv[8]);
+    check_error_stop_control();
     sentinel_scan_session_t s;sentinel_scan_session_init(&s);
     sentinel_scan_session_select_snapshot(&s,SENTINEL_SCAN_WIFI);
     sentinel_scan_observation_t idle={.valid=true};

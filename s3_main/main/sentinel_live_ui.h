@@ -521,6 +521,13 @@ static void live_make_view(void)
 {
     sentinel_scan_tool_t tool = live_page_tool();
     live_scan_record_t *record = live_display_record(tool);
+    const bool ordinary_ble = tool == SENTINEL_SCAN_BLE && ble_discovery_ordinary_page();
+    /* A failed shared-store allocation must not expose a legacy Watch bank as
+     * fresh ordinary discovery. C5 still has its independent retained view. */
+    live_scan_record_t missing_ble = {.valid = true, .error = ble_discovery_open_error};
+    if (ordinary_ble && !ble_discovery_live) record = &missing_ble;
+    cerberus_dual_ble_view_t companion = {0};
+    if (ordinary_ble) dual_ble_ui_get_view(&companion);
     sentinel_scan_session_t *session = live_session_for(tool);
     const bool unified_ble = tool == SENTINEL_SCAN_BLE && ble_discovery_unified();
     if (ble_discovery_presenting()) {
@@ -548,11 +555,16 @@ static void live_make_view(void)
     else if (session->completed && session->desired == tool) live_view.state = SENTINEL_VIEW_COMPLETE;
     if (tool == SENTINEL_SCAN_WIFI && live_wifi_capture_busy())
         live_view.state = SENTINEL_VIEW_LIVE;
-    if (tool == SENTINEL_SCAN_BLE && ble_discovery_presenting()) {
-        const cerberus_ble_discovery_session_t *discovery = &ble_discovery_live->session;
-        live_view.state = !cerberus_ble_discovery_session_released(discovery) || discovery->enabled ?
-            SENTINEL_VIEW_LIVE : discovery->faulted || discovery->error ?
-            SENTINEL_VIEW_ERROR : SENTINEL_VIEW_PAUSED;
+    if (ordinary_ble) {
+        const cerberus_ble_discovery_session_t *discovery = ble_discovery_live ? &ble_discovery_live->session : NULL;
+        bool held = !dual_ble_live_discovery_released() || !dual_ble_ui_released();
+        bool requested = ble_discovery_requested();
+        bool active = (discovery && discovery->enabled) || companion.enabled ||
+            companion.receiving || companion.reading;
+        bool failed = ble_discovery_open_error || (discovery && discovery->error) || companion.error;
+        live_view.stop_action = requested || held;
+        live_view.state = held || (requested && (active || !failed)) ? SENTINEL_VIEW_LIVE :
+            requested && failed ? SENTINEL_VIEW_ERROR : SENTINEL_VIEW_PAUSED;
     }
     live_view.total_count = record->count;
     if (tool == SENTINEL_SCAN_BLE) {
@@ -686,51 +698,49 @@ static void live_make_view(void)
         snprintf(live_hint, sizeof(live_hint), live_view.age_label ?
             "FILTER LEFT / SORT & AGE RIGHT / %u IN SWEEP" :
             "FILTER LEFT / SORT RIGHT / %u IN SWEEP", record->count);
-    if (tool == SENTINEL_SCAN_BLE && ble_discovery_presenting()) {
-        const cerberus_ble_discovery_session_t *discovery = &ble_discovery_live->session;
-        cerberus_dual_ble_view_t companion;
-        dual_ble_ui_get_view(&companion);
-        if (discovery->drain_requested || (!discovery->enabled && discovery->epoch))
-            snprintf(live_subtitle, sizeof(live_subtitle), "STOPPING / WAITING FOR RADIO RELEASE");
-        else if (discovery->error)
-            snprintf(live_subtitle, sizeof(live_subtitle), "SCAN ERROR / %.30s", esp_err_to_name(discovery->error));
-        else if (dual_ble_ui_response_requests && companion.error == ESP_ERR_NOT_SUPPORTED)
-            snprintf(live_subtitle, sizeof(live_subtitle), "C5 REQUESTS UNAVAILABLE / S3 / C5 >");
-        else if (discovery->enabled && dual_ble_ui_response_requests != companion.requested_response)
+    if (ordinary_ble) {
+        const cerberus_ble_discovery_session_t *discovery = ble_discovery_live ? &ble_discovery_live->session : NULL;
+        const int32_t s3_error = ble_discovery_open_error ? ble_discovery_open_error :
+            discovery ? discovery->error : ESP_OK;
+        const bool requested = ble_discovery_requested();
+        const bool held = !dual_ble_live_discovery_released() || !dual_ble_ui_released();
+        const char *c5_state = companion.error ? "ERROR" : companion.stopping ? "STOPPING" :
+            companion.receiving ? "LIVE" : companion.reading ? "READING" : companion.enabled ? "STARTING" : "STOPPED";
+        if (!requested && held)
+            snprintf(live_subtitle, sizeof(live_subtitle), "STOPPING / WAITING FOR BOTH / C5 >");
+        else if (s3_error)
+            snprintf(live_subtitle, sizeof(live_subtitle), "S3 %.19s / C5 %s / C5 >", esp_err_to_name(s3_error), c5_state);
+        else if (companion.error)
+            snprintf(live_subtitle, sizeof(live_subtitle), "S3 %s / C5 %.20s / C5 >",
+                discovery && discovery->enabled ? "LIVE" : "STOPPED", esp_err_to_name(companion.error));
+        else if (requested && (dual_ble_ui_response_requests != companion.requested_response ||
+            companion.requested_family != (uint8_t)ble_filter))
             snprintf(live_subtitle, sizeof(live_subtitle), "C5 MODE CHANGING / RETAINED %s / C5 >",
                 companion.published_response ? "REQUESTS" : "PASSIVE");
-        else if (discovery->enabled && dual_ble_ui_response_requests && !companion.error)
-            snprintf(live_subtitle, sizeof(live_subtitle), "C5 RESPONSE REQUESTS %s / %u / C5 >",
-                companion.stopping ? "STOP" : companion.receiving ? "LIVE" : companion.reading ? "READ" : "WAIT", companion.count);
-        else if (ble_filter != CERBERUS_S3_BLE_FILTER_ALL && companion.error == ESP_ERR_NOT_SUPPORTED)
-            snprintf(live_subtitle, sizeof(live_subtitle), "C5 FOCUS UNAVAILABLE / S3 VIEW / C5 >");
-        else if (companion.error == ESP_ERR_NO_MEM)
-            snprintf(live_subtitle, sizeof(live_subtitle), "C5 NO MEMORY / S3 VIEW / C5 >");
-        else if (companion.error)
-            snprintf(live_subtitle, sizeof(live_subtitle), "S3 VIEW / C5 ERROR %ld / TAP FOR C5 >", (long)companion.error);
-        else if (discovery->enabled && ble_filter != CERBERUS_S3_BLE_FILTER_ALL)
-            snprintf(live_subtitle, sizeof(live_subtitle), "C5 FOCUS %s / %u RETAINED / C5 >",
-                companion.stopping || companion.requested_family != (uint8_t)ble_filter ? "CHANGING" :
-                companion.receiving ? "LIVE" : companion.reading ? "READ" : "WAIT", companion.count);
-        else if (discovery->enabled)
-            snprintf(live_subtitle, sizeof(live_subtitle), "S3 + C5 %s / %u / TAP FOR C5 >",
-                companion.receiving ? "LIVE" : companion.reading ? "READ" : "WAIT", companion.count);
-        else
-            snprintf(live_subtitle, sizeof(live_subtitle), "STOPPED / C5 %u / TAP FOR C5 >", companion.count);
-        snprintf(live_hint, sizeof(live_hint), "KEPT %u / REPLACED %lu / CACHE FULL %u",
-            ble_discovery_live->inventory.count,
-            (unsigned long)ble_discovery_live->inventory.replacements,
-            ble_discovery_live->binding_overflows);
-        if (unified_ble) {
-            if (ble_filter == CERBERUS_S3_BLE_FILTER_ALL)
-                snprintf(live_hint, sizeof(live_hint), "S3 %u + C5 %u OBS / SOURCE FILTER ABOVE",
-                    ble_discovery_live->inventory.family == ble_filter ?
-                        ble_discovery_live->inventory.count : 0U, companion.count);
-            else snprintf(live_hint, sizeof(live_hint), "S3 %u + C5 %u RETAINED / UNCLASSIFIED %u",
+        else if (requested)
+            snprintf(live_subtitle, sizeof(live_subtitle), "S3 %s / C5 %s %s / TAP C5 >",
+                discovery && discovery->enabled ? "LIVE" : "WAIT", c5_state,
+                dual_ble_ui_response_requests ? "REQUESTS" : ble_filter != CERBERUS_S3_BLE_FILTER_ALL ? "FOCUS" : "PASSIVE");
+        else snprintf(live_subtitle, sizeof(live_subtitle), "STOPPED / C5 %u RETAINED / TAP C5 >", companion.count);
+        if (!ble_discovery_live)
+            snprintf(live_hint, sizeof(live_hint), "S3 STORE UNAVAILABLE / C5 HAS %u RETAINED", companion.count);
+        else if (unified_ble && ble_filter != CERBERUS_S3_BLE_FILTER_ALL)
+            snprintf(live_hint, sizeof(live_hint), "S3 %u + C5 %u RETAINED / UNCLASSIFIED %u",
                 (unsigned)__builtin_popcount(ble_discovery_live->order_s3_mask),
                 (unsigned)__builtin_popcount(ble_discovery_live->order_c5_mask),
                 (unsigned)ble_discovery_live->order_c5_count - (unsigned)__builtin_popcount(ble_discovery_live->c5_classifiable));
-        }
+        else snprintf(live_hint, sizeof(live_hint), "S3 %u + C5 %u OBS / SOURCE FILTER ABOVE",
+            ble_discovery_live->inventory.family == ble_filter ? ble_discovery_live->inventory.count : 0U,
+            companion.count);
+        if (ble_discovery_s3_retryable() && dual_ble_live_c5_retryable())
+            snprintf(live_hint, sizeof(live_hint), "RETRY EACH RECEIVER IN C5 VIEW");
+        else if (ble_discovery_s3_retryable())
+            snprintf(live_hint, sizeof(live_hint), "RETRY S3 IN C5 VIEW / C5 %s", c5_state);
+        else if (dual_ble_live_c5_retryable())
+            snprintf(live_hint, sizeof(live_hint), "RETRY C5 IN C5 VIEW / S3 %s",
+                discovery && discovery->enabled ? "LIVE" : "STOPPED");
+        else if (requested && s3_error && discovery && discovery->enabled)
+            snprintf(live_hint, sizeof(live_hint), "S3 RETRYING / C5 %s / TAP C5 VIEW", c5_state);
     }
     if (tool == SENTINEL_SCAN_WIFI && live_view.age_label && record->captured)
         snprintf(live_hint, sizeof(live_hint), "%s / %s / %u IN SWEEP",
@@ -766,12 +776,16 @@ static void live_make_view(void)
     live_view.message = live_view.state == SENTINEL_VIEW_LIVE ?
         (record->captured ? "LAST SWEEP WAS EMPTY" : "LISTENING") :
         live_view.state == SENTINEL_VIEW_COMPLETE ? "NO SIGNALS FOUND" : NULL;
-    if (tool == SENTINEL_SCAN_BLE && ble_discovery_presenting())
-        live_view.message = ble_discovery_live->session.enabled ?
+    if (ordinary_ble)
+        live_view.message = ble_discovery_requested() ?
             (ble_filter == CERBERUS_S3_BLE_FILTER_ALL ? "WAITING FOR REPORTS" : "WAITING FOR HINTS") :
             (ble_filter == CERBERUS_S3_BLE_FILTER_ALL ? "NO OBSERVATIONS" : "NO MATCHING HINTS");
+    if (ordinary_ble && !ble_discovery_live)
+        live_view.message = "OPEN C5 VIEW";
     if (tool == SENTINEL_SCAN_BLE && live_ble_recent_only && live_view.age_label && record->captured)
         live_view.message = "NO HINTS WITHIN 30S";
+    if (ordinary_ble && live_view.state == SENTINEL_VIEW_ERROR)
+        live_view.message = "RETRY RECEIVERS";
     if (tool == SENTINEL_SCAN_WIFI && live_wifi_recent_only && live_view.age_label && record->captured)
         live_view.message = "NO NETWORKS WITHIN 30S";
     if (ordinary_wifi && live_wifi_band != CERBERUS_S3_WIFI_BAND_ALL && record->captured)
@@ -899,7 +913,6 @@ static void live_make_view(void)
 
 static esp_err_t draw_live_scan(void)
 {
-    if (ble_discovery_page()) (void)ble_discovery_acquire();
     live_make_view();
     return live_paint(true);
 }
@@ -1035,17 +1048,17 @@ static void live_reset_observations(void)
 
 static bool live_scan_paused(void)
 {
-    if (ble_discovery_presenting())
-        return !ble_discovery_live->session.enabled;
+    if (ble_discovery_ordinary_page())
+        return !ble_discovery_requested();
     sentinel_scan_session_t *session = live_session_for(live_page_tool());
     return session->paused || session->faulted;
 }
 
 static const char *live_scan_action_label(void)
 {
-    if (ble_discovery_presenting())
-        return ble_discovery_live->session.enabled ||
-            !cerberus_ble_discovery_session_released(&ble_discovery_live->session) ? "STOP" : "SCAN";
+    if (ble_discovery_ordinary_page())
+        return ble_discovery_requested() || !dual_ble_live_discovery_released() ||
+            !dual_ble_ui_released() ? "STOP" : "SCAN";
     sentinel_scan_session_t *session = live_session_for(live_page_tool());
     if (session->completed) return "SCAN AGAIN";
     return live_scan_paused() || live_records[live_page_tool()].error != ESP_OK ? "SCAN" : "STOP";
@@ -1080,20 +1093,18 @@ static void handle_live_scan_tap(uint16_t x, uint16_t y)
 {
     /* Hit-test the last painted snapshot, never a newly fetched row ordering. */
     sentinel_scan_tool_t tool = live_page_tool();
-    if (tool == SENTINEL_SCAN_BLE && ble_discovery_presenting() &&
+    if (tool == SENTINEL_SCAN_BLE && ble_discovery_ordinary_page() &&
         x >= 8U && x < 312U && y >= 102U && y < 126U) {
-        ble_discovery_live->selection_pending = false;
-        ble_discovery_live->destination = 0U;
+        ble_discovery_cancel_navigation();
         ble_mode = UI_BLE_MODE_C5;
-        dual_ble_ui_open(false);
+        dual_ble_ui_open(true);
         ESP_ERROR_CHECK(draw_ble());
         return;
     }
     if (tool == SENTINEL_SCAN_BLE && x >= 8U && x < 216U && y >= 48U && y < 98U) {
         ble_filter = (cerberus_s3_ble_filter_t)(((unsigned)ble_filter + 1U) % CERBERUS_S3_BLE_FILTER_COUNT);
+        if (ble_discovery_ordinary_page()) ble_discovery_cancel_navigation();
         if (ble_discovery_presenting()) {
-            ble_discovery_live->selection_pending = false;
-            ble_discovery_live->destination = 0U;
             (void)cerberus_ble_discovery_session_select(&ble_discovery_live->session, (uint8_t)ble_filter);
         }
         live_page[tool] = 0U;
@@ -1155,11 +1166,9 @@ static void handle_live_scan_tap(uint16_t x, uint16_t y)
             else wifi_mode=UI_WIFI_MODE_MENU;
         }
         else if (current_page == UI_PAGE_BLE) {
-            if (ble_discovery_presenting()) {
-                ble_discovery_live->selection_pending = false;
-                ble_discovery_live->destination = ble_filter == CERBERUS_S3_BLE_FILTER_FIND_MY &&
-                    !ble_connection_is_active() ? 2U : 1U;
-                cerberus_ble_discovery_session_stop(&ble_discovery_live->session);
+            if (ble_discovery_ordinary_page()) {
+                ble_discovery_request_destination(ble_filter == CERBERUS_S3_BLE_FILTER_FIND_MY &&
+                    !ble_connection_is_active() ? 2U : 1U);
             } else if (ble_filter == CERBERUS_S3_BLE_FILTER_FIND_MY && !ble_attack_selecting &&
                 !ble_connection_is_active()) ble_findmy_monitor_open();
             else ble_mode = UI_BLE_MODE_MENU;

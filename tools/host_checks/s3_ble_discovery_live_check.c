@@ -16,7 +16,7 @@ static void clean_live(void)
     if(ble_findmy_monitor){heap_caps_free(ble_findmy_monitor);ble_findmy_monitor=NULL;}
 }
 
-static void seed_native(cerberus_s3_ble_filter_t family)
+static void seed_native_stopped(cerberus_s3_ble_filter_t family)
 {
     clean_live();
     drawn[0]=0;
@@ -24,7 +24,7 @@ static void seed_native(cerberus_s3_ble_filter_t family)
     seed_list();
     memset(&discovery_native,0,sizeof(discovery_native));
     memset(live_records,0,sizeof(live_records));
-    ble_discovery_open_error=ESP_OK;
+    ble_discovery_open_error=ESP_OK;ble_discovery_run_requested=false;ble_discovery_unallocated_destination=0U;ble_discovery_unallocated_last_draw_ms=0U;
     ble_filter=family;ble_attack_selecting=false;ui_capability_blocked=false;
     current_page=UI_PAGE_BLE;ble_mode=UI_BLE_MODE_LIST;
     clock_ms=1000;owner=CERBERUS_S3_BLE_OWNER_NONE;c5_online=false;
@@ -33,6 +33,15 @@ static void seed_native(cerberus_s3_ble_filter_t family)
     live_commands=live_observations=starts=stops=0;
     live_last_poll=0;fail_alloc=false;
     discovery_ui_allocations=unified_sort_calls=unified_classify_calls=unified_response_classify_calls=0;
+}
+
+/* Most regression cases enter through the explicit Scan action. Separate
+ * stopped seeds exercise drawing, allocation failure and retained returns. */
+static void seed_native(cerberus_s3_ble_filter_t family)
+{
+    seed_native_stopped(family);
+    CHECK(ble_discovery_request_start()==ESP_OK);
+    companion_retries=0U; /* These older cases measure retries after explicit entry. */
 }
 
 static void native_tick(uint64_t now,bool asleep)
@@ -76,12 +85,20 @@ static void row(unsigned index,unsigned key,uint8_t type,int8_t rssi)
 
 static void stop_and_release(uint64_t now)
 {
-    cerberus_ble_discovery_session_stop(&ble_discovery_live->session);
+    ble_discovery_request_stop();
     discovery_native.hold_stop=false;
     for(unsigned i=0;i<30&&!cerberus_ble_discovery_session_released(&ble_discovery_live->session);++i)
         native_tick(now+i*250U,false);
     CHECK(cerberus_ble_discovery_session_released(&ble_discovery_live->session));
     CHECK(!discovery_native.bank.meta.attached&&owner==CERBERUS_S3_BLE_OWNER_NONE);
+}
+
+static void finish_selected_handoff(void)
+{
+    CHECK(!ble_discovery_requested());
+    for(unsigned i=0;i<20U&&ble_discovery_live->selection_pending;++i)
+        native_tick((uint64_t)clock_ms+250U,false);
+    CHECK(!ble_discovery_live->selection_pending);
 }
 
 static void first_results_and_frozen_tap(const char *prefix)
@@ -111,7 +128,7 @@ static void first_results_and_frozen_tap(const char *prefix)
     CHECK(ble_discovery_live->inventory.count==2); /* Missing A remains earlier. */
     CHECK(ble_discovery_live->inventory.entries[1].record.peer.address_type==1);
     CHECK(ble_discovery_live->painted[0].record.peer.address[0]==11);
-    discovery_native.hold_stop=true;
+    discovery_native.hold_stop=true;companion_released=false;
     handle_ble_tap(20,135);
     CHECK(ble_discovery_live->selection_pending&&!ble_discovery_live->session.enabled);
     CHECK(!memcmp(&selected,&ble_discovery_live->selected,sizeof(selected)));
@@ -123,8 +140,10 @@ static void first_results_and_frozen_tap(const char *prefix)
     discovery_native_finish(true);
     native_tick(1601,false);native_tick(1801,false);
     CHECK(discovery_native.release==1&&owner==CERBERUS_S3_BLE_OWNER_NONE);
+    CHECK(ble_mode==UI_BLE_MODE_LIST&&ble_discovery_live->selection_pending);
+    companion_released=true;native_tick(1802,false);
     /* Existing frozen-detail bridge may use its RF-free queued monitor exit. */
-    tick(1802);
+    tick(1803);
     CHECK(ble_mode==UI_BLE_MODE_DETAIL);
     CHECK(ble_selected_result.address[0]==11&&ble_selected_result.address_type==0);
     CHECK(!memcmp(&ble_selected_result,&selected.record.peer,sizeof(ble_selected_result)));
@@ -188,8 +207,9 @@ static void continuous_family_and_stop(const char *prefix)
 
 static void failures_and_navigation(void)
 {
-    seed_native(CERBERUS_S3_BLE_FILTER_ALL);
+    seed_native_stopped(CERBERUS_S3_BLE_FILTER_ALL);
     fail_alloc=true;
+    CHECK(ble_discovery_request_start()==ESP_ERR_NO_MEM&&ble_discovery_requested());
     CHECK(draw_live_scan()==ESP_OK);
     native_tick(1000,false);
     CHECK(!ble_discovery_live&&ble_discovery_open_error==ESP_ERR_NO_MEM&&discovery_native.start==0);
@@ -198,7 +218,7 @@ static void failures_and_navigation(void)
     native_tick(1500,false);
     CHECK(!ble_discovery_live&&discovery_native.start==0); /* Explicit retry only. */
     CHECK(discovery_ui_allocations==1);
-    ble_discovery_toggle();CHECK(ble_discovery_live&&ble_discovery_live->session.enabled);
+    CHECK(ble_discovery_retry_s3()==ESP_OK);CHECK(ble_discovery_live&&ble_discovery_live->session.enabled);
     native_tick(1550,false);
     CHECK(discovery_native.start==1);
     CHECK(discovery_ui_allocations==2);
@@ -223,7 +243,7 @@ static void failures_and_navigation(void)
     CHECK(!ble_discovery_live->session.epoch&&discovery_native.release==1&&discovery_native.start==1);
     clean_live();
 
-    seed_native(CERBERUS_S3_BLE_FILTER_ALL);
+    seed_native_stopped(CERBERUS_S3_BLE_FILTER_ALL);
     ble_attack_selecting=true;native_tick(1000,false);
     CHECK(!ble_discovery_live&&discovery_native.start==0); /* Legacy scheduler path retained. */
     ble_attack_selecting=false;current_page=UI_PAGE_WATCH;native_tick(1500,false);
@@ -488,7 +508,7 @@ static void unified_all_families(const char *prefix)
             cerberus_dual_ble_row_t painted=ble_discovery_live->painted_c5[0];
             cerberus_dual_ble_provenance_t proof=ble_discovery_live->painted_c5_provenance[0];
             companion_row(0,99,3,-2);++companion_store.published_boot_id;++companion_store.published_epoch;
-            handle_live_scan_tap(20,135);CHECK(ble_mode==UI_BLE_MODE_C5&&dual_ble_ui_from_unified);
+            handle_live_scan_tap(20,135);finish_selected_handoff();CHECK(ble_mode==UI_BLE_MODE_C5&&dual_ble_ui_from_unified);
             CHECK(!memcmp(&painted,&dual_ble_ui_selected,sizeof(painted))&&
                 !memcmp(&proof,&dual_ble_ui_selected_provenance,sizeof(proof)));
             actual_c5_footer_tap(250,440);CHECK(archive_save_calls==1U&&archive_save_selected);
@@ -640,7 +660,7 @@ static void unified_filters_capacity_and_family(const char *prefix)
     for(unsigned i=0;i<32;++i)companion_row(i,i+1,(uint8_t)(i%4),-50);
     companion_store.error=ESP_OK;live_page[SENTINEL_SCAN_BLE]=3;repaint_unified();
     CHECK(ble_discovery_live->source_filter==CERBERUS_BLE_DISCOVERY_LIST_C5&&live_view.page==3);
-    handle_live_scan_tap(20,135);CHECK(ble_mode==UI_BLE_MODE_C5&&dual_ble_ui_from_unified);
+    handle_live_scan_tap(20,135);finish_selected_handoff();CHECK(ble_mode==UI_BLE_MODE_C5&&dual_ble_ui_from_unified);
     actual_c5_footer_tap(40,440);CHECK(ble_mode==UI_BLE_MODE_LIST&&!ble_discovery_live->session.enabled);
     repaint_unified();CHECK(live_view.page==3&&ble_discovery_live->source_filter==CERBERUS_BLE_DISCOVERY_LIST_C5);
     CHECK(discovery_native.start==1);clean_live();
@@ -665,10 +685,24 @@ static void unified_frozen_c5_selection_save_fox(const char *prefix)
     unsigned before=all_boundary_calls();
     /* y=127 is inside the first card, not the status-line receiver switch. */
     handle_live_scan_tap(20,127);
-    CHECK(ble_mode==UI_BLE_MODE_C5&&dual_ble_ui_detail&&dual_ble_ui_from_unified);
+    CHECK(ble_mode==UI_BLE_MODE_LIST&&dual_ble_ui_detail&&dual_ble_ui_from_unified);
     CHECK(!memcmp(&selected,&dual_ble_ui_selected,sizeof(selected))&&!memcmp(&proof,&dual_ble_ui_selected_provenance,sizeof(proof)));
-    CHECK(!memcmp(&old_s3,&ble_selected_result,sizeof(old_s3))&&!ble_discovery_live->selection_pending);
-    CHECK(ble_discovery_live->session.enabled&&all_boundary_calls()==before);
+    CHECK(!memcmp(&old_s3,&ble_selected_result,sizeof(old_s3))&&ble_discovery_live->selection_pending);
+    CHECK(!ble_discovery_live->session.enabled&&!ble_discovery_requested()&&all_boundary_calls()==before);
+    companion_released=false;discovery_native.hold_stop=true;
+    native_tick(1100,false);native_tick(14500,false);
+    CHECK(ble_mode==UI_BLE_MODE_LIST&&ble_discovery_live->selection_pending);
+    repaint_unified();CHECK(ble_discovery_live->painted_count>=2U);
+    handle_live_scan_tap(20,190); /* A later painted row cannot replace the pending proof. */
+    CHECK(!memcmp(&selected,&dual_ble_ui_selected,sizeof(selected))&&
+        !memcmp(&proof,&dual_ble_ui_selected_provenance,sizeof(proof)));
+    CHECK(ble_discovery_live->selection_pending&&ble_discovery_live->selected_source==CERBERUS_BLE_DISCOVERY_LIST_C5);
+    discovery_native.hold_stop=false;discovery_native_finish(true);
+    stop_and_release(14750);CHECK(ble_mode==UI_BLE_MODE_LIST);
+    companion_released=true;native_tick(17000,false);
+    CHECK(ble_mode==UI_BLE_MODE_C5&&!ble_discovery_live->selection_pending);
+    CHECK(!memcmp(&selected,&dual_ble_ui_selected,sizeof(selected))&&!memcmp(&proof,&dual_ble_ui_selected_provenance,sizeof(proof)));
+    before=all_boundary_calls();
     drawn[0]=0;CHECK(actual_c5_footer_draw()==ESP_OK);CHECK(strstr(drawn,"BLE LIST")&&strstr(drawn,"SAVE SD"));
     actual_c5_footer_tap(250,440);
     CHECK(archive_save_calls==1&&archive_save_selected);
@@ -679,9 +713,9 @@ static void unified_frozen_c5_selection_save_fox(const char *prefix)
     CHECK(ble_mode==UI_BLE_MODE_FOX_HUNT&&ble_fox_hunt_from_c5&&ble_fox_hunt_start_pending);
     CHECK(!memcmp(ble_fox_hunt_target.address,selected.address,6)&&ble_fox_hunt_target.address_type==1);
     CHECK(!memcmp(&old_s3,&ble_selected_result,sizeof(old_s3)));
-    CHECK(!dual_ble_live_prepare_fox(1100,false)&&track_begins==0);
-    stop_and_release(1150);CHECK(!dual_ble_live_prepare_fox(2000,false)&&track_begins==0);
-    companion_released=true;CHECK(dual_ble_live_prepare_fox(2100,false)&&track_begins==1&&track_type==1);
+    CHECK(!dual_ble_live_prepare_fox(17100,false)&&track_begins==0);
+    stop_and_release(17200);CHECK(!dual_ble_live_prepare_fox(17500,false)&&track_begins==0);
+    companion_released=true;CHECK(dual_ble_live_prepare_fox(17750,false)&&track_begins==1&&track_type==1);
     CHECK(!memcmp(track_address,selected.address,6));
     ble_fox_hunt_finish_exit(false,false);CHECK(ble_mode==UI_BLE_MODE_C5);
     dual_ble_live_tap(60,335);CHECK(ble_mode==UI_BLE_MODE_LIST&&!ble_discovery_live->session.enabled);
@@ -784,7 +818,7 @@ static void unified_full_original_and_focus(const char *prefix)
     cerberus_dual_ble_provenance_t proof=ble_discovery_live->painted_c5_provenance[0];
     memset(&row->family,0,sizeof(row->family));++companion_store.snapshots;
     ++companion_store.published_boot_id;++companion_store.published_epoch;
-    handle_live_scan_tap(20,135);
+    handle_live_scan_tap(20,135);finish_selected_handoff();
     CHECK(ble_mode==UI_BLE_MODE_C5&&dual_ble_ui_from_unified);
     CHECK(!memcmp(&frozen,&dual_ble_ui_selected,sizeof(frozen))&&
         !memcmp(&proof,&dual_ble_ui_selected_provenance,sizeof(proof)));
@@ -795,7 +829,7 @@ static void unified_full_original_and_focus(const char *prefix)
     companion_store.rows[0]=frozen;++companion_store.snapshots;
     companion_store.start.mode=CERBERUS_DUAL_BLE_FAMILY;companion_store.start.reserved=3U;
     companion_store.error=ESP_ERR_NOT_SUPPORTED;repaint_unified();
-    CHECK(live_view.total_count==1U&&strstr(live_subtitle,"C5 FOCUS UNAVAILABLE / S3 VIEW"));
+    CHECK(live_view.total_count==1U&&strstr(live_subtitle,"C5 ESP_ERR_NOT_SUPPOR"));
     CHECK(strstr(live_hint,"C5 1 RETAINED"));save(prefix,"family-focus-unavailable-retained");
     unsigned parsed=unified_classify_calls,boundaries=all_boundary_calls();
     clock_ms=1200;repaint_unified();
@@ -855,7 +889,7 @@ static void unified_response_families(const char *prefix)
             cerberus_dual_ble_provenance_t proof=ble_discovery_live->painted_c5_provenance[0];
             memset(&companion_store.rows[0].response,0,sizeof(companion_store.rows[0].response));
             ++companion_store.published_epoch;++companion_store.snapshots;
-            handle_live_scan_tap(20,135);CHECK(ble_mode==UI_BLE_MODE_C5);
+            handle_live_scan_tap(20,135);finish_selected_handoff();CHECK(ble_mode==UI_BLE_MODE_C5);
             CHECK(!memcmp(&frozen,&dual_ble_ui_selected,sizeof(frozen))&&!memcmp(&proof,&dual_ble_ui_selected_provenance,sizeof(proof)));
             actual_c5_footer_tap(250,440);CHECK(archive_save_calls==1&&!memcmp(&frozen,&archive_saved_c5,sizeof(frozen)));
             actual_c5_footer_tap(40,440);CHECK(ble_mode==UI_BLE_MODE_LIST);
@@ -871,9 +905,9 @@ static void unified_response_families(const char *prefix)
     dual_ble_ui_response_requests=true;companion_store.start.mode=CERBERUS_DUAL_BLE_DISCOVERY;
     repaint_unified();CHECK(strstr(live_subtitle,"MODE CHANGING")&&strstr(live_subtitle,"RETAINED PASSIVE"));
     companion_store.start.mode=CERBERUS_DUAL_BLE_RESPONSE_DISCOVERY;companion_store.error=ESP_ERR_NOT_SUPPORTED;
-    repaint_unified();CHECK(strstr(live_subtitle,"REQUESTS UNAVAILABLE")&&live_view.total_count==1);
+    repaint_unified();CHECK(strstr(live_subtitle,"C5 ESP_ERR_NOT_SUPPOR")&&live_view.total_count==1);
     save(prefix,"response-unavailable-retained-list");
-    companion_store.error=ESP_ERR_NO_MEM;repaint_unified();CHECK(strstr(live_subtitle,"C5 NO MEMORY"));
+    companion_store.error=ESP_ERR_NO_MEM;repaint_unified();CHECK(strstr(live_subtitle,"C5 ESP_ERR_NO_MEM"));
     unsigned before=all_boundary_calls();
     handle_live_scan_tap(20,113);CHECK(ble_mode==UI_BLE_MODE_C5);
     dual_ble_live_tap(200,65);CHECK(!dual_ble_ui_response_requests&&all_boundary_calls()==before);
@@ -1088,7 +1122,7 @@ static void shared_monitor_acquisition_and_frozen_selection(void)
 {
     static const uint8_t findmy[]={3,3,0x44,0xfd};
     const uint64_t base=UINT64_C(0x100000000)+1000U;
-    seed_native(CERBERUS_S3_BLE_FILTER_FLIPPER);
+    seed_native_stopped(CERBERUS_S3_BLE_FILTER_FLIPPER);
     ble_mode=UI_BLE_MODE_FINDMY_MONITOR;ble_findmy_running=ble_findmy_available=true;
     CHECK(ble_discovery_page()&&!ble_discovery_presenting()&&!ble_discovery_unified());
     CHECK(ble_discovery_acquire()&&!ble_discovery_live->session.enabled);
@@ -1170,7 +1204,7 @@ static void shared_monitor_acquisition_and_frozen_selection(void)
     clean_live();
 
     /* C5 frozen selection survives every current-bank identity being replaced. */
-    seed_native(CERBERUS_S3_BLE_FILTER_FIND_MY);ble_mode=UI_BLE_MODE_FINDMY_MONITOR;
+    seed_native_stopped(CERBERUS_S3_BLE_FILTER_FIND_MY);ble_mode=UI_BLE_MODE_FINDMY_MONITOR;
     CHECK(ble_discovery_acquire()&&!ble_discovery_live->session.enabled);
     companion_row(0,41,2,-25);fixture_response_row(&companion_store.rows[0],findmy,sizeof(findmy),2U,1000U);
     companion_store.rows[0].address_type=2U;++companion_store.snapshots;
@@ -1194,7 +1228,7 @@ static void shared_monitor_acquisition_and_frozen_selection(void)
 
 static void shared_monitor_independent_intent_and_sleep(void)
 {
-    seed_native(CERBERUS_S3_BLE_FILTER_FIND_MY);ble_mode=UI_BLE_MODE_FINDMY_MONITOR;
+    seed_native_stopped(CERBERUS_S3_BLE_FILTER_FIND_MY);ble_mode=UI_BLE_MODE_FINDMY_MONITOR;
     ble_findmy_running=true;CHECK(ble_discovery_monitor_start()==ESP_OK);
     discovery_native.reject_start=true;ble_discovery_tick(1000U,false);
     CHECK(!ble_discovery_live->session.enabled&&ble_discovery_live->session.error!=ESP_OK);
@@ -1216,9 +1250,296 @@ static void shared_monitor_independent_intent_and_sleep(void)
     clean_live();
 }
 
+/* Composite tests compile both actual UI owner adapters, both controllers and
+ * the global tick. Only the RF-driver and framed C5 peer are simulated. */
+static void composite_seed(void)
+{
+    seed_native_stopped(CERBERUS_S3_BLE_FILTER_ALL);
+    companion_actual_owner=true;
+    memset(&composite_peer,0,sizeof(composite_peer));composite_peer.boot=UINT64_C(0x500000001);
+    const cerberus_dual_ble_ops_t ops={NULL,fixture_actual_dual_ble_ui_exchange,fixture_actual_dual_ble_ui_clock};
+    cerberus_dual_ble_init(&companion_store,&ops);
+    dual_ble_ui_mode=-1;dual_ble_ui_family=0U;dual_ble_ui_attempted=false;
+    dual_ble_ui_error=ESP_OK;dual_ble_ui_selection_pending=false;
+}
+
+static void composite_step(uint64_t now,bool asleep)
+{
+    unsigned frames=composite_peer.frames;
+    native_tick(now,asleep);
+    dual_ble_live_tick(now,asleep);
+    CHECK(composite_peer.frames-frames<=4U);
+}
+
+static void composite_drain(void)
+{
+    ble_discovery_leave();discovery_native.hold_stop=false;composite_peer.hold_stop=false;
+    for(unsigned i=0;i<60U&&(!dual_ble_live_discovery_released()||!dual_ble_ui_released());++i)
+        composite_step((uint64_t)clock_ms+250U,false);
+    CHECK(!ble_discovery_requested()&&dual_ble_live_discovery_released()&&dual_ble_ui_released());
+    if(dual_ble_ui_store&&dual_ble_ui_store!=&companion_store)heap_caps_free(dual_ble_ui_store);
+    dual_ble_ui_store=&companion_store;companion_actual_owner=false;
+    clean_live();
+}
+
+static void ordinary_explicit_intent_and_receiver_failures(const char *prefix)
+{
+    composite_seed();
+    CHECK(draw_live_scan()==ESP_OK&&!ble_discovery_live&&!ble_discovery_requested());
+    composite_step(1000,false);composite_step(1250,false);
+    CHECK(!discovery_native.start&&!composite_peer.starts&&!ble_discovery_requested());
+    /* Rendering/visible ticks may allocate presentation, never a scan. */
+    CHECK(ble_discovery_live&&!ble_discovery_live->session.enabled);
+    actual_discovery_entry();CHECK(ble_discovery_requested());
+    composite_step(1500,false);composite_step(1750,false);
+    CHECK(discovery_native.start==1U&&composite_peer.starts==1U&&ble_discovery_requested());
+    CHECK(!ble_discovery_s3_retryable()&&!dual_ble_live_c5_retryable());
+    discovery_native.copy_errors=1U;composite_step(2000,false);
+    CHECK(ble_discovery_live->session.enabled&&!ble_discovery_s3_retryable());
+    CHECK(ble_discovery_retry_s3()==ESP_ERR_INVALID_STATE&&composite_peer.starts==1U);
+    /* An asynchronous terminal S3 error drains only S3. */
+    discovery_native.bank.meta.status.state=CERBERUS_BLE_SCAN_ERROR;
+    discovery_native.bank.meta.status.error_code=ESP_FAIL;
+    discovery_native.bank.meta.owned=false;owner=CERBERUS_S3_BLE_OWNER_NONE;
+    for(unsigned i=0;i<12U&&!ble_discovery_live->session.faulted;++i)composite_step((uint64_t)clock_ms+250U,false);
+    CHECK(ble_discovery_s3_retryable()&&ble_discovery_requested()&&composite_peer.owned);
+    unsigned c5starts=composite_peer.starts,c5stops=composite_peer.stops,s3starts=discovery_native.start;
+    for(unsigned i=0;i<8U;++i)composite_step((uint64_t)clock_ms+250U,false);
+    CHECK(discovery_native.start==s3starts&&composite_peer.starts==c5starts&&composite_peer.stops==c5stops);
+    drawn[0]=0;CHECK(draw_live_scan()==ESP_OK&&live_view.stop_action&&live_view.state==SENTINEL_VIEW_LIVE);
+    save(prefix,"independent-s3-error");
+    handle_live_scan_tap(20,113);CHECK(ble_mode==UI_BLE_MODE_C5);
+    dual_ble_live_tap(40,125);composite_step((uint64_t)clock_ms+250U,false);
+    CHECK(discovery_native.start==s3starts+1U&&composite_peer.starts==c5starts&&composite_peer.stops==c5stops);
+    CHECK(ble_discovery_requested()&&!ble_discovery_s3_retryable());
+    composite_drain();
+
+    /* C5 unsupported is terminal for that receiver only; S3 keeps its epoch. */
+    composite_seed();composite_peer.unsupported=true;CHECK(ble_discovery_request_start()==ESP_OK);
+    composite_step(1000,false);composite_step(1250,false);
+    CHECK(ble_discovery_requested()&&ble_discovery_live->session.enabled&&discovery_native.start==1U);
+    CHECK(dual_ble_live_c5_retryable()&&!ble_discovery_s3_retryable());
+    uint64_t epoch=ble_discovery_live->session.epoch;
+    unsigned s3stops=discovery_native.stop;
+    composite_peer.unsupported=false;handle_live_scan_tap(20,113);dual_ble_live_tap(200,125);
+    composite_step(1500,false);composite_step(1750,false);
+    CHECK(composite_peer.starts==1U&&ble_discovery_live->session.epoch==epoch&&
+        discovery_native.stop==s3stops&&discovery_native.start==1U);
+    composite_drain();
+}
+
+static void ordinary_allocation_failure_and_no_store_navigation(const char *prefix)
+{
+    composite_seed();dual_ble_ui_store=NULL;fail_alloc=true;
+    CHECK(ble_discovery_request_start()==ESP_ERR_NO_MEM&&ble_discovery_requested());
+    fail_alloc=false;composite_step(1000,false);composite_step(1250,false);
+    CHECK(!ble_discovery_live&&ble_discovery_s3_retryable()&&composite_peer.starts==1U&&composite_peer.owned);
+    CHECK(draw_live_scan()==ESP_OK&&!live_view.row_count&&!live_view.total_count&&live_view.stop_action);
+    CHECK(live_view.state==SENTINEL_VIEW_LIVE&&strstr(live_subtitle,"S3"));save(prefix,"independent-s3-store-unavailable");
+    unsigned starts_c5=composite_peer.starts,stop_c5=composite_peer.stops;
+    handle_live_scan_tap(20,113);CHECK(ble_mode==UI_BLE_MODE_C5);
+    dual_ble_live_tap(40,125);composite_step(1500,false);
+    CHECK(ble_discovery_live&&discovery_native.start==1U&&composite_peer.starts==starts_c5&&composite_peer.stops==stop_c5);
+    composite_drain();
+
+    composite_seed();CHECK(ble_discovery_request_start()==ESP_OK);dual_ble_ui_store=NULL;fail_alloc=true;
+    composite_step(1000,false);fail_alloc=false;
+    CHECK(discovery_native.start==1U&&ble_discovery_requested()&&dual_ble_live_c5_retryable());
+    CHECK(!dual_ble_ui_store&&ble_discovery_live->session.enabled);
+    composite_step(1250,false);CHECK(!dual_ble_ui_store); /* No implicit allocation retry. */
+    handle_live_scan_tap(20,113);dual_ble_live_tap(200,125);composite_step(1500,false);composite_step(1750,false);
+    CHECK(composite_peer.starts==1U&&discovery_native.start==1U&&!discovery_native.stop);
+    composite_drain();
+
+    /* Tools and monitor transitions work with no S3 store and held C5 cleanup. */
+    for(unsigned destination=1U;destination<=2U;++destination){
+        composite_seed();fail_alloc=true;CHECK(ble_discovery_request_start()==ESP_ERR_NO_MEM);
+        fail_alloc=false;composite_step(1000,false);composite_step(1250,false);
+        composite_peer.hold_stop=true;ble_discovery_request_destination((uint8_t)destination);
+        unsigned allocs=discovery_ui_allocations;
+        composite_step(1500,false);composite_step(14500,false);
+        CHECK(!ble_discovery_requested()&&ble_discovery_unallocated_destination==destination&&!ble_discovery_live);
+        CHECK(ble_mode==UI_BLE_MODE_LIST&&discovery_ui_allocations==allocs);
+        /* Stop cancels pending destination without any new RF or allocation. */
+        ble_discovery_toggle();CHECK(!ble_discovery_unallocated_destination&&!ble_discovery_requested());
+        composite_peer.hold_stop=false;
+        for(unsigned i=0;i<10U&&!dual_ble_ui_released();++i)composite_step((uint64_t)clock_ms+250U,false);
+        CHECK(ble_mode==UI_BLE_MODE_LIST&&!ble_discovery_live);
+        if(destination==1U){ble_discovery_request_destination(1U);composite_step((uint64_t)clock_ms+250U,false);
+            CHECK(ble_mode==UI_BLE_MODE_MENU&&!ble_discovery_live);}
+        composite_drain();
+    }
+}
+
+static void ordinary_no_store_navigation_superseded(void)
+{
+    for(unsigned route=0;route<2U;++route){
+        composite_seed();fail_alloc=true;CHECK(ble_discovery_request_start()==ESP_ERR_NO_MEM);
+        fail_alloc=false;composite_step(1000,false);composite_step(1250,false);
+        composite_peer.hold_stop=true;ble_discovery_request_destination(1U);
+        composite_step(1500,false);CHECK(ble_discovery_unallocated_destination==1U);
+        if(route==0U)handle_live_scan_tap(20,113);
+        else handle_live_scan_tap(40,65);
+        CHECK(!ble_discovery_unallocated_destination&&!ble_discovery_requested());
+        composite_peer.hold_stop=false;
+        for(unsigned i=0;i<12U&&!dual_ble_ui_released();++i)composite_step((uint64_t)clock_ms+250U,false);
+        CHECK(ble_mode==(route==0U?UI_BLE_MODE_C5:UI_BLE_MODE_LIST)&&!ble_discovery_live);
+        composite_drain();
+    }
+}
+
+static void ordinary_unallocated_status_refresh(const char *prefix)
+{
+    composite_seed();fail_alloc=true;CHECK(ble_discovery_request_start()==ESP_ERR_NO_MEM);
+    fail_alloc=false;
+    unsigned allocations=discovery_ui_allocations;
+    composite_step(1000,false); /* Paint STOPPED, then queue C5 INFO. */
+    CHECK(!ble_discovery_live&&strstr(live_subtitle,"C5 STOPPED"));
+    unsigned frame=live_frame,frames=composite_peer.frames;
+    native_tick(1100,false);CHECK(live_frame==frame&&composite_peer.frames==frames);
+    composite_step(1250,false); /* Paint STARTING before actual C5 start. */
+    CHECK(live_frame==frame+1U&&strstr(live_subtitle,"C5 STARTING"));
+    CHECK(composite_peer.starts==1U&&composite_peer.owned);
+    frame=live_frame;frames=composite_peer.frames;
+    native_tick(1450,false); /* Only cached UI/S3 tick; no C5 exchange. */
+    CHECK(live_frame==frame+1U&&strstr(live_subtitle,"C5 LIVE"));
+    CHECK(composite_peer.frames==frames&&discovery_ui_allocations==allocations&&!discovery_native.start);
+    /* A committed C5 bank count remains visible without borrowing legacy S3
+     * rows or allocating another shared index. */
+    companion_store.count=7U;ble_discovery_request_stop();
+    native_tick(1650,false);CHECK(strstr(live_subtitle,"STOPPING"));
+    composite_step(1900,false);composite_step(2150,false);native_tick(2400,false);
+    CHECK(dual_ble_ui_released()&&strstr(live_hint,"C5 HAS 7 RETAINED"));
+    CHECK(!live_view.row_count&&!live_view.total_count&&discovery_ui_allocations==allocations);
+    /* A different cached error is repainted on cadence with the exact code. */
+    dual_ble_ui_error=ESP_ERR_TIMEOUT;frames=composite_peer.frames;frame=live_frame;
+    native_tick(2600,false);CHECK(live_frame==frame+1U&&strstr(live_subtitle,"C5 ERROR"));
+    CHECK(composite_peer.frames==frames&&discovery_ui_allocations==allocations);
+    drawn[0]=0;CHECK(live_paint(true)==ESP_OK);save(prefix,"no-store-cached-c5-error");
+    frame=live_frame;native_tick(2700,false);CHECK(live_frame==frame);
+    native_tick(2900,true);CHECK(live_frame==frame); /* Hidden/sleep never paint. */
+    CHECK(!ble_discovery_requested()&&discovery_ui_allocations==allocations&&!ble_discovery_live);
+    composite_drain();
+}
+
+static void ordinary_stop_pending_info_and_source_cleanup(void)
+{
+    for(unsigned route=0;route<4U;++route){
+        composite_seed();CHECK(ble_discovery_request_start()==ESP_OK);
+        composite_step(1000,false); /* C5 begin queued INFO, no owner/transport yet. */
+        CHECK(dual_ble_ui_store->enabled&&!dual_ble_ui_store->start.job_id&&!composite_peer.frames);
+        if(route==0)ble_discovery_toggle();
+        else if(route==1)actual_back(UI_BACK_Y);
+        else if(route==2)ble_discovery_leave(); /* Same ordinary Save cancellation hook. */
+        composite_step(1250,route==3U);
+        CHECK(!ble_discovery_requested()&&!dual_ble_ui_store->enabled&&!composite_peer.frames&&!composite_peer.starts);
+        for(unsigned i=0;i<4U;++i)composite_step((uint64_t)clock_ms+250U,false);
+        CHECK(!composite_peer.starts&&discovery_native.start==1U);
+        composite_drain();
+    }
+    composite_seed();CHECK(ble_discovery_request_start()==ESP_OK);
+    composite_step(1000,false);composite_step(1250,false);
+    discovery_native.hold_stop=composite_peer.hold_stop=true;
+    ble_discovery_toggle();composite_step(1500,false);
+    CHECK(!ble_discovery_requested()&&!dual_ble_live_discovery_released()&&!dual_ble_ui_released());
+    ble_discovery_toggle();composite_step(14500,false);CHECK(!ble_discovery_requested());
+    ble_mode=UI_BLE_MODE_C5;dual_ble_ui_detail=false;
+    dual_ble_live_tap(150,390);composite_step(14750,false);
+    CHECK(!ble_discovery_requested()&&!ble_discovery_live->session.enabled&&composite_peer.starts==1U&&discovery_native.start==1U);
+    composite_drain();
+}
+
+static void ordinary_entries_and_failed_family_changes(const char *prefix)
+{
+    for(unsigned entry=0;entry<3U;++entry){
+        composite_seed();
+        if(entry==0U)actual_discovery_entry();
+        else if(entry==1U)actual_discovery_menu_scan();
+        else actual_discovery_missing_selection();
+        CHECK(ble_discovery_requested()&&ble_discovery_live&&ble_discovery_live->session.enabled);
+        composite_step(1000,false);composite_step(1250,false);
+        CHECK(discovery_native.start==1U&&composite_peer.starts==1U);
+        composite_drain();
+    }
+    composite_seed();ui_capability_blocked=true;actual_discovery_entry();
+    CHECK(!ble_discovery_requested()&&!ble_discovery_live);ui_capability_blocked=false;
+    ble_attack_selecting=true;actual_discovery_entry();CHECK(!ble_discovery_requested());
+    ble_attack_selecting=false;composite_drain();
+
+    composite_seed();discovery_native.reject_start=true;composite_peer.unsupported=true;
+    CHECK(ble_discovery_request_start()==ESP_OK);composite_step(1000,false);composite_step(1250,false);
+    CHECK(ble_discovery_s3_retryable()&&dual_ble_live_c5_retryable());
+    unsigned s3starts=discovery_native.start,c5frames=composite_peer.frames;
+    drawn[0]=0;CHECK(draw_live_scan()==ESP_OK&&live_view.state==SENTINEL_VIEW_ERROR&&live_view.stop_action);
+    CHECK(!strcmp(live_view.message,"RETRY RECEIVERS"));
+    CHECK(!strstr(drawn,"WAITING FOR REPORTS")&&!strstr(drawn,"WAITING FOR HINTS"));
+    save(prefix,"both-receivers-retry");
+    handle_live_scan_tap(40,65);composite_step(1500,false);composite_step(1750,false);
+    CHECK(ble_filter==CERBERUS_S3_BLE_FILTER_IBEACON&&ble_discovery_requested());
+    CHECK(discovery_native.start==s3starts&&composite_peer.frames==c5frames&&
+        ble_discovery_s3_retryable()&&dual_ble_live_c5_retryable());
+    ble_discovery_toggle();composite_step(2000,false);
+    CHECK(!ble_discovery_requested()&&!ble_discovery_s3_retryable()&&!dual_ble_live_c5_retryable());
+    handle_live_scan_tap(40,65);composite_step(2250,false);
+    CHECK(discovery_native.start==s3starts&&composite_peer.frames==c5frames);
+    composite_drain();
+
+    /* A deliberate new Start resets both failed attempts without needing an
+     * intervening cancellation tick. The source-only retry stays separate. */
+    composite_seed();composite_peer.unsupported=true;discovery_native.reject_start=true;
+    CHECK(ble_discovery_request_start()==ESP_OK);composite_step(1000,false);composite_step(1250,false);
+    CHECK(dual_ble_live_c5_retryable()&&ble_discovery_s3_retryable());
+    composite_peer.unsupported=false;discovery_native.reject_start=false;
+    CHECK(ble_discovery_request_start()==ESP_OK);composite_step(1500,false);composite_step(1750,false);
+    CHECK(composite_peer.starts==1U&&discovery_native.start==2U&&ble_discovery_requested());
+    composite_drain();
+}
+
+static void ordinary_direct_c5_frozen_handoff(void)
+{
+    for(unsigned cancel=0;cancel<4U;++cancel){
+        composite_seed();fail_alloc=true;CHECK(ble_discovery_request_start()==ESP_ERR_NO_MEM);
+        fail_alloc=false;composite_step(1000,false);composite_step(1250,false);
+        handle_live_scan_tap(20,113);CHECK(ble_mode==UI_BLE_MODE_C5&&!ble_discovery_live);
+        companion_row(0,57,2,-32);
+        dual_ble_ui_painted[0]=companion_store.rows[0];
+        dual_ble_ui_painted_provenance[0]=(cerberus_dual_ble_provenance_t){.boot_id=11,.epoch=22,.generation=3,.index=0};
+        dual_ble_ui_painted_count=1U;
+        cerberus_dual_ble_row_t frozen=dual_ble_ui_painted[0];
+        cerberus_dual_ble_provenance_t proof=dual_ble_ui_painted_provenance[0];
+        /* companion_row's presentation exchange is never used by this owner. */
+        companion_store.ops.exchange=fixture_actual_dual_ble_ui_exchange;
+        composite_peer.hold_stop=true;dual_ble_live_tap(20,160);
+        CHECK(dual_ble_ui_selection_pending&&!dual_ble_ui_detail&&!ble_discovery_requested());
+        memset(&companion_store.rows[0],0,sizeof(companion_store.rows[0]));++companion_store.published_epoch;
+        composite_step(1500,false);composite_step(14500,false);
+        CHECK(dual_ble_ui_selection_pending&&!dual_ble_ui_detail);
+        if(cancel==1U)dual_ble_live_tap(150,390);
+        if(cancel==2U)actual_c5_footer_tap(40,440);
+        if(cancel==3U)composite_step(14750,true);
+        if(cancel)CHECK(!dual_ble_ui_selection_pending);
+        composite_peer.hold_stop=false;
+        for(unsigned i=0;i<12U&&(!dual_ble_ui_released()||dual_ble_ui_selection_pending);++i)
+            composite_step((uint64_t)clock_ms+250U,false);
+        CHECK(dual_ble_ui_detail==(cancel==0U));
+        CHECK(!memcmp(&frozen,&dual_ble_ui_selected,sizeof(frozen))&&!memcmp(&proof,&dual_ble_ui_selected_provenance,sizeof(proof)));
+        unsigned starts=composite_peer.starts;
+        ble_mode=UI_BLE_MODE_LIST;handle_live_scan_tap(50,65);composite_step((uint64_t)clock_ms+250U,false);
+        CHECK(!ble_discovery_requested()&&composite_peer.starts==starts&&!discovery_native.start);
+        composite_drain();
+    }
+}
+
 int main(int argc,char **argv)
 {
     CHECK(argc==2);
+    ordinary_explicit_intent_and_receiver_failures(argv[1]);
+    ordinary_allocation_failure_and_no_store_navigation(argv[1]);
+    ordinary_no_store_navigation_superseded();
+    ordinary_unallocated_status_refresh(argv[1]);
+    ordinary_stop_pending_info_and_source_cleanup();
+    ordinary_entries_and_failed_family_changes(argv[1]);
+    ordinary_direct_c5_frozen_handoff();
     empty_receive_explanation();
     first_results_and_frozen_tap(argv[1]);
     continuous_family_and_stop(argv[1]);

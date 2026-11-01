@@ -13,6 +13,9 @@ out.mkdir(parents=True, exist_ok=True)
 ui = (root / "s3_main/main/ui.c").read_text()
 begin = ui.index("static esp_err_t draw_ble_fox_hunt(void)")
 (out / "dual_ble_fox_draw_impl.h").write_text(ui[begin:ui.index("static esp_err_t draw_ble_analyzer(void)", begin)])
+live = (root / "s3_main/main/dual_ble_live_ui.h").read_text()
+begin = live.index("static bool dual_ble_live_c5_retryable(void)")
+(out / "dual_ble_retry_impl.h").write_text(live[begin:live.index("static bool dual_ble_live_discovery_released(void)", begin)])
 exe = out / "check.exe"
 env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(out / "zig-cache"),
            ZIG_LOCAL_CACHE_DIR=str(out / "zig-local"))

@@ -221,7 +221,7 @@ static const char *subtitle(const sentinel_scan_view_t *view)
 
 static const char *scan_label(const sentinel_scan_view_t *view)
 {
-    return view->state == SENTINEL_VIEW_LIVE ? "STOP" :
+    return view->stop_action || view->state == SENTINEL_VIEW_LIVE ? "STOP" :
         view->state == SENTINEL_VIEW_COMPLETE ? "AGAIN" : "SCAN";
 }
 

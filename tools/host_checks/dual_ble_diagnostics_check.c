@@ -26,6 +26,10 @@ static cerberus_s3_ble_track_status_t source_sample;
 static struct {cerberus_ble_discovery_session_t session;} discovery,*ble_discovery_live;
 enum {UI_PAGE_BLE=1,UI_BLE_MODE_FOX_HUNT=2};
 static unsigned current_page,ble_mode;
+static bool ordinary_page,monitor_page;
+static esp_err_t ble_discovery_open_error;
+static bool ble_discovery_ordinary_page(void){return ordinary_page;}
+static bool ble_discovery_monitor_page(void){return monitor_page;}
 bool cerberus_s3_ble_host_initialized(void){++host_reads;return true;}
 bool cerberus_s3_ble_host_synced(void){++host_reads;return true;}
 cerberus_s3_ble_owner_t cerberus_s3_ble_host_owner(void){++host_reads;return CERBERUS_S3_BLE_OWNER_SCANNER;}
@@ -85,6 +89,39 @@ static void check_family_scopes(void)
     storage.published_family=0;
     dual_ble_publish_diagnostics(197,false);cerberus_dual_ble_diagnostics_get(&out);
     assert(!out.requested_family&&!out.c5_requested_family&&!out.c5_published_family);
+}
+
+static void check_discovery_error_scope(void)
+{
+    cerberus_dual_ble_diagnostics_t out;
+    unsigned reads=scanner_reads;
+    current_page=UI_PAGE_BLE;ble_mode=0;ordinary_page=true;
+    ble_scan_checked=true;ble_scan_status.state=CERBERUS_BLE_SCAN_RUNNING;
+    ble_scan_error=ESP_FAIL;ble_discovery_live=&discovery;
+    memset(&discovery,0,sizeof(discovery));
+    discovery.session.error=ESP_ERR_TIMEOUT;discovery.session.faulted=true;
+    dual_ble_publish_diagnostics(198,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(!out.s3_scan_cached&&!out.s3_discovery_attached&&!out.s3_discovery_enabled);
+    assert(out.s3_scan_error==ESP_ERR_TIMEOUT&&out.s3_state==0&&scanner_reads==reads);
+    printed[0]=0;print_dual_ble();
+    assert(strstr(printed,"dual_ble_s3_scan_error=263"));
+    /* No shared allocation: an ordinary open error still belongs to this run,
+       and must not borrow the unrelated generic RUNNING observation. */
+    ble_discovery_live=NULL;ble_discovery_open_error=ESP_ERR_NO_MEM;
+    dual_ble_publish_diagnostics(198,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(out.s3_scan_error==ESP_ERR_NO_MEM&&!out.s3_scan_cached&&!out.s3_discovery_attached);
+    ordinary_page=false;monitor_page=true;ble_discovery_open_error=ESP_OK;
+    ble_discovery_live=&discovery;discovery.session.epoch=73;
+    discovery.session.have_observation=true;discovery.session.error=0;
+    discovery.session.observation.state=CERBERUS_BLE_SCAN_RUNNING;
+    discovery.session.observation.owned=true;
+    dual_ble_publish_diagnostics(198,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(out.s3_scan_cached&&out.s3_discovery_owned&&out.s3_scan_error==ESP_OK);
+    monitor_page=false;discovery.session.epoch=0;discovery.session.error=ESP_ERR_TIMEOUT;
+    dual_ble_publish_diagnostics(198,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(out.s3_scan_cached&&out.s3_state==CERBERUS_BLE_SCAN_RUNNING&&out.s3_scan_error==ESP_FAIL);
+    assert(scanner_reads==reads);
+    ble_discovery_live=NULL;ble_scan_error=ESP_OK;
 }
 
 int main(void)
@@ -176,6 +213,7 @@ int main(void)
     printed[0]=0;reads=scanner_reads+host_reads;print_dual_ble();assert(scanner_reads+host_reads==reads);
     assert(strstr(printed,"dual_ble_s3_rssi=-44")&&strstr(printed,"independent_received_reports"));
     check_family_scopes();
+    check_discovery_error_scope();
     cerberus_dual_ble_diagnostics_t input=out;input.c5_sweeps=123;
     input.c5_snapshots=UINT32_MAX;input.c5_first_result_ms=UINT32_MAX;input.c5_has_first_result=true;
     input.c5_inventory_known=input.c5_inventory_replacement_enabled=true;

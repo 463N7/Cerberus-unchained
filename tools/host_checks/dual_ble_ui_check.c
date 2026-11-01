@@ -69,11 +69,20 @@ esp_err_t c5_spi_link_dual_ble_exchange(uint8_t cmd,const void *q,size_t qn,void
 {memset(r,0,rn);++companion_exchanges;
  return family_peer_enabled?family_peer_exchange(cmd,q,qn,r,rn):ESP_ERR_NOT_SUPPORTED;}
 static unsigned companion_allocations;
+enum { UI_BLE_MODE_C5=99 };
+static bool companion_ordinary,companion_requested,companion_s3_retryable;
+static bool companion_s3_released=true;
+static bool ble_discovery_ordinary_page(void){return companion_ordinary;}
+static bool ble_discovery_requested(void){return companion_requested;}
+static bool ble_discovery_s3_retryable(void){return companion_s3_retryable;}
+static bool dual_ble_live_discovery_released(void){return companion_s3_released;}
+static bool dual_ble_live_c5_retryable(void);
 static void *companion_calloc(size_t n,size_t size,unsigned caps)
 {++companion_allocations;return heap_caps_calloc(n,size,caps);}
 #define heap_caps_calloc companion_calloc
 #include "dual_ble_ui.h"
 #undef heap_caps_calloc
+#include "dual_ble_retry_impl.h"
 #include "s3_ble_tracker.h"
 static cerberus_c5_ble_result_t ble_fox_hunt_target;
 static bool ble_fox_hunt_start_pending,ble_fox_hunt_exit_pending;
@@ -279,6 +288,28 @@ static void paint_list(void)
     assert(dual_ble_ui_draw(false)==ESP_OK);
 }
 
+static void paint_requested_list(void)
+{
+    drawn[0]=0;
+    assert(cerberus_display_fill_rect(0,0,320,480,UI_BACKGROUND)==ESP_OK);
+    assert(dual_ble_ui_draw(companion_requested)==ESP_OK);
+}
+
+/* Existing presentation cases enter through the real frozen-selection path,
+ * then supply released owners to the real cached barrier. The shared live UI
+ * suite exercises stop dispatch, hidden cleanup and the global tick order. */
+static int select_released_row(uint16_t x,uint16_t y)
+{
+    int action=dual_ble_ui_tap(x,y);
+    assert(action==DUAL_BLE_UI_SELECT&&dual_ble_ui_selection_pending&&!dual_ble_ui_detail);
+    uint32_t saved_job=dual_ble_ui_store?dual_ble_ui_store->start.job_id:0U;
+    if(dual_ble_ui_store)dual_ble_ui_store->start.job_id=0U;
+    companion_s3_released=true;
+    assert(dual_ble_ui_apply_selection());
+    if(dual_ble_ui_store)dual_ble_ui_store->start.job_id=saved_job;
+    return DUAL_BLE_UI_REDRAW;
+}
+
 static void check_list_controls(const char *prefix)
 {
     unsigned calls=companion_exchanges,radio_starts=starts,radio_stops=stops;
@@ -308,7 +339,7 @@ static void check_list_controls(const char *prefix)
     memset(dual_ble_ui_store->rows,0,sizeof(dual_ble_ui_store->rows));dual_ble_ui_store->count=0;
     dual_ble_ui_store->published_boot_id=99;dual_ble_ui_store->published_epoch=100;
     dual_ble_ui_store->published_generation=88;
-    assert(dual_ble_ui_tap(20,160)==DUAL_BLE_UI_REDRAW);
+    assert(select_released_row(20,160)==DUAL_BLE_UI_REDRAW);
     cerberus_c5_ble_result_t target;assert(dual_ble_ui_selected_peer(&target));
     assert(!strcmp(target.name,"Peer 0")&&target.address_type==1&&!memcmp(target.address,"ABCDEF",6));
     assert(dual_ble_ui_selected.raw[2]==5&&target.flags==0);
@@ -358,7 +389,7 @@ static void check_list_controls(const char *prefix)
     masked=true;paint_list();assert(!strstr(drawn,"46:45:44:43:42:41")&&strstr(drawn,"BLE-")&&strstr(drawn,"Age 0"));
     dual_ble_ui_store->rows[0].name[0]='\0';paint_list();
     assert(strstr(drawn,"Unnamed device")&&!strstr(drawn,"46:45:44:43:42:41"));save(prefix,"masked-unnamed-list");
-    assert(dual_ble_ui_tap(20,160)==DUAL_BLE_UI_REDRAW);paint_list();
+    assert(select_released_row(20,160)==DUAL_BLE_UI_REDRAW);paint_list();
     assert(strstr(drawn,"C5 / Unnamed device")&&!strstr(drawn,"46:45:44:43:42:41"));save(prefix,"masked-unnamed-detail");
     assert(dual_ble_ui_tap(250,210)==DUAL_BLE_UI_REDRAW);paint_list();
     assert(strstr(drawn,"C5 / Unnamed device")&&!strstr(drawn,"46:45:44:43:42:41"));
@@ -366,7 +397,7 @@ static void check_list_controls(const char *prefix)
     memset(dual_ble_ui_store->rows[0].name,'N',sizeof(dual_ble_ui_store->rows[0].name));
     dual_ble_ui_store->rows[0].name[1]=(char)0xFF;paint_list();
     assert(strstr(drawn,"N?NNNNNNNNNNNNNNNNNNNNNNNNNNNNNN"));save(prefix,"bounded-name");
-    assert(dual_ble_ui_tap(20,160)==DUAL_BLE_UI_REDRAW);paint_list();
+    assert(select_released_row(20,160)==DUAL_BLE_UI_REDRAW);paint_list();
     assert(strstr(drawn,"C5 / N?NNNNNNNNNNNNNNNNNNNNNNNNNNNNNN"));save(prefix,"bounded-name-detail");
     assert(dual_ble_ui_selected_peer(&target)&&target.name[sizeof(target.name)-1U]=='\0');
     assert(dual_ble_ui_selected.name[sizeof(dual_ble_ui_selected.name)-1U]=='N'); /* Original retained. */
@@ -428,7 +459,7 @@ static void check_receive_metadata(const char *prefix)
     paint_list();
     cerberus_dual_ble_receive_metadata_t frozen=r->receive;
     memset(&r->receive,0,sizeof(r->receive));r->raw_length=3; /* New live bank cannot rebind selection. */
-    assert(dual_ble_ui_tap(20,160)==DUAL_BLE_UI_REDRAW);
+    assert(select_released_row(20,160)==DUAL_BLE_UI_REDRAW);
     assert(!memcmp(&dual_ble_ui_selected.receive,&frozen,sizeof(frozen)));
     assert(!dual_ble_ui_receive_info);
     paint_list();assert(strstr(drawn,"ORIGINAL ADV 31 B")&&strstr(drawn,"RAW ADV *"));
@@ -472,7 +503,7 @@ static void check_receive_metadata(const char *prefix)
     assert(strstr(drawn,"RECEIVE INFO UNAVAILABLE")&&strstr(drawn,"NO METADATA FOR THIS OBSERVATION"));
     assert(!strstr(drawn,"CTRL COMPLETE")&&!strstr(drawn,"CALLBACK 0 B"));save(prefix,"metadata-unknown");
     assert(dual_ble_ui_tap(20,330)==DUAL_BLE_UI_REDRAW);paint_list();
-    assert(dual_ble_ui_tap(20,160)==DUAL_BLE_UI_REDRAW&&!dual_ble_ui_receive_info);
+    assert(select_released_row(20,160)==DUAL_BLE_UI_REDRAW&&!dual_ble_ui_receive_info);
     assert(dual_ble_ui_tap(200,210)==DUAL_BLE_UI_REDRAW&&dual_ble_ui_receive_info);
     dual_ble_ui_open(true);assert(!dual_ble_ui_detail&&!dual_ble_ui_receive_info);
     assert(companion_exchanges==calls&&starts==radio_starts&&stops==radio_stops);
@@ -573,7 +604,7 @@ static void check_family_hints(const char *prefix)
     assert(dual_ble_ui_tap(250,210)==DUAL_BLE_UI_REDRAW);paint_list();
     assert(strstr(drawn,"FIND MY FORMAT HINTS"));
     assert(dual_ble_ui_tap(20,330)==DUAL_BLE_UI_BACK_S3&&dual_ble_ui_tap(200,330)==DUAL_BLE_UI_FOX);
-    assert(dual_ble_ui_tap(20,65)==DUAL_BLE_UI_BACK_S3&&dual_ble_ui_tap(100,390)==DUAL_BLE_UI_TOGGLE);
+    assert(dual_ble_ui_tap(20,65)==DUAL_BLE_UI_BACK_S3&&dual_ble_ui_tap(100,390)==DUAL_BLE_UI_BACK_S3);
 
     uint8_t beacon[30]={2,1,6,26,0xff,0x4c,0,2,0x15};
     for(unsigned i=0;i<16;++i)beacon[9+i]=(uint8_t)i;
@@ -753,8 +784,11 @@ static void check_focused_lifecycle(const char *prefix)
     unsigned calls=companion_exchanges;
     family_tick(2,22000);family_tick(2,23000);assert(companion_exchanges==calls);
     family_tick(0,24000);family_tick(0,24001);
+    assert(family_peer_starts==2&&companion_exchanges==calls&&dual_ble_ui_attempted&&
+        dual_ble_ui_error==ESP_ERR_NOT_SUPPORTED&&dual_ble_ui_family==0);
+    dual_ble_ui_retry();family_tick(0,24002);family_tick(0,24003);
     assert(family_peer_starts==3&&family_peer_start.mode==CERBERUS_DUAL_BLE_DISCOVERY);
-    clock_ms=24002;dual_ble_ui_sync(-1,NULL,0,24002);assert(dual_ble_ui_released()&&!family_peer_attached);
+    clock_ms=24004;dual_ble_ui_sync(-1,NULL,0,24004);assert(dual_ble_ui_released()&&!family_peer_attached);
     assert(starts==radio_starts&&stops==radio_stops);
     family_peer_enabled=false;heap_caps_free(dual_ble_ui_store);dual_ble_ui_store=NULL;
 }
@@ -958,9 +992,74 @@ static void check_response_mode_lifecycle(const char *prefix)
     assert(family_peer_starts==3&&!family_peer_attached&&strstr(drawn,"REQUESTS UNAVAILABLE / S3 AVAILABLE"));
     save(prefix,"response-unsupported");calls=companion_exchanges;family_tick(0,55000);assert(companion_exchanges==calls);
     assert(dual_ble_ui_tap(200,65)==DUAL_BLE_UI_REDRAW&&!dual_ble_ui_response_requests);
-    family_tick(0,56000);family_tick(0,56001);assert(family_peer_starts==4&&family_peer_start.mode==CERBERUS_DUAL_BLE_DISCOVERY);
-    clock_ms=56002;dual_ble_ui_sync(-1,NULL,0,56002);assert(dual_ble_ui_released());
+    family_tick(0,56000);family_tick(0,56001);
+    assert(family_peer_starts==3&&companion_exchanges==calls&&dual_ble_ui_error==ESP_ERR_NOT_SUPPORTED);
+    dual_ble_ui_retry();family_tick(0,56002);family_tick(0,56003);
+    assert(family_peer_starts==4&&family_peer_start.mode==CERBERUS_DUAL_BLE_DISCOVERY);
+    clock_ms=56004;dual_ble_ui_sync(-1,NULL,0,56004);assert(dual_ble_ui_released());
     family_peer_enabled=false;heap_caps_free(dual_ble_ui_store);dual_ble_ui_store=NULL;
+    dual_ble_ui_response_requests=dual_ble_ui_response_mode=false;
+}
+
+static void check_ordinary_retry_and_selection(const char *prefix)
+{
+    unsigned exchanges=companion_exchanges,allocations=companion_allocations,radio_starts=starts,radio_stops=stops;
+    companion_ordinary=companion_requested=true;companion_s3_retryable=false;
+    ble_mode=UI_BLE_MODE_C5;
+    ble_filter=CERBERUS_S3_BLE_FILTER_FIND_MY;dual_ble_ui_mode=CERBERUS_DUAL_BLE_FAMILY;
+    dual_ble_ui_family=2;dual_ble_ui_response_mode=dual_ble_ui_response_requests=true;
+    dual_ble_ui_open(true);dual_ble_ui_error=ESP_OK;dual_ble_ui_store->error=ESP_ERR_TIMEOUT;
+    dual_ble_ui_store->phase=0;dual_ble_ui_store->enabled=false;dual_ble_ui_store->start.job_id=0;
+    assert(dual_ble_live_c5_retryable());
+    companion_requested=false;assert(!dual_ble_live_c5_retryable());companion_requested=true;
+    companion_ordinary=false;assert(!dual_ble_live_c5_retryable());companion_ordinary=true;
+    dual_ble_ui_family=3;assert(!dual_ble_live_c5_retryable());dual_ble_ui_family=2;
+    dual_ble_ui_response_requests=false;assert(!dual_ble_live_c5_retryable());dual_ble_ui_response_requests=true;
+    dual_ble_ui_detail=true;assert(!dual_ble_live_c5_retryable());
+    ble_mode=UI_BLE_MODE_LIST;assert(dual_ble_live_c5_retryable());
+    ble_mode=UI_BLE_MODE_C5;dual_ble_ui_detail=false;
+    dual_ble_ui_selection_pending=true;assert(!dual_ble_live_c5_retryable());dual_ble_ui_selection_pending=false;
+    dual_ble_ui_store->start.job_id=9;cerberus_dual_ble_stop(dual_ble_ui_store);
+    assert(!dual_ble_live_c5_retryable());dual_ble_ui_store->start.job_id=0;dual_ble_ui_store->phase=0;
+    companion_s3_retryable=true;paint_requested_list();
+    assert(strstr(drawn,"RETRY S3")&&strstr(drawn,"RETRY C5"));
+    cerberus_dual_ble_sort_t sort=dual_ble_ui_sort;bool recent=dual_ble_ui_recent_only;
+    assert(dual_ble_ui_tap(20,120)==DUAL_BLE_UI_RETRY_S3&&dual_ble_ui_tap(200,120)==DUAL_BLE_UI_RETRY_C5);
+    assert(sort==dual_ble_ui_sort&&recent==dual_ble_ui_recent_only);
+    save(prefix,"independent-retry-controls");
+    companion_requested=false;companion_s3_released=false;paint_requested_list();
+    assert(strstr(drawn,"STOPPING BOTH RECEIVERS")&&!strstr(drawn,"START BOTH RECEIVERS"));
+    companion_s3_released=true;dual_ble_ui_store->start.job_id=17;paint_requested_list();
+    assert(strstr(drawn,"STOPPING BOTH RECEIVERS")&&!strstr(drawn,"START BOTH RECEIVERS"));
+    dual_ble_ui_store->start.job_id=0;companion_requested=true;
+    companion_s3_retryable=false;dual_ble_ui_store->error=ESP_OK;
+    dual_ble_ui_recent_only=false;dual_ble_ui_offset=0;dual_ble_ui_store->count=1;
+    dual_ble_ui_store->published_boot_id=UINT64_MAX;dual_ble_ui_store->published_epoch=UINT64_MAX-1;
+    dual_ble_ui_store->published_generation=0;
+    cerberus_dual_ble_row_t *row=&dual_ble_ui_store->rows[0];memset(row,0,sizeof(*row));
+    memcpy(row->address,"ABCDEF",6);row->address_type=3;strcpy(row->name,"Frozen before cleanup");
+    row->raw_length=3;row->raw[0]=2;row->raw[1]=1;row->raw[2]=6;
+    paint_requested_list();cerberus_dual_ble_row_t frozen=dual_ble_ui_painted[0];
+    cerberus_dual_ble_provenance_t proof=dual_ble_ui_painted_provenance[0];
+    assert(dual_ble_ui_tap(20,160)==DUAL_BLE_UI_SELECT&&!dual_ble_ui_detail&&dual_ble_ui_selection_pending);
+    companion_requested=false;companion_s3_released=false;dual_ble_ui_store->start.job_id=19;
+    memset(row,0,sizeof(*row));++dual_ble_ui_store->published_generation;
+    paint_requested_list();assert(!dual_ble_ui_painted_count&&strstr(drawn,"RELEASING RECEIVERS FOR DETAIL"));
+    assert(strstr(drawn,"CANCEL SELECTION")&&dual_ble_ui_tap(20,160)==DUAL_BLE_UI_NONE);
+    assert(!dual_ble_ui_apply_selection());companion_s3_released=true;assert(!dual_ble_ui_apply_selection());
+    dual_ble_ui_store->start.job_id=0;assert(dual_ble_ui_apply_selection()&&dual_ble_ui_detail);
+    assert(!memcmp(&frozen,&dual_ble_ui_selected,sizeof(frozen))&&
+        !memcmp(&proof,&dual_ble_ui_selected_provenance,sizeof(proof)));
+    assert(!dual_ble_ui_apply_selection());drawn[0]=0;assert(dual_ble_ui_draw(true)==ESP_OK);
+    assert(strstr(drawn,"BACK TO BLE LIST")&&!strstr(drawn,"START BOTH")&&!strstr(drawn,"STOP BOTH"));
+    assert(dual_ble_ui_tap(160,390)==DUAL_BLE_UI_BACK_S3);
+    /* Stop/Back/save cancellation is independent of shared-store allocation. */
+    dual_ble_ui_detail=false;dual_ble_ui_selection_pending=true;dual_ble_ui_cancel_selection();
+    assert(!dual_ble_ui_apply_selection()&&!memcmp(&frozen,&dual_ble_ui_selected,sizeof(frozen)));
+    cerberus_dual_ble_scan_t *saved=dual_ble_ui_store;dual_ble_ui_store=NULL;
+    dual_ble_ui_selection_pending=true;assert(dual_ble_ui_apply_selection());dual_ble_ui_store=saved;
+    assert(companion_exchanges==exchanges&&companion_allocations==allocations&&starts==radio_starts&&stops==radio_stops);
+    companion_ordinary=companion_requested=companion_s3_retryable=false;
     dual_ble_ui_response_requests=dual_ble_ui_response_mode=false;
 }
 
@@ -994,7 +1093,7 @@ int main(int argc,char **argv)
     assert(strstr(drawn,"C5 WHOLE SWEEP")&&strstr(drawn,"C5 -70 dBm"));
     assert(strstr(drawn,"STOP BOTH RECEIVERS")&&!strstr(drawn,"BEEP"));save(argv[1],"list");
     dual_ble_ui_store->rows[0].address[0]=99;
-    assert(dual_ble_ui_tap(20,160)==DUAL_BLE_UI_REDRAW);
+    assert(select_released_row(20,160)==DUAL_BLE_UI_REDRAW);
     cerberus_c5_ble_result_t target;assert(dual_ble_ui_selected_peer(&target));
     assert(target.address[0]=='A'&&target.address_type==0&&target.flags==0&&target.uuid_length==0);
     assert(!memcmp(&unchanged,&ble_selected_result,sizeof(unchanged)));
@@ -1003,7 +1102,7 @@ int main(int argc,char **argv)
     assert(strstr(drawn,"ORIGINAL ADV 3 B")&&strstr(drawn,"02 01 06"));
     assert(strstr(drawn,"AGE <= 200 ms"));save(argv[1],"detail");
     assert(dual_ble_ui_tap(200,330)==DUAL_BLE_UI_FOX);
-    assert(dual_ble_ui_tap(100,390)==DUAL_BLE_UI_TOGGLE);
+    assert(dual_ble_ui_tap(100,390)==DUAL_BLE_UI_BACK_S3);
     assert(dual_ble_ui_tap(100,65)==DUAL_BLE_UI_BACK_S3);
     assert(dual_ble_ui_tap(20,330)==DUAL_BLE_UI_REDRAW);
     assert(dual_ble_ui_tap(200,340)==DUAL_BLE_UI_REDRAW);drawn[0]=0;
@@ -1019,6 +1118,7 @@ int main(int argc,char **argv)
     check_full_original_hints(argv[1]);
     check_response_details(argv[1]);
     check_monitor_frozen_origin(argv[1]);
+    check_ordinary_retry_and_selection(argv[1]);
     heap_caps_free(dual_ble_ui_store);dual_ble_ui_store=NULL;
     check_focused_lifecycle(argv[1]);
     check_response_mode_lifecycle(argv[1]);

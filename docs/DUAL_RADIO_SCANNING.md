@@ -2,6 +2,11 @@
 
 ## Current local checkpoint
 
+[Rev115](DUAL_RADIO_REV115.md) makes ordinary BLE discovery survive either
+receiver's failure, including an unavailable S3 store, with independent retries
+and shared release barriers for Stop, selection, navigation and saving. It is
+a local candidate; rev113 remains installed and physical acceptance is pending.
+
 [Rev114](DUAL_RADIO_REV114.md) is the local dedicated Find My Monitor candidate.
 It reuses the shared discovery owners, retains separate S3/C5 evidence and
 keeps Stop/Back/sleep and saved-result navigation on the existing release paths.

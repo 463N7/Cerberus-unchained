@@ -185,17 +185,65 @@ static unsigned companion_syncs,companion_retries,companion_exchanges;
 static int companion_requested_mode;
 static uint8_t companion_requested_family;
 static uint64_t companion_sync_clock;
+static bool dual_ble_live_discovery_released(void);
+static bool dual_ble_live_c5_retryable(void);
+static bool ble_discovery_s3_retryable(void);
+static bool dual_ble_ui_released(void);
 #include "discovery_companion_impl.h"
-static void dual_ble_ui_retry(void){++companion_retries;}
-static bool dual_ble_ui_released(void){return companion_released;}
-static void dual_ble_ui_cancel(void){companion_requested_mode=dual_ble_ui_mode=-1;}
+/* Small bound peer for actual C5 coordinator lifecycle, not a second UI
+ * scheduler. Version 1 deliberately avoids inventory transfers in these
+ * ownership tests; existing controller suites cover every snapshot version. */
+static bool companion_actual_owner;
+static struct {
+    uint64_t boot,epoch;
+    uint32_t job;
+    unsigned starts,stops,releases,frames;
+    bool attached,owned,unsupported,hold_stop;
+} composite_peer;
+esp_err_t c5_spi_link_dual_ble_exchange(uint8_t command,const void *request,
+    size_t request_size,void *response,size_t response_size)
+{
+    ++composite_peer.frames;
+    if(command==CERBERUS_SPI_COMMAND_DUAL_BLE_INFO){
+        assert(!request_size&&response_size==sizeof(cerberus_dual_ble_info_t));
+        if(composite_peer.unsupported)return ESP_ERR_NOT_SUPPORTED;
+        cerberus_dual_ble_info_t out={.boot_id=composite_peer.boot,.next_job_id=composite_peer.starts+1U,
+            .version=1,.capacity=32,.raw_bytes=31,.flags=CERBERUS_DUAL_BLE_READY|
+                (composite_peer.attached?CERBERUS_DUAL_BLE_ATTACHED:0U)};
+        memcpy(response,&out,sizeof(out));return ESP_OK;
+    }
+    assert(request&&request_size>=sizeof(cerberus_dual_ble_binding_t)&&response_size==sizeof(cerberus_dual_ble_status_t));
+    const cerberus_dual_ble_binding_t *binding=request;
+    assert(binding->boot_id==composite_peer.boot);
+    if(command==CERBERUS_SPI_COMMAND_DUAL_BLE_START){
+        const cerberus_dual_ble_start_t *start=request;
+        assert(request_size==sizeof(*start)&&cerberus_dual_ble_start_valid(start));
+        assert(start->mode==CERBERUS_DUAL_BLE_DISCOVERY&&!composite_peer.attached);
+        composite_peer.job=start->job_id;++composite_peer.starts;++composite_peer.epoch;
+        composite_peer.attached=composite_peer.owned=true;
+    }else{
+        assert(binding->job_id==composite_peer.job&&composite_peer.attached);
+        if(command==CERBERUS_SPI_COMMAND_DUAL_BLE_STOP){++composite_peer.stops;if(!composite_peer.hold_stop)composite_peer.owned=false;}
+        else if(command==CERBERUS_SPI_COMMAND_DUAL_BLE_RELEASE){++composite_peer.releases;assert(!composite_peer.owned);composite_peer.attached=false;}
+        else assert(command==CERBERUS_SPI_COMMAND_DUAL_BLE_STATUS);
+    }
+    cerberus_dual_ble_status_t out={.epoch=composite_peer.epoch,.job_id=composite_peer.job,.version=1,
+        .generation=(uint8_t)composite_peer.starts,.state=composite_peer.owned?CERBERUS_BLE_SCAN_RUNNING:CERBERUS_BLE_SCAN_COMPLETE,
+        .flags=(composite_peer.attached?CERBERUS_DUAL_BLE_ATTACHED:0U)|(composite_peer.owned?CERBERUS_DUAL_BLE_OWNED:0U)};
+    memcpy(response,&out,sizeof(out));return ESP_OK;
+}
+#include "discovery_companion_owner_impl.h"
+static void dual_ble_ui_retry(void){++companion_retries;if(companion_actual_owner)fixture_actual_dual_ble_ui_retry();}
+static bool dual_ble_ui_released(void){return companion_actual_owner?fixture_actual_dual_ble_ui_released():companion_released;}
+static void dual_ble_ui_cancel(void){if(companion_actual_owner){fixture_actual_dual_ble_ui_cancel();return;}companion_requested_mode=dual_ble_ui_mode=-1;}
 static void dual_ble_ui_sync(int mode,const uint8_t *address,uint8_t type,uint64_t now)
-{assert(mode>=-1&&mode<=CERBERUS_DUAL_BLE_ANALYZER);companion_requested_mode=dual_ble_ui_mode=mode;companion_sync_clock=now;++companion_syncs;
+{if(companion_actual_owner){fixture_actual_dual_ble_ui_sync(mode,address,type,now);return;}assert(mode>=-1&&mode<=CERBERUS_DUAL_BLE_ANALYZER);companion_requested_mode=dual_ble_ui_mode=mode;companion_sync_clock=now;++companion_syncs;
  if(mode==CERBERUS_DUAL_BLE_TRACK){assert(address);memcpy(dual_ble_ui_target,address,6);dual_ble_ui_type=type;}
  (void)dual_ble_ui_attempted;(void)dual_ble_ui_family;}
 static void dual_ble_ui_sync_family(uint8_t family,uint64_t now)
-{assert(family<CERBERUS_S3_BLE_FILTER_COUNT);companion_requested_family=family;
- companion_requested_mode=family?CERBERUS_DUAL_BLE_FAMILY:CERBERUS_DUAL_BLE_DISCOVERY;(void)now;++companion_syncs;}
+{if(companion_actual_owner){fixture_actual_dual_ble_ui_sync_family(family,now);return;}assert(family<CERBERUS_S3_BLE_FILTER_COUNT);companion_requested_family=family;
+ companion_requested_mode=dual_ble_ui_mode=family?CERBERUS_DUAL_BLE_FAMILY:CERBERUS_DUAL_BLE_DISCOVERY;
+ dual_ble_ui_family=family;dual_ble_ui_response_mode=dual_ble_ui_response_requests;(void)now;++companion_syncs;}
 static bool dual_ble_live_enabled(void);
 static bool dual_ble_live_discovery_released(void);
 typedef struct { bool busy; } cerberus_dual_wifi_status_t;
@@ -300,9 +348,17 @@ static void *discovery_ui_calloc(size_t n,size_t size,unsigned capabilities)
  * the actual new ordinary-list header and tests its scheduler and ownership. */
 #include "discovery_native_types.h"
 static ble_discovery_live_store_t *ble_discovery_live;
+static esp_err_t ble_discovery_open_error;
 static bool ble_discovery_page(void){return false;}
+static bool ble_discovery_ordinary_page(void){return false;}
+static bool ble_discovery_requested(void){return false;}
+static bool ble_discovery_s3_retryable(void){return false;}
+static esp_err_t ble_discovery_retry_s3(void){return ESP_ERR_INVALID_STATE;}
+static esp_err_t ble_discovery_request_start(void){return ESP_ERR_INVALID_STATE;}
+static void ble_discovery_request_stop(void){dual_ble_ui_cancel();}
+static void ble_discovery_request_destination(uint8_t dest){(void)dest;}
+static void ble_discovery_cancel_navigation(void){dual_ble_ui_cancel_selection();}
 static bool ble_discovery_presenting(void){return false;}
-static bool ble_discovery_acquire(void){return false;}
 static void ble_discovery_leave(void){assert(!ble_discovery_live);}
 static void ble_discovery_tick(uint64_t now,bool asleep){(void)now;(void)asleep;}
 static void ble_discovery_select_painted(unsigned row){(void)row;assert(!"native selection in legacy fixture");}
@@ -316,12 +372,11 @@ static esp_err_t ble_discovery_monitor_start(void){return ESP_ERR_NO_MEM;}
 static bool ble_discovery_monitor_freeze_selection(unsigned row){(void)row;return false;}
 static bool ble_discovery_monitor_apply_selection(void){return false;}
 #endif
-static bool dual_ble_live_enabled(void)
-{return ble_discovery_live&&ble_discovery_live->session.enabled;}
 /* The inherited monitor fixture uses one generic error name. Preserve its
  * existing cases while exposing the actual TIMEOUT label for owned polling. */
 static const char *view_error_name(esp_err_t error)
-{return error==ESP_ERR_TIMEOUT?"ESP_ERR_TIMEOUT":esp_err_to_name(error);}
+{return error==ESP_ERR_TIMEOUT?"ESP_ERR_TIMEOUT":error==ESP_ERR_NO_MEM?"ESP_ERR_NO_MEM":
+ error==ESP_ERR_NOT_SUPPORTED?"ESP_ERR_NOT_SUPPORTED":esp_err_to_name(error);}
 #define esp_err_to_name view_error_name
 #include "ble_analyzer_dual_ui.h"
 #include "discovery_routes_impl.h"
@@ -330,7 +385,10 @@ static const char *view_error_name(esp_err_t error)
 
 static void seed_list(void)
 {
+    (void)actual_discovery_entry;(void)actual_discovery_menu_scan;(void)actual_discovery_missing_selection;
+    (void)ble_discovery_cancel_navigation;
     (void)dual_ble_live_tick;
+    companion_actual_owner=false;
     (void)dual_ble_ui_cancel;
     (void)draw_ble_findmy_monitor;
     ble_analyzer_s3_details=true;analyzer_wifi_busy=false;
@@ -339,7 +397,7 @@ static void seed_list(void)
     (void)dual_ble_ui_select_frozen;
     memset(&companion_store,0,sizeof(companion_store));dual_ble_ui_store=&companion_store;
     companion_syncs=companion_retries=companion_exchanges=archive_save_calls=0;
-    companion_released=true;dual_ble_ui_detail=dual_ble_ui_receive_info=dual_ble_ui_from_unified=dual_ble_ui_from_monitor=false;
+    companion_released=true;dual_ble_ui_selection_pending=false;dual_ble_ui_detail=dual_ble_ui_receive_info=dual_ble_ui_from_unified=dual_ble_ui_from_monitor=false;
     dual_ble_ui_error=ESP_OK;dual_ble_ui_response_requests=dual_ble_ui_response_mode=dual_ble_ui_response_tab=false;
     reset();memset(observations,0,sizeof(observations));memset(&store,0,sizeof(store));
     ble_findmy_running=ble_findmy_stopping=ble_findmy_exit_pending=ble_findmy_select_pending=false;

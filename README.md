@@ -1,6 +1,6 @@
 # Cerberus Unchained
 
-Experimental Cerberus firmware for the expanded rev114 feature set: integrated
+Experimental Cerberus firmware for the expanded rev115 feature set: integrated
 wardriving, C5 Wi-Fi capture and analysis, S3 BLE discovery and tools, Remote ID
 receive workflows, AP/client navigation, and optional expansion radios.
 
@@ -9,7 +9,7 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev114`, paired with onboard
+**Current source version: `0.1.0-dev.rev115`, paired with onboard
 C5 protocol firmware revision 68. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -40,6 +40,11 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev115 makes ordinary Bluetooth discovery intent independent of either
+receiver's failure, adds source-specific retries and preserves Stop/navigation
+through release. It is a local candidate; rev113 remains installed. See
+[rev115](docs/DUAL_RADIO_REV115.md) for validation and acceptance limits.
 
 Rev114 moves the dedicated Find My Monitor onto the existing S3 and C5
 discovery owners, with separate receiver status, frozen row selection and
