@@ -1,7 +1,7 @@
 {
   "format": 2,
   "audit_checkpoint": "rev124-source",
-  "scope": "Source/workflow status through rev124. Rev124 adds native saved combined S3/C5 Wi-Fi observations and a factual Recon dashboard over the existing inventory and recorder; integrated build and physical acceptance are tracked in DUAL_RADIO_REV124.md. The last verified installed pair is rev123/C5 firmware69, including the rev114-122 lifecycle milestones and offline Marauder Find My JSON interchange. Paired boot, display buffering and SD mount do not establish feature acceptance or full Marauder parity. A read-only GitHub comparison at 2026-11-01 20:37:11 UTC found develop identical to 79cc6bcba1db6679baee1dab2b0c1ad5010e6363. Status assignments remain unchanged; RECEIVE_REMAINING_GAPS.md records remaining scope.",
+  "scope": "Source/workflow status through rev124. Rev124 adds native saved combined S3/C5 Wi-Fi observations and a factual Recon dashboard over the existing inventory and recorder; build, paired installation and pending physical acceptance are tracked in DUAL_RADIO_REV124.md. The last verified installed pair is rev124/C5 firmware69, including the rev114-123 lifecycle and offline interchange milestones. Paired boot, display buffering and SD mount do not establish feature acceptance or full Marauder parity. A read-only GitHub comparison at 2026-11-01 21:08:33 UTC found develop identical to 79cc6bcba1db6679baee1dab2b0c1ad5010e6363. Status assignments remain unchanged; RECEIVE_REMAINING_GAPS.md records remaining scope.",
   "contribution_summary": "docs/CONTRIBUTION_REV93.md",
   "prior_public_contribution": "docs/CONTRIBUTION_REV81.md",
   "upstream": "https://github.com/justcallmekoko/ESP32Marauder",

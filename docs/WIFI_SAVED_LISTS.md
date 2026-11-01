@@ -2,7 +2,8 @@
 
 Rev124 adds saving and reopening the combined S3/C5 Wi-Fi results. These files
 retain observations from a completed scan, rather than a set of live targets.
-The new workflow's build and hardware acceptance are recorded in
+The workflow is included in installed rev124; physical save/reopen acceptance
+remains pending. Build, installation and acceptance evidence are recorded in
 [the rev124 checkpoint](DUAL_RADIO_REV124.md).
 
 ## Workflow

@@ -47,7 +47,11 @@ of its live mascot, plus an optional RSSI radar. All 134 host suites and five
 native targets pass on the same 1,108 unchanged inputs. The linked audit measures
 4,800 bytes less fixed S3 data/BSS and a 4,992-byte smaller S3 image; C5 fixed
 memory is unchanged. Optional viewer/worker allocations and physical acceptance
-are tracked separately. The last verified installed pair is rev123/C5 firmware69.
+are tracked separately. The matched rev124/C5 firmware69 pair is installed with
+verified image writes, paired application boot, display buffering and mounted
+SD. A second idle capture more than 46 seconds later confirms advancing uptime
+without additional SPI errors. Physical touchscreen, Wi-Fi save/reopen, Recon
+recording, RF and sustained-load acceptance remain pending.
 See [the rev124 checkpoint](docs/DUAL_RADIO_REV124.md) for validation status and
 [saved Wi-Fi lists](docs/WIFI_SAVED_LISTS.md) for the storage and provenance
 contract. These changes do not establish complete Marauder parity.
@@ -65,16 +69,16 @@ C5 is unchanged, and optional JSON viewer/worker allocations total 68,200 bytes
 before allocator overhead and other retained stores. Matched package build
 and verify-only checks pass for three targets and nine images. See
 [rev123](docs/DUAL_RADIO_REV123.md) for the exact local package and evidence.
-The matched rev123/C5 firmware69 update is installed with verified image writes,
+The preceding rev123/C5 firmware69 update was installed with verified image writes,
 paired application boot, display buffering and mounted SD. A second idle capture
-more than 42 seconds later confirms the settled boot state. Physical RF,
+more than 42 seconds later confirmed the settled boot state. Physical RF,
 touchscreen, save/reopen, GPS and sustained-load acceptance remain pending.
 This offline interchange does not restore imported records into live discovery
 or establish full Marauder parity.
 
-The rev114–122 source milestones below are included in installed rev123. Their
-individual checkpoint documents preserve the evidence and installation status
-recorded when each milestone was completed.
+Rev123 and the rev114–122 source milestones below are included in installed
+rev124. Their individual checkpoint documents preserve the evidence and
+installation status recorded when each milestone was completed.
 
 Rev122 implements integrated GPS DATA and received-NMEA views, independent GGA
 metadata freshness and retained UART cleanup. GPS remains optional and OFF

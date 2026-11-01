@@ -1,8 +1,10 @@
 # Recon live inventory and activity
 
 This guide describes the current source, including the rev124 field dashboard.
-The last verified installed pair is rev123; the new dashboard's validation and
-installation are recorded separately in [the rev124 checkpoint](DUAL_RADIO_REV124.md).
+The verified installed pair is rev124/C5 firmware69. Paired boot is confirmed;
+physical dashboard interaction and SD recording acceptance remain pending.
+Validation and installation evidence are recorded in
+[the rev124 checkpoint](DUAL_RADIO_REV124.md).
 The earlier contribution's evidence remains in [CONTRIBUTION_REV93.md](CONTRIBUTION_REV93.md).
 
 Recon retains a generic live inventory from the existing C5 Wi-Fi and S3 BLE
