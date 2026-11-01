@@ -1,5 +1,14 @@
 # BLE receive-list parity audit
 
+## Rev105 source checkpoint: saved-report source filters
+
+The offline report viewer adds ALL/S3/C5/LEGACY receiver filtering and stable
+file/name/signal sorting over the existing immutable document. Saved ages,
+source provenance and response/receive evidence remain historical. This
+complements rev104's live list without changing radio scheduling or the v4
+archive format. Both are local checkpoints; rev103 remains installed. See
+[rev105](DUAL_RADIO_REV105.md) for validation and remaining physical acceptance.
+
 ## Rev104 source checkpoint: unified ordinary discovery
 
 Ordinary ALL-device discovery now presents both committed receiver banks in

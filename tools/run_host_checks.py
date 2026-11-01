@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the 122 host suites through the unified BLE discovery checkpoint.
+"""Run the 123 host suites through the saved BLE browsing checkpoint.
 
 The checked-in synthetic fixtures need no board, radio, or private captures.
 Generated fixtures, native executables, previews, logs, and the result receipt
@@ -39,6 +39,7 @@ CHECKS = (
     'check_wardrive_recent.py',
     'check_wardrive_recent_service.py',
     'check_ble_archive.py',
+    'check_ble_archive_list.py',
     'check_ble_archive_io.py',
     'check_recon_inventory.py',
     'check_recon_journal.py',
@@ -183,8 +184,8 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=3, help="Parallel compiler jobs (default: 3)")
     args = parser.parse_args()
     names = (*CHECKS, *SERIAL_CHECKS)
-    if len(names) != 122 or len(set(names)) != 122:
-        parser.error("Expected 122 unique suites; do not silently skip a suite")
+    if len(names) != 123 or len(set(names)) != 123:
+        parser.error("Expected 123 unique suites; do not silently skip a suite")
     if args.list:
         for name in names:
             print(name)
@@ -211,7 +212,7 @@ def main() -> int:
     changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
     receipt = {
         "format": 1,
-        "suite_set": "rev104",
+        "suite_set": "rev105",
         "recorded_utc": datetime.now(timezone.utc).isoformat(),
         "status": "passed" if not changed and all(r["exit_code"] == 0 for r in results) else "failed",
         "hardware_validated": False,

@@ -286,7 +286,7 @@ static void test_both_and_c5_footer(void)
     CHECK(saved_length==13856U&&!memcmp(&saved.rows[63].receive,&frozen_receive,sizeof(frozen_receive)));
     CHECK(saved.rows[0].response_state==CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT&&saved.rows[0].response_source_uptime_ms==9100);
     CHECK(!memcmp(&selected_before,&ble_selected_result,sizeof(selected_before)));
-    complete();CHECK(strstr(drawn,"S3 32 / C5 32 / LEGACY 0"));
+    complete();CHECK(strstr(drawn,"64/64 OBS / P1/16 / S3 32 C5 32 L0"));
     ble_archive_tap(64,426);CHECK(current_page==UI_PAGE_BLE&&ble_mode==UI_BLE_MODE_C5);
 
     seed_both();dual_ble_ui_detail=true;

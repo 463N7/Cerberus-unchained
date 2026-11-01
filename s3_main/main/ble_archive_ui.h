@@ -5,6 +5,7 @@
  * API belongs here. Completed jobs publish value copies; failed jobs retain
  * the previous document. Historical source clocks are never made current. */
 #include "ble_archive.h"
+#include "ble_archive_list.h"
 #include "cerberus_protocol.h"
 #include "ble_receive_info_ui.h"
 
@@ -25,6 +26,9 @@ typedef struct {
     bool painted_age_valid[4], selected_age_valid, raw_response;
     bool job_pending, saving, has_document, paint_valid, selected_valid, release_pending;
     uint8_t page, raw_page, painted_count;
+    uint8_t order[CERBERUS_BLE_ARCHIVE_LIST_CAPACITY], filtered_count;
+    cerberus_ble_archive_list_source_t source_filter;
+    cerberus_ble_archive_list_sort_t sort;
     ble_archive_ui_view_t view;
     esp_err_t error;
     char file_name[256];
@@ -83,6 +87,9 @@ static inline bool ble_archive_ui_complete(ble_archive_ui_store_t *store,
     store->has_document = true;
     store->paint_valid = store->selected_valid = false;
     store->page = store->raw_page = 0U;
+    store->filtered_count = 0U;
+    store->source_filter = CERBERUS_BLE_ARCHIVE_LIST_ALL;
+    store->sort = CERBERUS_BLE_ARCHIVE_LIST_FILE;
     store->raw_response = false;
     store->error = ESP_OK;
     store->view = BLE_ARCHIVE_UI_LIST;
@@ -143,20 +150,22 @@ static inline esp_err_t ble_archive_ui_list(ble_archive_ui_store_t *store)
         snprintf(line, sizeof(line), "...%.47s", store->file_name + 46U);
         ESP_RETURN_ON_ERROR(draw_centered(96, line, UI_MUTED, 1), TAG, "archive file continuation");
     }
-    if ((unsigned)store->page * 4U >= store->document.count) store->page = 0U;
-    snprintf(line, sizeof(line), "%u OBSERVATIONS / PAGE %u OF %u", store->document.count,
-        store->page + 1U, (store->document.count + 3U) / 4U);
-    ESP_RETURN_ON_ERROR(draw_centered(118, line, UI_TEXT, 1), TAG, "archive count");
+    store->filtered_count = cerberus_ble_archive_list_order(&store->document,
+        store->source_filter, store->sort, store->order);
+    if ((unsigned)store->page * 4U >= store->filtered_count) store->page = 0U;
+    const char *source_label = store->source_filter == CERBERUS_BLE_ARCHIVE_LIST_S3 ? "SOURCE S3 >" :
+        store->source_filter == CERBERUS_BLE_ARCHIVE_LIST_C5 ? "SOURCE C5 >" :
+        store->source_filter == CERBERUS_BLE_ARCHIVE_LIST_LEGACY ? "SOURCE LEGACY >" : "SOURCE ALL >";
+    const char *sort_label = store->sort == CERBERUS_BLE_ARCHIVE_LIST_NAME ? "NAME A-Z >" :
+        store->sort == CERBERUS_BLE_ARCHIVE_LIST_SIGNAL ? "SIGNAL >" : "FILE ORDER >";
+    ESP_RETURN_ON_ERROR(draw_button(8, 112, 148, 30, source_label), TAG, "archive source filter");
+    ESP_RETURN_ON_ERROR(draw_button(164, 112, 148, 30, sort_label), TAG, "archive sort");
     unsigned sources[3] = {0};
     for (uint8_t i = 0U; i < store->document.count; ++i)
         if (store->document.rows[i].receiver <= CERBERUS_BLE_ARCHIVE_RECEIVER_C5)
             ++sources[store->document.rows[i].receiver];
-    snprintf(line, sizeof(line), "S3 %u / C5 %u / LEGACY %u / NOT DEVICE COUNT",
-        sources[CERBERUS_BLE_ARCHIVE_RECEIVER_S3], sources[CERBERUS_BLE_ARCHIVE_RECEIVER_C5],
-        sources[CERBERUS_BLE_ARCHIVE_RECEIVER_LEGACY]);
-    ESP_RETURN_ON_ERROR(draw_centered(134, line, UI_MUTED, 1), TAG, "archive identities");
-    for (unsigned row = 0U; row < 4U && (unsigned)store->page * 4U + row < store->document.count; ++row) {
-        unsigned index = (unsigned)store->page * 4U + row;
+    for (unsigned row = 0U; row < 4U && (unsigned)store->page * 4U + row < store->filtered_count; ++row) {
+        unsigned index = store->order[(unsigned)store->page * 4U + row];
         store->painted[row] = store->document.rows[index];
         const cerberus_ble_archive_row_t *item = &store->painted[row];
         store->painted_age_valid[row] = item->receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ?
@@ -168,9 +177,9 @@ static inline esp_err_t ble_archive_ui_list(ble_archive_ui_store_t *store)
         ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(8, y, 304, 50, UI_PANEL), TAG, "archive row");
         snprintf(line, sizeof(line), "%s / %s", ble_archive_ui_receiver(item->receiver), name[0] ? name : "[NO RETAINED NAME]");
         ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 6U, line, UI_TEXT, UI_PANEL, 1), TAG, "archive name");
-        if (item->rssi_valid) snprintf(line, sizeof(line), "%s / %s %d dBm", address,
+        if (item->rssi_valid) snprintf(line, sizeof(line), "%s T%u / %s %d dBm", address, item->address_type,
             item->rssi_kind == CERBERUS_BLE_ARCHIVE_RSSI_LATEST_ADV ? "LAST" : "PEAK", item->rssi);
-        else snprintf(line, sizeof(line), "%s / RSSI UNKNOWN", address);
+        else snprintf(line, sizeof(line), "%s T%u / RSSI UNKNOWN", address, item->address_type);
         ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 21U, line, UI_MUTED, UI_PANEL, 1), TAG, "archive address");
         if (store->painted_age_valid[row]) snprintf(line, sizeof(line), "ADV %u B / AGE AT SAVE %s%llums", item->advertisement_length,
             item->receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ? "<=" : "",
@@ -179,6 +188,20 @@ static inline esp_err_t ble_archive_ui_list(ble_archive_ui_store_t *store)
         ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 36U, line, UI_MUTED, UI_PANEL, 1), TAG, "archive age");
         ++store->painted_count;
     }
+    if (!store->filtered_count) {
+        const char *empty = store->source_filter == CERBERUS_BLE_ARCHIVE_LIST_S3 ? "NO S3 OBSERVATIONS IN THIS FILE" :
+            store->source_filter == CERBERUS_BLE_ARCHIVE_LIST_C5 ? "NO C5 OBSERVATIONS IN THIS FILE" :
+            store->source_filter == CERBERUS_BLE_ARCHIVE_LIST_LEGACY ? "NO LEGACY OBSERVATIONS IN THIS FILE" :
+            "NO OBSERVATIONS IN THIS FILTER";
+        ESP_RETURN_ON_ERROR(draw_centered(222, empty, UI_TEXT, 1), TAG, "archive empty source");
+        ESP_RETURN_ON_ERROR(draw_centered(248, "FILTERING DOES NOT CHANGE THE SAVED FILE", UI_MUTED, 1), TAG, "archive filter scope");
+    }
+    unsigned pages = store->filtered_count ? (store->filtered_count + 3U) / 4U : 1U;
+    snprintf(line, sizeof(line), "%u/%u OBS / P%u/%u / S3 %u C5 %u L%u",
+        store->filtered_count, store->document.count, store->page + 1U, pages,
+        sources[CERBERUS_BLE_ARCHIVE_RECEIVER_S3], sources[CERBERUS_BLE_ARCHIVE_RECEIVER_C5],
+        sources[CERBERUS_BLE_ARCHIVE_RECEIVER_LEGACY]);
+    ESP_RETURN_ON_ERROR(draw_centered(364, line, UI_MUTED, 1), TAG, "archive source counts");
     ESP_RETURN_ON_ERROR(draw_button(8, 374, 148, 44, "PREV"), TAG, "archive prev");
     ESP_RETURN_ON_ERROR(draw_button(164, 374, 148, 44, "NEXT"), TAG, "archive next");
     ESP_RETURN_ON_ERROR(ble_archive_ui_back("BACK"), TAG, "archive back");
@@ -430,10 +453,19 @@ static inline ble_archive_ui_action_t ble_archive_ui_tap(ble_archive_ui_store_t 
         store->view = BLE_ARCHIVE_UI_LIST; store->paint_valid = false; return BLE_ARCHIVE_UI_REDRAW;
     }
     if (store->view == BLE_ARCHIVE_UI_LIST) {
+        if (y >= 112U && y < 142U && ((x >= 8U && x < 156U) || (x >= 164U && x < 312U))) {
+            if (x < 156U) store->source_filter = (cerberus_ble_archive_list_source_t)
+                (((unsigned)store->source_filter + 1U) % CERBERUS_BLE_ARCHIVE_LIST_SOURCE_COUNT);
+            else store->sort = (cerberus_ble_archive_list_sort_t)
+                (((unsigned)store->sort + 1U) % CERBERUS_BLE_ARCHIVE_LIST_SORT_COUNT);
+            store->page = 0U;
+            store->paint_valid = false; store->painted_count = 0U;
+            return BLE_ARCHIVE_UI_REDRAW;
+        }
         if (y >= 374U && y < 418U && ((x >= 8U && x < 156U) || (x >= 164U && x < 312U))) {
             if (x < 156U) { if (store->page) --store->page; }
-            else if (((unsigned)store->page + 1U) * 4U < store->document.count) ++store->page;
-            store->paint_valid = false; return BLE_ARCHIVE_UI_REDRAW;
+            else if (((unsigned)store->page + 1U) * 4U < store->filtered_count) ++store->page;
+            store->paint_valid = false; store->painted_count = 0U; return BLE_ARCHIVE_UI_REDRAW;
         }
         if (store->paint_valid && x >= 8U && x < 312U && y >= 150U && y < 362U) {
             unsigned row = (y - 150U) / 54U;

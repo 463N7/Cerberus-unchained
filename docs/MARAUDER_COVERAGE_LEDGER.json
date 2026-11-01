@@ -1,7 +1,7 @@
 {
   "format": 2,
-  "audit_checkpoint": "rev104-source-preparation",
-  "scope": "Editorial source/workflow status through rev104 unified ordinary BLE discovery; rev103 remains the installed checkpoint. The shared live list and receiver filters preserve source evidence without changing RF scheduling or establishing full Marauder feature parity. See DUAL_RADIO_REV104.md for validation limits, DUAL_RADIO_REV103.md for installation evidence, DUAL_RADIO_REV102.md and BLE_SD_SNAPSHOTS.md for saved receive evidence, and BLE_RECEIVE_LIST_PARITY.md for receive limits. Marauder develop was last rechecked unchanged at 79cc6bcba1db6679baee1dab2b0c1ad5010e6363 on 2026-11-01.",
+  "audit_checkpoint": "rev105-source-preparation",
+  "scope": "Editorial source/workflow status through rev105 saved BLE receiver filtering and stable ordering, following rev104 unified live discovery; rev103 remains installed. Browsing preserves source evidence and historical ages without new RF or filesystem requests. See DUAL_RADIO_REV105.md and DUAL_RADIO_REV104.md for local validation limits, DUAL_RADIO_REV103.md for installation evidence, BLE_SD_SNAPSHOTS.md for saved evidence, and BLE_RECEIVE_LIST_PARITY.md for receive limits. Full Marauder parity remains incomplete. Marauder develop was last rechecked unchanged at 79cc6bcba1db6679baee1dab2b0c1ad5010e6363 on 2026-11-01.",
   "contribution_summary": "docs/CONTRIBUTION_REV93.md",
   "prior_public_contribution": "docs/CONTRIBUTION_REV81.md",
   "upstream": "https://github.com/justcallmekoko/ESP32Marauder",
@@ -2317,7 +2317,7 @@
         56,
         57
       ],
-      "next_gap": "Rev104 combines ordinary ALL-device BLE discovery with ALL/S3/C5 receiver filters over a bounded 64-reference index and frozen per-source selections. Family-specific views remain S3-only; source filters change presentation, not radio admission or SAVE BOTH scope. Rev102 v4 reports retain C5 receive envelopes and S3 matching responses; loaded rows never enter live target lists. Physical unified-list/Stop/Back/Fox/save acceptance, saved-report source filters, dense retention, broader history/session recording, full payloads, Marauder AirTag JSON import, AP/SSID editing/persistence, MAC controls and profile parity remain open. See DUAL_RADIO_REV104.md and BLE_SD_SNAPSHOTS.md; rev103 remains installed."
+      "next_gap": "Rev105 adds ALL/S3/C5/LEGACY source filters and stable FILE/NAME/SIGNAL ordering to loaded reports, using a 64-byte index and preserving frozen selections and historical ages without IO/clock/radio calls. It complements rev104's combined ordinary live discovery list. Family-specific live views remain S3-only, and presentation does not change radio admission or SAVE BOTH scope. V4 reports retain C5 receive envelopes and S3 matching responses; loaded rows never become live targets. Physical live/offline filtering, Stop/Back/Fox/save/reopen acceptance, dense retention, broader history/session recording, full payloads, Marauder AirTag JSON import, AP/SSID editing/persistence, MAC controls and profile parity remain open. See DUAL_RADIO_REV105.md and BLE_SD_SNAPSHOTS.md; rev103 remains installed."
     },
     {
       "name": "storage_and_transfer",
