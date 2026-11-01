@@ -46,7 +46,14 @@ allocations to preserve internal radio memory. Their payload totals 21,760
 bytes. A missing/exhausted PSRAM bank produces an explicit memory error and a
 zero visible row count; Back and later reloads remain available. All 120 host
 suites and all five native targets pass on stable inputs. The linked internal
-sections shrink by 21,744 bytes. Physical repeat-scan checks are pending.
+sections shrink by 21,744 bytes. The paired rev96 package is installed, both
+chips are online and SD is mounted. Cold internal free RAM is 135,268 bytes,
+exactly 21,744 bytes above rev95. After BLE Stop/Back and a split Wi-Fi scan,
+the console captured 19 S3 plus 11 C5 APs, no scan errors and released owners.
+Warm internal free RAM is 88,036 bytes, 22,500 above scan admission, and remained
+stable at a later read. The owner reported repeated split success; the captured
+C5 counter independently establishes one completed job so far. The SD-list
+browsing and following-scan check remains pending.
 
 Rev95 addresses the retained S3 memory limitation observed after Bluetooth use.
 It moves eligible NimBLE host allocations to PSRAM, preserves the existing
@@ -54,8 +61,8 @@ buffer counts and host lifetime, and rejects BLE initialization when optional
 PSRAM is absent. It also adds cached per-radio/lifecycle diagnostics and bounded
 recovery from an unknown C5 firmware cache. All 119 host suites and all five
 native targets pass on stable inputs. The matched onboard package also passes
-image, partition, source and console-stack checks. The paired rev95 build is
-installed. After BLE Stop/Back, the owner and console confirmed a split scan:
+image, partition, source and console-stack checks. On the preceding installed
+rev95 build, after BLE Stop/Back the owner and console confirmed a split scan:
 9 S3 APs plus 17 C5 APs in 4,959 ms, no scan errors and no held radio owners.
 Warm internal free RAM was 66,292 bytes, only 756 bytes above the next-scan
 admission threshold. This narrow reserve motivates rev96. See
