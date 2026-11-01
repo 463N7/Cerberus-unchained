@@ -147,12 +147,16 @@ static bool companion_released=true;
 static cerberus_dual_ble_scan_t companion_store;
 static unsigned companion_syncs,companion_retries,companion_exchanges;
 static int companion_requested_mode;
+static uint8_t companion_requested_family;
 #include "discovery_companion_impl.h"
 static void dual_ble_ui_retry(void){++companion_retries;}
 static bool dual_ble_ui_released(void){return companion_released;}
 static void dual_ble_ui_sync(int mode,const uint8_t *address,uint8_t type,uint64_t now)
 {assert(mode>=-1&&mode<=CERBERUS_DUAL_BLE_ANALYZER);companion_requested_mode=mode;(void)address;(void)type;(void)now;++companion_syncs;
- (void)dual_ble_ui_target;(void)dual_ble_ui_type;(void)dual_ble_ui_mode;(void)dual_ble_ui_attempted;}
+ (void)dual_ble_ui_target;(void)dual_ble_ui_type;(void)dual_ble_ui_mode;(void)dual_ble_ui_attempted;(void)dual_ble_ui_family;}
+static void dual_ble_ui_sync_family(uint8_t family,uint64_t now)
+{assert(family<CERBERUS_S3_BLE_FILTER_COUNT);companion_requested_family=family;
+ companion_requested_mode=family?CERBERUS_DUAL_BLE_FAMILY:CERBERUS_DUAL_BLE_DISCOVERY;(void)now;++companion_syncs;}
 static bool dual_ble_live_enabled(void);
 static bool dual_ble_live_discovery_released(void);
 typedef struct { bool busy; } cerberus_dual_wifi_status_t;

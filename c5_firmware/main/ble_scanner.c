@@ -13,6 +13,7 @@
 #include "dual_ble_protocol.h"
 #include "ble_inventory_admission.h"
 #include "ble_analyzer_counter.h"
+#include "ble_family_wire.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "host/ble_hs.h"
@@ -97,17 +98,19 @@ static RTC_NOINIT_ATTR uint8_t diagnostic_phase;
 static uint64_t dual_boot_id, dual_epoch_counter, dual_epoch;
 static uint32_t dual_job_id, dual_job_highwater, dual_last_contact_ms, dual_track_ms, dual_track_reports;
 static int32_t dual_error;
-static uint8_t dual_mode, dual_generation, dual_address[6], dual_address_type, dual_version;
+static uint8_t dual_mode, dual_generation, dual_address[6], dual_address_type, dual_version, dual_family;
 static int8_t dual_track_rssi;
 static bool dual_attached, dual_radio_active, dual_track_seen;
 static cerberus_ble_analyzer_counter_t dual_analyzer;
 /* Ordinary callback tokens retain their legacy wrap behavior. Once wrapped,
- * Analyzer cannot claim a never-reused token until the next C5 boot. */
+ * Analyzer and Family cannot claim a never-reused token until the next C5 boot. */
 static bool analyzer_callback_exhausted;
 static cerberus_ble_inventory_admission_t scan_inventory;
+static cerberus_dual_ble_family_wire_t scan_family[CERBERUS_DUAL_BLE_CAPACITY];
 typedef struct {
     cerberus_dual_ble_snapshot_row_t rows[CERBERUS_DUAL_BLE_CAPACITY];
     cerberus_dual_ble_receive_metadata_t receive[CERBERUS_DUAL_BLE_CAPACITY];
+    cerberus_dual_ble_family_wire_t family[CERBERUS_DUAL_BLE_CAPACITY];
     uint64_t counter, handle, epoch, request_id;
     uint32_t job_id, replaced, dropped;
     uint8_t count, flags;
@@ -200,9 +203,11 @@ static void copy_raw_advertisement(cerberus_ble_record_t *record,
 }
 
 static bool analyzer_observe(uint32_t epoch, uint8_t type, int8_t rssi,
-    bool original, int64_t callback_us)
+    bool original, int64_t callback_us, uint8_t *family)
 {
     xSemaphoreTake(scanner_mutex, portMAX_DELAY);
+    if (family) *family = dual_attached && dual_mode == CERBERUS_DUAL_BLE_FAMILY &&
+        epoch && epoch == scan_callback_epoch && scan_status.state == CERBERUS_BLE_SCAN_RUNNING ? dual_family : 0U;
     const bool analyzer = dual_attached && dual_mode == CERBERUS_DUAL_BLE_ANALYZER;
     if (analyzer && original && epoch && epoch == scan_callback_epoch &&
         scan_status.state == CERBERUS_BLE_SCAN_RUNNING)
@@ -211,13 +216,32 @@ static bool analyzer_observe(uint32_t epoch, uint8_t type, int8_t rssi,
     return analyzer;
 }
 
+/* Full parsing is opt-in FAMILY work and runs outside scanner_mutex. Raw
+ * preview flags retain their independent SDK/prefix meaning; a cut preview
+ * does not invalidate the independently parsed complete delivered container. */
+static void __attribute__((noinline)) family_classify_callback(
+    const struct ble_gap_disc_desc *discovery,
+    const cerberus_dual_ble_receive_metadata_t *receive, uint8_t code,
+    cerberus_dual_ble_family_wire_t *out)
+{
+    cerberus_dual_ble_family_evidence_t evidence = {0};
+    if (receive->source_kind == CERBERUS_DUAL_BLE_RECEIVE_UNKNOWN)
+        cerberus_dual_ble_family_unavailable(&evidence, CERBERUS_DUAL_BLE_FAMILY_RECEIVE_UNKNOWN);
+    else cerberus_dual_ble_family_parse_ad(discovery->data, discovery->length_data,
+        discovery->addr.val, discovery->addr.type, &evidence);
+    /* Invalid typed identities are rejected before retention. Parser failure
+     * yields canonical unavailable evidence, never cached positive hints. */
+    (void)cerberus_dual_ble_family_wire_encode(&evidence, code, out);
+}
+
 static void record_advertisement_with_metadata(const struct ble_gap_disc_desc *discovery,
     uint32_t epoch, int64_t callback_us, const cerberus_dual_ble_receive_metadata_t *receive)
 {
     if (discovery == NULL || (discovery->length_data != 0U && discovery->data == NULL) ||
         discovery->event_type == BLE_HCI_ADV_RPT_EVTYPE_SCAN_RSP) return;
+    uint8_t family_code = 0U;
     if (analyzer_observe(epoch, discovery->addr.type, discovery->rssi,
-            discovery->event_type <= 3U, callback_us)) return;
+            discovery->event_type <= 3U, callback_us, &family_code)) return;
     struct ble_hs_adv_fields fields = {0};
     const bool parsed = discovery->length_data == 0U ||
         ble_hs_adv_parse_fields(&fields, discovery->data, discovery->length_data) == 0;
@@ -227,6 +251,18 @@ static void record_advertisement_with_metadata(const struct ble_gap_disc_desc *d
     const bool full_ad_valid = discovery->event_type <= 3U &&
         cerberus_ble_inventory_ad_valid(discovery->data, discovery->length_data);
     const bool qualifying = parsed && full_ad_valid;
+    cerberus_dual_ble_receive_metadata_t normalized = {0};
+    if (receive && receive->callback_length == discovery->length_data) {
+        normalized = *receive;
+        normalized.ad_validation = full_ad_valid ? CERBERUS_DUAL_BLE_AD_VALID : CERBERUS_DUAL_BLE_AD_INVALID;
+        const uint8_t raw_length = discovery->length_data < 31U ? discovery->length_data : 31U;
+        const uint8_t raw_flags = (discovery->length_data > 31U ? 1U : 0U) | (parsed ? 0U : 2U);
+        if (!cerberus_dual_ble_receive_metadata_valid(&normalized, raw_length,
+                discovery->event_type, raw_flags)) memset(&normalized, 0, sizeof(normalized));
+    }
+    cerberus_dual_ble_family_wire_t family = {0};
+    if (family_code) family_classify_callback(discovery, &normalized, family_code, &family);
+
 
     xSemaphoreTake(scanner_mutex, portMAX_DELAY);
     if (!epoch || epoch != scan_callback_epoch || scan_status.state != CERBERUS_BLE_SCAN_RUNNING) {
@@ -265,9 +301,27 @@ static void record_advertisement_with_metadata(const struct ble_gap_disc_desc *d
         return;
     }
 
+    const bool focused = dual_attached && dual_mode == CERBERUS_DUAL_BLE_FAMILY;
+    /* Parse outside the mutex, then bind it to the still-current owner/epoch.
+     * Backward callback clocks cannot replace or refresh an original. These
+     * remain historical retained rows; no new timing/proof is published. */
+    if (focused && (family_code != dual_family || callback_us < 0 ||
+            (scan_inventory.clock_valid && callback_us < scan_inventory.clock_highwater_us))) {
+        xSemaphoreGive(scanner_mutex); return;
+    }
     int existing_index = find_record(&discovery->addr);
+    const bool family_match = family.version && (family.flags & CERBERUS_DUAL_BLE_FAMILY_WIRE_AVAILABLE) &&
+        (family.categories & (1U << (family_code - 1U)));
+    if (focused) {
+        scan_inventory.clock_highwater_us = callback_us;
+        scan_inventory.clock_valid = true;
+        /* Unrelated originals never occupy slots or increment full-bank drop
+         * counters. Existing typed rows are retained but dequalified below. */
+        if (existing_index < 0 && !family_match) { xSemaphoreGive(scanner_mutex); return; }
+        if (existing_index >= 0 && !family_match) scan_inventory.rank[existing_index] = 0U;
+    }
     int admitted_index = cerberus_ble_inventory_admit(&scan_inventory,
-        scan_status.stored_count, existing_index, qualifying, callback_us);
+        scan_status.stored_count, existing_index, focused ? family_match : qualifying, callback_us);
     bool connectable = discovery->event_type == BLE_HCI_ADV_RPT_EVTYPE_ADV_IND ||
         discovery->event_type == BLE_HCI_ADV_RPT_EVTYPE_DIR_IND;
     cerberus_ble_record_t *record = NULL;
@@ -302,16 +356,8 @@ static void record_advertisement_with_metadata(const struct ble_gap_disc_desc *d
         record->original_observed_ms = callback_us >= 0 ? (uint32_t)((uint64_t)callback_us / 1000U) : UINT32_MAX;
         record->latest_rssi = discovery->rssi;
         record->original_time_valid = callback_us >= 0;
-        memset(&record->receive, 0, sizeof(record->receive));
-        if (receive && receive->callback_length == discovery->length_data) {
-            record->receive = *receive;
-            record->receive.ad_validation = full_ad_valid ?
-                CERBERUS_DUAL_BLE_AD_VALID : CERBERUS_DUAL_BLE_AD_INVALID;
-            if (!cerberus_dual_ble_receive_metadata_valid(&record->receive,
-                    record->advertisement_length, record->advertisement_event_type,
-                    record->advertisement_flags))
-                memset(&record->receive, 0, sizeof(record->receive));
-        }
+        record->receive = normalized;
+        if (focused) scan_family[record - scan_results] = family;
     }
     xSemaphoreGive(scanner_mutex);
 }
@@ -393,7 +439,7 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         if (extended->data_status != BLE_GAP_EXT_ADV_DATA_STATUS_COMPLETE) {
             /* Never concatenate partial reports or classify their prefixes. */
             if (analyzer_observe(epoch, extended->addr.type, extended->rssi,
-                    !extended->length_data || extended->data != NULL, callback_us)) break;
+                    !extended->length_data || extended->data != NULL, callback_us, NULL)) break;
             xSemaphoreTake(scanner_mutex, portMAX_DELAY);
             if (epoch && epoch == scan_callback_epoch && scan_status.state == CERBERUS_BLE_SCAN_RUNNING) {
                 cerberus_ble_activity_observe(&activity_capture, extended->addr.val,
@@ -1065,7 +1111,7 @@ static esp_err_t start_scan(bool companion)
         connection_status.state == CERBERUS_BLE_CONNECTION_DISCONNECTING;
     if (!host_synced || scan_status.state == CERBERUS_BLE_SCAN_RUNNING || connection_active ||
         (dual_attached && !companion) || dual_radio_active ||
-        (companion && dual_mode == CERBERUS_DUAL_BLE_ANALYZER &&
+        (companion && (dual_mode == CERBERUS_DUAL_BLE_ANALYZER || dual_mode == CERBERUS_DUAL_BLE_FAMILY) &&
             (analyzer_callback_exhausted || scan_callback_epoch == UINT32_MAX))) {
         esp_err_t err = host_synced ? ESP_ERR_INVALID_STATE : ESP_ERR_NOT_FINISHED;
         xSemaphoreGive(scanner_mutex);
@@ -1085,7 +1131,7 @@ static esp_err_t start_scan(bool companion)
     uint32_t now_ms = (uint32_t)(started_us / 1000LL);
     cerberus_ble_inventory_admission_begin(&scan_inventory,
         companion && dual_attached && dual_version == CERBERUS_DUAL_BLE_VERSION &&
-            dual_mode == CERBERUS_DUAL_BLE_DISCOVERY, started_us);
+            (dual_mode == CERBERUS_DUAL_BLE_DISCOVERY || dual_mode == CERBERUS_DUAL_BLE_FAMILY), started_us);
     uint64_t epoch = watch_capture_epoch == UINT64_MAX ? 0U : ++watch_capture_epoch;
     cerberus_watch_capture_begin_with_epoch(&watch_capture, CERBERUS_WATCH_RADIO_BLE,
         scan_status.generation, now_ms, epoch);
@@ -1096,6 +1142,8 @@ static esp_err_t start_scan(bool companion)
     cerberus_ble_activity_begin(&activity_capture, scan_status.generation, now_ms,
         MYNEWT_VAL(BLE_EXT_ADV) != 0);
     memset(scan_results, 0, sizeof(scan_results));
+    if (companion && dual_mode == CERBERUS_DUAL_BLE_FAMILY)
+        memset(scan_family, 0, sizeof(scan_family));
     diagnostic_phase = 1;
     xSemaphoreGive(scanner_mutex);
     ble_npl_eventq_put(nimble_port_get_dflt_eventq(), &start_event);

@@ -694,8 +694,14 @@ static void live_make_view(void)
             snprintf(live_subtitle, sizeof(live_subtitle), "STOPPING / WAITING FOR RADIO RELEASE");
         else if (discovery->error)
             snprintf(live_subtitle, sizeof(live_subtitle), "SCAN ERROR / %.30s", esp_err_to_name(discovery->error));
+        else if (ble_filter != CERBERUS_S3_BLE_FILTER_ALL && companion.error == ESP_ERR_NOT_SUPPORTED)
+            snprintf(live_subtitle, sizeof(live_subtitle), "C5 FOCUS UNAVAILABLE / S3 VIEW / C5 >");
         else if (companion.error)
             snprintf(live_subtitle, sizeof(live_subtitle), "S3 VIEW / C5 ERROR %ld / TAP FOR C5 >", (long)companion.error);
+        else if (discovery->enabled && ble_filter != CERBERUS_S3_BLE_FILTER_ALL)
+            snprintf(live_subtitle, sizeof(live_subtitle), "C5 FOCUS %s / %u RETAINED / C5 >",
+                companion.stopping || companion.requested_family != (uint8_t)ble_filter ? "CHANGING" :
+                companion.receiving ? "LIVE" : companion.reading ? "READ" : "WAIT", companion.count);
         else if (discovery->enabled)
             snprintf(live_subtitle, sizeof(live_subtitle), "S3 + C5 %s / %u / TAP FOR C5 >",
                 companion.receiving ? "LIVE" : companion.reading ? "READ" : "WAIT", companion.count);
@@ -710,7 +716,7 @@ static void live_make_view(void)
                 snprintf(live_hint, sizeof(live_hint), "S3 %u + C5 %u OBS / SOURCE FILTER ABOVE",
                     ble_discovery_live->inventory.family == ble_filter ?
                         ble_discovery_live->inventory.count : 0U, companion.count);
-            else snprintf(live_hint, sizeof(live_hint), "S3 %u + C5 %u / C5 UNCLASSIFIED %u",
+            else snprintf(live_hint, sizeof(live_hint), "S3 %u + C5 %u RETAINED / UNCLASSIFIED %u",
                 (unsigned)__builtin_popcount(ble_discovery_live->order_s3_mask),
                 (unsigned)__builtin_popcount(ble_discovery_live->order_c5_mask),
                 (unsigned)ble_discovery_live->order_c5_count - (unsigned)__builtin_popcount(ble_discovery_live->c5_classifiable));

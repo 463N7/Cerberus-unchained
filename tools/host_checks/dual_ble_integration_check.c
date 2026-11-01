@@ -5,12 +5,13 @@
 #undef main
 #include "dual_ble_scan.h"
 #include "dual_ble_archive_capture.h"
+#include "dual_ble_family.h"
 #include "c5_ble_legacy_getters.h"
 
 typedef struct {
-    bool legacy, lose_begin, mutated, extended, old_metadata, bad_fence, bad_analyzer_binding;
+    bool legacy, lose_begin, mutated, extended, old_metadata, bad_fence, bad_analyzer_binding, family;
     uint64_t rf_started_ms, first_begin_ms, fallback_handle;
-    unsigned begin_calls, reads, releases, frames, metadata_reads, old_reads, unsupported_at, analyzer_reads;
+    unsigned begin_calls, reads, releases, frames, metadata_reads, old_reads, unsupported_at, analyzer_reads, family_reads;
 } integration_t;
 
 static uint64_t integration_clock(void *context) { (void)context; return now_ms; }
@@ -32,11 +33,23 @@ static void integration_extended_report(uint8_t address,uint8_t type,int8_t rssi
         .length_data=sizeof(payload),.data=payload}};
     assert(!gap_event(&event,(void*)(uintptr_t)scan_callback_epoch));
 }
+static void integration_family_report(uint8_t address,uint8_t type,int8_t rssi,uint8_t suffix)
+{
+    /* The HC name begins beyond the retained31-byte prefix. The full callback
+     * is valid even though its prefix terminates inside the first AD field. */
+    uint8_t payload[47]={39,0xff,0x4c,0};
+    memcpy(payload+40,(uint8_t[]){6,9,'H','C','-','0',suffix},7);
+    struct ble_gap_event event={.type=BLE_GAP_EVENT_EXT_DISC,.ext_disc={
+        .addr={{address,2,3,4,5,6},type},.rssi=rssi,.sid=7,.prim_phy=3,.sec_phy=1,
+        .length_data=sizeof(payload),.data=payload}};
+    assert(!gap_event(&event,(void*)(uintptr_t)scan_callback_epoch));
+}
 
 static esp_err_t integration_exchange(void *context,uint8_t command_id,const void *request,
     size_t request_size,void *response,size_t response_size)
 {
     integration_t *i=context;++i->frames;
+    if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY)++i->family_reads;
     cerberus_dual_ble_binding_t wrong_binding;
     if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_ANALYZER_SAMPLE){
         ++i->analyzer_reads;
@@ -78,7 +91,8 @@ static esp_err_t integration_exchange(void *context,uint8_t command_id,const voi
     }
     if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_START&&starts!=old_starts){
         i->rf_started_ms=now_ms;
-        if(i->extended)integration_extended_report(1,1,-30,7);else integration_report(-30,6);
+        if(i->family)integration_family_report(1,1,-30,'5');
+        else if(i->extended)integration_extended_report(1,1,-30,7);else integration_report(-30,6);
         if(dual_mode!=CERBERUS_DUAL_BLE_ANALYZER){
             memcpy(scan_results[0].name,"REAL",4);scan_results[0].name_length=4;
             scan_results[0].uuid_length=2;scan_results[0].uuid[0]=0xaa;scan_results[0].uuid[1]=0xfe;
@@ -90,12 +104,14 @@ static esp_err_t integration_exchange(void *context,uint8_t command_id,const voi
         if(i->lose_begin){i->lose_begin=false;now_ms+=8U;return ESP_ERR_TIMEOUT;}
     }
     if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ||
-        command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA){
+        command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA||
+        command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY){
         ++i->reads;
         /* This update occurs AFTER the first real chunk reply, while remaining
          * chunks are still in flight. No mixture may reach the S3 publisher. */
         if(!i->mutated){
-            if(i->extended||scan_status.stored_count==32)integration_extended_report(1,1,-90,12);
+            if(i->family)integration_family_report(1,1,-90,'6');
+            else if(i->extended||scan_status.stored_count==32)integration_extended_report(1,1,-90,12);
             else integration_report(-90,7);
             i->mutated=true;
         }
@@ -190,6 +206,65 @@ static void integration_analyzer(void)
     for(unsigned n=0;n<50&&!cerberus_dual_ble_released(&s);++n){now_ms+=20;cerberus_dual_ble_tick(&s,now_ms);}
     assert(cerberus_dual_ble_released(&s)&&!dual_attached&&!dual_radio_active);
     puts("Actual C5 callbacks -> bound Analyzer sample -> S3: >32 identities, partial originals, exclusions, silence, final sweep, restart gap and stale binding passed");
+}
+static void integration_family(void)
+{
+    integration_t i;cerberus_dual_ble_scan_t s;
+    integration_reset(&i,&s,false);cerberus_dual_ble_stop(&s);i.family=true;i.lose_begin=true;
+    assert(cerberus_dual_ble_begin_family(&s,6)==ESP_OK);
+    for(unsigned n=0;n<250&&!s.snapshots;++n)integration_tick(&i,&s);
+    assert(s.snapshots==1&&s.count==1&&s.published_family==6&&i.family_reads==16);
+    assert(!i.metadata_reads&&!i.old_reads&&i.begin_calls>=2&&starts==1&&!s.sweeps);
+    cerberus_dual_ble_row_t row;cerberus_dual_ble_provenance_t proof;
+    assert(cerberus_dual_ble_copy_row(&s,0,&row,&proof));
+    cerberus_dual_ble_family_evidence_t evidence;
+    assert(cerberus_dual_ble_family_classify(&row,&proof,&evidence));
+    assert(evidence.hc_name==CERBERUS_BLE_HC_05&&
+        (evidence.categories&CERBERUS_DUAL_BLE_FAMILY_HC_NAME_HINT));
+    assert(row.raw_length==31&&row.receive.callback_length==47&&row.raw_flags==3&&row.rssi==-30);
+    assert(row.request_started_ms==i.first_begin_ms&&i.mutated);
+    for(unsigned n=0;n<250&&s.snapshots<2;++n)integration_tick(&i,&s);
+    assert(s.snapshots==2&&s.rows[0].rssi==-90);
+    assert(cerberus_dual_ble_family_classify(&s.rows[0],&proof,&evidence)&&evidence.hc_name==CERBERUS_BLE_HC_06);
+    assert(cerberus_dual_ble_family_classify(&row,&proof,&evidence)&&evidence.hc_name==CERBERUS_BLE_HC_05);
+    /* A newer original without this family dequalifies its existing typed row;
+     * it cannot keep the previous callback's evidence. New unmatched peers do
+     * not occupy family admission capacity. */
+    integration_report(-75,6);
+    integration_extended_report(2,1,-60,1);
+    for(unsigned n=0;n<250&&s.snapshots<3;++n)integration_tick(&i,&s);
+    assert(s.snapshots==3&&s.count==1&&s.rows[0].rssi==-75);
+    assert(cerberus_dual_ble_family_classify(&s.rows[0],&proof,&evidence)&&!evidence.categories);
+    uint8_t malformed[]={4,0xff,0x4c,0};
+    struct ble_gap_event invalid={.type=BLE_GAP_EVENT_DISC,.disc={
+        .addr={{1,2,3,4,5,6},1},.rssi=-80,.event_type=0,.data=malformed,.length_data=sizeof(malformed)}};
+    assert(!gap_event(&invalid,(void*)(uintptr_t)scan_callback_epoch));
+    integration_family_report(1,0,-45,'5'); /* Equal address bytes, distinct typed identity. */
+    for(unsigned n=0;n<250&&s.snapshots<4;++n)integration_tick(&i,&s);
+    assert(s.snapshots==4&&s.count==2&&s.rows[0].address_type==1&&s.rows[1].address_type==0);
+    assert(!cerberus_dual_ble_family_classify(&s.rows[0],&proof,&evidence)&&
+        evidence.state==CERBERUS_DUAL_BLE_FAMILY_MALFORMED&&!evidence.available);
+    cerberus_dual_ble_provenance_t second;
+    cerberus_dual_ble_row_t second_row;
+    assert(cerberus_dual_ble_copy_row(&s,1,&second_row,&second));
+    assert(cerberus_dual_ble_family_classify(&second_row,&second,&evidence)&&evidence.hc_name==CERBERUS_BLE_HC_05);
+    for(unsigned n=0;n<500&&!s.sweeps;++n)integration_tick(&i,&s);
+    assert(s.sweeps==1&&s.published_family==6);
+    cerberus_dual_ble_stop(&s);
+    for(unsigned n=0;n<50&&!cerberus_dual_ble_released(&s);++n)integration_tick(&i,&s);
+    assert(cerberus_dual_ble_released(&s)&&!dual_attached&&!dual_radio_active);
+    /* Final-suffix cancellation must not publish even though the base110-byte
+     * metadata projection has already arrived. */
+    for(unsigned stop_at=1;stop_at<=16;stop_at+=15){
+        integration_reset(&i,&s,false);cerberus_dual_ble_stop(&s);i.family=true;
+        assert(cerberus_dual_ble_begin_family(&s,6)==ESP_OK);
+        for(unsigned n=0;n<250&&i.family_reads<stop_at;++n)integration_tick(&i,&s);
+        assert(i.family_reads==stop_at&&!s.snapshots);
+        cerberus_dual_ble_stop(&s);
+        for(unsigned n=0;n<50&&!cerberus_dual_ble_released(&s);++n)integration_tick(&i,&s);
+        assert(cerberus_dual_ble_released(&s)&&!s.snapshots&&i.family_reads==stop_at&&!dual_attached);
+    }
+    puts("Actual C5 full callback -> FAMILY158 -> S3: beyond-prefix hints, frozen mutation, first-BEGIN age, dequalification, focused admission, final sweep and Stop passed");
 }
 int main(void)
 {
@@ -324,6 +399,7 @@ int main(void)
     for(unsigned tick=0;tick<50U&&!cerberus_dual_ble_released(&s);++tick){now_ms+=20;cerberus_dual_ble_tick(&s,now_ms);}
     assert(cerberus_dual_ble_released(&s)&&!dual_attached&&!s.snapshots);
     integration_analyzer();
+    integration_family();
     puts("Actual C5 service/callback + S3 coordinator: live immutable readout, lost-BEGIN age, final 8s sweep, Stop and v1 completed-bank fallback passed");
     return 0;
 }

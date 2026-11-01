@@ -18,6 +18,7 @@ static uint8_t dual_ble_ui_visible_count;
 static cerberus_dual_ble_sort_t dual_ble_ui_sort = CERBERUS_DUAL_BLE_SORT_SIGNAL;
 static bool dual_ble_ui_recent_only;
 static uint8_t dual_ble_ui_target[6], dual_ble_ui_type;
+static uint8_t dual_ble_ui_family;
 static int dual_ble_ui_mode = -1;
 static bool dual_ble_ui_attempted, dual_ble_ui_detail;
 static bool dual_ble_ui_receive_info;
@@ -42,16 +43,22 @@ static void dual_ble_ui_retry(void)
     if (dual_ble_ui_store) cerberus_dual_ble_stop(dual_ble_ui_store);
 }
 
-/* Desired mode comes only from discovery, exact-address Fox Hunt or passive
- * Analyzer. Mixed Recon/Wardriving retain their existing radio roles. */
-static void dual_ble_ui_sync(int mode, const uint8_t address[6], uint8_t type, uint64_t now)
+/* Family is part of the desired owner binding. Switching it drains the old
+ * C5 job before starting another; retained/painted rows stay immutable. Mixed
+ * Recon/Wardriving retain their existing radio roles. */
+static void dual_ble_ui_sync_request(int mode, uint8_t family,
+    const uint8_t address[6], uint8_t type, uint64_t now)
 {
-    if (mode < -1 || mode > CERBERUS_DUAL_BLE_ANALYZER ||
-        (mode == CERBERUS_DUAL_BLE_TRACK && (!address || type > 3U))) mode = -1;
+    if (mode < -1 || mode > CERBERUS_DUAL_BLE_FAMILY ||
+        (mode == CERBERUS_DUAL_BLE_TRACK && (!address || type > 3U)) ||
+        (mode == CERBERUS_DUAL_BLE_FAMILY && (!family || family > 6U))) mode = -1;
+    if (mode != CERBERUS_DUAL_BLE_FAMILY) family = 0U;
     bool changed = mode != dual_ble_ui_mode || (mode == CERBERUS_DUAL_BLE_TRACK &&
-        (type != dual_ble_ui_type || memcmp(address, dual_ble_ui_target, 6U)));
+        (type != dual_ble_ui_type || memcmp(address, dual_ble_ui_target, 6U))) ||
+        family != dual_ble_ui_family;
     if (changed) {
         dual_ble_ui_mode = mode; dual_ble_ui_attempted = false; dual_ble_ui_error = ESP_OK;
+        dual_ble_ui_family = family;
         if (mode == CERBERUS_DUAL_BLE_TRACK) {
             memcpy(dual_ble_ui_target, address, 6U); dual_ble_ui_type = type;
         }
@@ -69,10 +76,21 @@ static void dual_ble_ui_sync(int mode, const uint8_t address[6], uint8_t type, u
     cerberus_dual_ble_tick(dual_ble_ui_store, now);
     if (mode >= 0 && !dual_ble_ui_attempted && cerberus_dual_ble_released(dual_ble_ui_store)) {
         dual_ble_ui_attempted = true;
-        dual_ble_ui_error = cerberus_dual_ble_begin(dual_ble_ui_store, (uint8_t)mode,
+        dual_ble_ui_error = mode == CERBERUS_DUAL_BLE_FAMILY ?
+            cerberus_dual_ble_begin_family(dual_ble_ui_store, family) :
+            cerberus_dual_ble_begin(dual_ble_ui_store, (uint8_t)mode,
             mode == CERBERUS_DUAL_BLE_TRACK ? dual_ble_ui_target : NULL,
             mode == CERBERUS_DUAL_BLE_TRACK ? dual_ble_ui_type : 0U);
     }
+}
+
+static void dual_ble_ui_sync(int mode, const uint8_t address[6], uint8_t type, uint64_t now)
+{ dual_ble_ui_sync_request(mode, 0U, address, type, now); }
+
+static void dual_ble_ui_sync_family(uint8_t family, uint64_t now)
+{
+    dual_ble_ui_sync_request(family ? CERBERUS_DUAL_BLE_FAMILY : CERBERUS_DUAL_BLE_DISCOVERY,
+        family, NULL, 0U, now);
 }
 
 static void dual_ble_ui_get_view(cerberus_dual_ble_view_t *out)
@@ -200,11 +218,20 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
         uint8_t order[CERBERUS_DUAL_BLE_CAPACITY];
         dual_ble_ui_visible_count = cerberus_dual_ble_list_order(dual_ble_ui_store ? dual_ble_ui_store->rows : NULL,
             view.count, dual_ble_ui_sort, dual_ble_ui_recent_only, now, order);
-        if (view.live_updates) snprintf(line, sizeof(line), "C5 LIVE / %u OF %u / %lu UPDATES",
+        if (dual_ble_ui_mode == CERBERUS_DUAL_BLE_FAMILY)
+            snprintf(line, sizeof(line), "C5 FOCUSED / %u OF %u RETAINED", dual_ble_ui_visible_count, view.count);
+        else if (view.live_updates) snprintf(line, sizeof(line), "C5 LIVE / %u OF %u / %lu UPDATES",
             dual_ble_ui_visible_count, view.count, (unsigned long)view.snapshots);
         else snprintf(line, sizeof(line), "C5 WHOLE SWEEP / %u OF %u", dual_ble_ui_visible_count, view.count);
         ESP_RETURN_ON_ERROR(draw_centered(84, line, UI_TEXT, 1), TAG, "C5 BLE source");
-        if (view.error) snprintf(line, sizeof(line), "C5 ERROR %ld / S3 VIEW AVAILABLE", (long)view.error);
+        if (dual_ble_ui_mode == CERBERUS_DUAL_BLE_FAMILY && view.error == ESP_ERR_NOT_SUPPORTED)
+            snprintf(line, sizeof(line), "FOCUS UNAVAILABLE / S3 VIEW AVAILABLE");
+        else if (view.error) snprintf(line, sizeof(line), "C5 ERROR %ld / S3 VIEW AVAILABLE", (long)view.error);
+        else if (dual_ble_ui_mode == CERBERUS_DUAL_BLE_FAMILY)
+            snprintf(line, sizeof(line), "FOCUS %s / %lu RF SWEEPS / ROWS RETAINED",
+                view.stopping || view.requested_family != dual_ble_ui_family ? "CHANGING" :
+                view.receiving ? "LIVE" : view.reading ? "READ" : view.enabled ? "WAIT" : "STOPPED",
+                (unsigned long)view.sweeps);
         else snprintf(line, sizeof(line), "%s / %lu RF SWEEPS", view.stopping ? "STOPPING" :
             view.reading && view.receiving ? "RECEIVING + READING" : view.reading ? "READING" :
             view.receiving ? "RECEIVING" : view.enabled ? "WAITING" : "STOPPED", (unsigned long)view.sweeps);
@@ -240,7 +267,9 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
             ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 27U, line, UI_MUTED, UI_PANEL, 1), TAG, "C5 BLE row age");
             ++painted_count;
         }
-        if (!dual_ble_ui_visible_count) ESP_RETURN_ON_ERROR(draw_centered(208, view.count ?
+        if (!dual_ble_ui_visible_count) ESP_RETURN_ON_ERROR(draw_centered(208,
+            dual_ble_ui_mode == CERBERUS_DUAL_BLE_FAMILY && view.error == ESP_ERR_NOT_SUPPORTED ?
+            "NO C5 RESULTS / FOCUS UNAVAILABLE" : view.count ?
             "NO CONFIRMED RECENT C5 RESULTS" : view.live_updates ? "WAITING FOR C5 DISCOVERIES" :
             "WAITING FOR A COMPLETED C5 SWEEP", UI_MUTED, 1), TAG, "C5 BLE empty");
         if (view.inventory_known) snprintf(line, sizeof(line), "BANK REPLACED %lu / DROPPED %lu",

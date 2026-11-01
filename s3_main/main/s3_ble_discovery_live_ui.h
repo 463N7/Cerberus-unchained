@@ -12,6 +12,11 @@ _Static_assert((int)CERBERUS_DUAL_BLE_FAMILY_IBEACON == (int)CERBERUS_S3_BLE_FOC
     (int)CERBERUS_DUAL_BLE_FAMILY_META_HINT == (int)CERBERUS_S3_BLE_FOCUS_META_HINT &&
     (int)CERBERUS_DUAL_BLE_FAMILY_HC_NAME_HINT == (int)CERBERUS_S3_BLE_FOCUS_HC_NAME_HINT,
     "Receiver family category mapping");
+_Static_assert(CERBERUS_S3_BLE_FILTER_ALL == 0 && CERBERUS_S3_BLE_FILTER_IBEACON == 1 &&
+    CERBERUS_S3_BLE_FILTER_FIND_MY == 2 && CERBERUS_S3_BLE_FILTER_FLIPPER == 3 &&
+    CERBERUS_S3_BLE_FILTER_FLOCK == 4 && CERBERUS_S3_BLE_FILTER_META_HINT == 5 &&
+    CERBERUS_S3_BLE_FILTER_HC_NAME_HINT == 6,
+    "C5 focused-family wire selector mapping");
 
 typedef struct {
     cerberus_ble_discovery_session_t session;
@@ -465,7 +470,8 @@ static bool ble_discovery_build_unified_row(unsigned row, size_t position, uint6
         if (ble_filter != CERBERUS_S3_BLE_FILTER_ALL) {
             snprintf(live_details[row], sizeof(live_details[row]), "C5 LAST %s T%u", identifier, peer->address_type);
             const char *kind = ble_filter == CERBERUS_S3_BLE_FILTER_FLOCK &&
-                (store->c5_oui_only & (UINT32_C(1) << ref.index)) ? "C5 ADDR CLUE" : "C5 ADV HINT";
+                (store->c5_oui_only & (UINT32_C(1) << ref.index)) ? "C5 ADDR CLUE" :
+                peer->family.version ? "C5 FULL HINT" : "C5 ADV HINT";
             if (cerberus_dual_ble_list_age(peer, now_ms, &age)) {
                 uint32_t seconds = age / 1000U + (age % 1000U != 0U);
                 snprintf(live_badges[row], sizeof(live_badges[row]), "%s <=%lus%s",

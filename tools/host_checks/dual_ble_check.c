@@ -1,4 +1,5 @@
 #include "dual_ble_scan.h"
+#include "ble_family_wire.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -19,6 +20,10 @@ typedef struct {
     cerberus_dual_ble_snapshot_status_t snapshot;
     cerberus_dual_ble_snapshot_row_t frozen[CERBERUS_DUAL_BLE_CAPACITY];
     cerberus_dual_ble_receive_metadata_t frozen_receive[CERBERUS_DUAL_BLE_CAPACITY];
+    cerberus_dual_ble_family_wire_t frozen_family[CERBERUS_DUAL_BLE_CAPACITY];
+    bool family_supported, family_read_unsupported;
+    unsigned family_reads, family_fault;
+    uint8_t family_code;
     bool metadata_supported, metadata_fail_enabled;
     unsigned metadata_reads, metadata_fail_after;
     unsigned fault, busy_begin, busy_read;
@@ -64,6 +69,7 @@ static void snapshot_freeze(peer_t *p)
         .flags=CERBERUS_DUAL_BLE_INVENTORY_REPLACEMENT};
     memset(p->frozen,0,sizeof(p->frozen));
     memset(p->frozen_receive,0,sizeof(p->frozen_receive));
+    memset(p->frozen_family,0,sizeof(p->frozen_family));
     for (uint8_t i=0;i<p->count;++i) {
         cerberus_dual_ble_snapshot_row_t *r=&p->frozen[i];
         memcpy(r->address,(uint8_t[]){1,2,3,4,5,(uint8_t)(i/4U)},6);
@@ -75,6 +81,11 @@ static void snapshot_freeze(peer_t *p)
         p->frozen_receive[i]=(cerberus_dual_ble_receive_metadata_t){
             .source_kind=CERBERUS_DUAL_BLE_RECEIVE_LEGACY,.callback_length=3,
             .sid=0xff,.data_status=0xff,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+        if(p->mode==CERBERUS_DUAL_BLE_FAMILY) {
+            cerberus_dual_ble_family_evidence_t evidence;
+            assert(cerberus_dual_ble_family_parse_ad(r->raw,r->raw_length,r->address,r->address_type,&evidence));
+            assert(cerberus_dual_ble_family_wire_encode(&evidence,p->family_code,&p->frozen_family[i]));
+        }
     }
     cerberus_dual_ble_snapshot_row_t *r=&p->frozen[0];
     switch(p->fault) {
@@ -93,6 +104,16 @@ static void snapshot_freeze(peer_t *p)
     case BAD_ROW_DUPLICATE:p->frozen[1]=*r;break;
     default:break;
     }
+    switch(p->family_fault) {
+    case 1:p->frozen_family[0].family_code=p->family_code==6?1:p->family_code+1;break;
+    case 2:p->frozen_family[0].version=2;break;
+    case 3:p->frozen_family[0].flags|=0x80;break;
+    case 4:p->frozen_family[0].reserved[0]=1;break;
+    case 5:memset(&p->frozen_family[0],0,sizeof(p->frozen_family[0]));break;
+    case 6:p->frozen_family[0].categories=0x80;break;
+    case 7:p->frozen_family[0].ibeacon_uuid[15]=1;break;
+    default:break;
+    }
 }
 static esp_err_t snapshot_exchange(peer_t *p,uint8_t cmd,const void *request,
     size_t request_size,void *reply,size_t reply_size)
@@ -101,22 +122,27 @@ static esp_err_t snapshot_exchange(peer_t *p,uint8_t cmd,const void *request,
     const cerberus_dual_ble_binding_t *b=request;
     assert(b->boot_id==p->boot && b->job_id==p->job && p->attached);
     if(cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ ||
-        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA) {
+        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA ||
+        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY) {
+        bool family=cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY;
         bool metadata=cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA;
         assert(request_size==22);
-        if(metadata) {
+        if(family) {++p->family_reads;if(p->family_read_unsupported)return ESP_ERR_NOT_SUPPORTED;}
+        else if(metadata) {
             ++p->metadata_reads;
             if(!p->metadata_supported || (p->metadata_fail_enabled&&p->metadata_reads>p->metadata_fail_after))
                 return ESP_ERR_NOT_SUPPORTED;
         } else ++p->snapshot_reads;
         const cerberus_dual_ble_snapshot_read_t *r=request;
-        assert(r->handle==p->snapshot.handle&&r->index<p->snapshot.count&&r->chunk<11);
+        assert(r->handle==p->snapshot.handle&&r->index<p->snapshot.count&&r->chunk<(family?16:11));
         cerberus_dual_ble_snapshot_chunk_t out={.handle=r->handle,.index=r->index,.chunk=r->chunk};
         if(p->busy_read) {--p->busy_read;out.error=CERBERUS_DUAL_BLE_SNAPSHOT_BUSY;}
         else {
-            cerberus_dual_ble_snapshot_metadata_row_t wire={.row=p->frozen[r->index],
-                .receive=p->frozen_receive[r->index]};
-            size_t offset=r->chunk*10U, amount=(metadata?sizeof(wire):sizeof(wire.row))-offset;
+            cerberus_dual_ble_snapshot_family_row_t wire={0};
+            memcpy(&wire,&p->frozen[r->index],sizeof(p->frozen[r->index]));
+            memcpy((uint8_t*)&wire+102,&p->frozen_receive[r->index],sizeof(p->frozen_receive[r->index]));
+            wire.family=p->frozen_family[r->index];
+            size_t offset=r->chunk*10U, amount=(family?sizeof(wire):metadata?110U:102U)-offset;
             if(amount>10U)amount=10U;out.byte_count=(uint8_t)amount;
             memcpy(out.data,(const uint8_t *)&wire+offset,amount);
             switch(p->fault) {
@@ -126,7 +152,7 @@ static esp_err_t snapshot_exchange(peer_t *p,uint8_t cmd,const void *request,
             case BAD_READ_LENGTH:--out.byte_count;break;
             case BAD_READ_ERROR:out.error=5;break;
             case BAD_READ_ERROR_BODY:out.error=CERBERUS_DUAL_BLE_SNAPSHOT_BUSY;break;
-            case BAD_READ_TAIL:if(r->chunk==10)out.data[9]=1;break;
+            case BAD_READ_TAIL:if(r->chunk==(family?15:10))out.data[9]=1;break;
             default:break;
             }
         }
@@ -194,7 +220,8 @@ static esp_err_t exchange(void *ctx, uint8_t cmd, const void *request,
         memcpy(reply,&out,sizeof(out));return ESP_OK;
     }
     if((cmd>=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_BEGIN&&cmd<=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_STATUS) ||
-        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA)
+        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA ||
+        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY)
         return snapshot_exchange(p,cmd,request,request_size,reply,reply_size);
     if (cmd == CERBERUS_SPI_COMMAND_DUAL_BLE_INFO) {
         assert(!request_size && reply_size==sizeof(cerberus_dual_ble_info_t));
@@ -210,9 +237,11 @@ static esp_err_t exchange(void *ctx, uint8_t cmd, const void *request,
         const cerberus_dual_ble_start_t *r=request;
         assert(cerberus_dual_ble_start_valid(r)); assert(r->boot_id==p->boot);
         if(r->mode==CERBERUS_DUAL_BLE_ANALYZER&&!p->analyzer_supported)return ESP_ERR_NOT_SUPPORTED;
+        if(r->mode==CERBERUS_DUAL_BLE_FAMILY&&!p->family_supported)return ESP_ERR_NOT_SUPPORTED;
         if (!p->attached) { ++p->starts; ++p->epoch; ++p->generation;
             p->attached=true; p->owned=true; p->state=CERBERUS_BLE_SCAN_RUNNING;
-            p->job=r->job_id; p->mode=r->mode;p->request_id=0;memset(&p->snapshot,0,sizeof(p->snapshot)); }
+            p->job=r->job_id; p->mode=r->mode;p->family_code=r->reserved;
+            p->request_id=0;memset(&p->snapshot,0,sizeof(p->snapshot)); }
         assert(r->version==p->version);
         assert(p->job==r->job_id);
         if (p->lose_start) return ESP_ERR_TIMEOUT;
@@ -840,6 +869,86 @@ static void check_analyzer_controller(void)
     drain(&s,&p);
     puts("C5 analyzer controller: bounded cadence, source clocks, gaps, old-peer admission, final fence, no inventory, Stop and retained-bank isolation passed");
 }
+static void family_start(cerberus_dual_ble_scan_t *s,peer_t *p,uint8_t family)
+{
+    init_live(s,p);p->family_supported=true;p->count=2;
+    assert(cerberus_dual_ble_begin_family(s,family)==ESP_OK);
+    tick(s,p);assert(p->starts==1&&p->mode==CERBERUS_DUAL_BLE_FAMILY&&p->family_code==family);
+}
+static void check_family_reader(void)
+{
+    cerberus_dual_ble_scan_t s;peer_t p;cerberus_dual_ble_view_t view;
+    init_live(&s,&p);
+    assert(cerberus_dual_ble_begin_family(NULL,1)==ESP_ERR_INVALID_ARG);
+    assert(cerberus_dual_ble_begin_family(&s,0)==ESP_ERR_INVALID_ARG);
+    assert(cerberus_dual_ble_begin_family(&s,7)==ESP_ERR_INVALID_ARG);
+    assert(cerberus_dual_ble_begin(&s,CERBERUS_DUAL_BLE_FAMILY,NULL,0)==ESP_ERR_INVALID_ARG);
+    assert(!s.enabled&&!p.frames);
+    for(uint8_t family=1;family<=6;++family){
+        family_start(&s,&p,family);
+        assert(cerberus_dual_ble_begin_family(&s,family)==ESP_ERR_INVALID_STATE);
+        cerberus_dual_ble_view(&s,&view);assert(view.requested_family==family&&!view.published_family);
+        await_snapshots(&s,&p,1);
+        assert(p.family_reads==32&&!p.metadata_reads&&!p.snapshot_reads&&s.live_updates);
+        cerberus_dual_ble_view(&s,&view);assert(view.requested_family==family&&view.published_family==family);
+        assert(s.rows[0].family.family_code==family&&s.rows[1].family.family_code==family);
+        cerberus_dual_ble_row_t saved=s.rows[0];drain(&s,&p);
+        assert(cerberus_dual_ble_begin_family(&s,family==6?1:family+1)==ESP_OK);
+        cerberus_dual_ble_view(&s,&view);
+        assert(view.requested_family!=family&&view.published_family==family&&!memcmp(&saved,&s.rows[0],sizeof(saved)));
+        drain(&s,&p);
+        assert(cerberus_dual_ble_begin(&s,CERBERUS_DUAL_BLE_DISCOVERY,NULL,0)==ESP_OK);
+        await_snapshots(&s,&p,1);
+        assert(!s.published_family&&bytes_zero(&s.rows[0].family,sizeof(s.rows[0].family)));
+        drain(&s,&p);
+    }
+    /* Family never silently becomes generic on old capability or command support. */
+    for(unsigned old=0;old<3;++old){
+        init_live(&s,&p);
+        if(old==0){p.version=1;p.snapshot_capability=false;}
+        else if(old==1)p.snapshot_capability=false;
+        assert(cerberus_dual_ble_begin_family(&s,1)==ESP_OK);fast_tick(&s,&p);
+        assert(s.error==ESP_ERR_NOT_SUPPORTED&&!p.starts&&!p.stops&&!p.family_reads&&cerberus_dual_ble_released(&s));
+    }
+    family_start(&s,&p,1);s.count=1;s.rows[0].rssi=-99;s.published_family=6;
+    cerberus_dual_ble_row_t saved=s.rows[0];p.family_read_unsupported=true;
+    for(unsigned n=0;n<200&&!s.error;++n)fast_tick(&s,&p);
+    assert(s.error==ESP_ERR_NOT_SUPPORTED&&p.family_reads==1&&!p.metadata_reads&&!p.snapshot_reads);
+    assert(!s.snapshots&&s.published_family==6&&!memcmp(&saved,&s.rows[0],sizeof(saved)));drain(&s,&p);
+    /* Invalid proof, full binding, chunk and final fence errors are fatal.
+     * Even a valid raw preview is not an excuse to reinterpret a bad proof. */
+    for(unsigned fault=1;fault<=7;++fault){
+        family_start(&s,&p,2);s.count=1;s.rows[0].rssi=-101;s.published_family=5;saved=s.rows[0];
+        p.family_fault=fault;
+        for(unsigned n=0;n<200&&!s.error;++n)fast_tick(&s,&p);
+        assert(s.error==ESP_ERR_INVALID_RESPONSE&&!s.snapshots&&!p.metadata_reads&&!p.snapshot_reads);
+        assert(s.published_family==5&&!memcmp(&saved,&s.rows[0],sizeof(saved)));drain(&s,&p);
+    }
+    for(unsigned fault=BAD_READ_HANDLE;fault<FAULT_END;++fault){
+        family_start(&s,&p,3);p.fault=fault;s.count=1;s.rows[0].rssi=-103;saved=s.rows[0];
+        for(unsigned n=0;n<300&&!s.error;++n)fast_tick(&s,&p);
+        assert(s.error==ESP_ERR_INVALID_RESPONSE&&!s.snapshots&&!memcmp(&saved,&s.rows[0],sizeof(saved)));
+        drain(&s,&p);
+    }
+    family_start(&s,&p,4);p.count=32;p.lose_begin_replies=2;
+    await_snapshots(&s,&p,1);
+    assert(p.family_reads==32U*16U&&p.snapshot_begins==3&&p.handle_counter==1);
+    assert(s.rows[31].request_started_ms+1==p.snapshot_clock_ms);
+    drain(&s,&p);
+    /* Stop has priority at every byte boundary, including the proof suffix. */
+    family_start(&s,&p,5);p.count=1;p.cost_ms=8;
+    unsigned positions=0;
+    for(unsigned n=0;n<200&&!s.snapshots;++n){
+        if(s.phase==12){
+            cerberus_dual_ble_scan_t copy=s;peer_t other=p;copy.ops.context=&other;
+            unsigned reads=other.family_reads;drain(&copy,&other);
+            assert(other.family_reads==reads&&!copy.snapshots&&!copy.published_family);++positions;
+        }
+        fast_tick(&s,&p);
+    }
+    assert(s.snapshots==1&&positions==16);drain(&s,&p);
+    puts("FAMILY158 reader: six selectors, 32x16 bounded transfer, immutable binding, no downgrade, malformed proof/fence, Stop and retained-bank scope passed");
+}
 int main(void)
 {
     cerberus_dual_ble_scan_t s;peer_t p;
@@ -895,6 +1004,8 @@ int main(void)
     check_live_snapshots();check_snapshot_faults_and_stop();check_published_provenance();check_inventory_metadata();
     check_receive_metadata();
     check_analyzer_history();check_analyzer_controller();
-    printf("dual BLE reader: owner/replay/fence/lost-reply/age/typed-row checks passed; store=%zu bytes\n",sizeof(s));
+    check_family_reader();
+    printf("dual BLE reader: owner/replay/fence/lost-reply/age/typed-row checks passed; store=%zu row=%zu wire=%zu scratch=%zu bytes\n",
+        sizeof(s),sizeof(s.rows[0]),sizeof(s.rows[0].family),sizeof(s.snapshot_family));
     return 0;
 }

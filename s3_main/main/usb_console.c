@@ -551,6 +551,10 @@ static void print_dual_ble(void)
         d.requested_mode, d.awake, d.allocated, d.enabled, d.attached, d.receiving,
         d.reading, d.stopping, d.released, d.c5_phase, d.c5_state, d.c5_generation,
         d.c5_sweeps, d.c5_rows, d.c5_read_index, d.extended_configured, d.c5_error);
+    console_printf("dual_ble_requested_family=%u\r\ndual_ble_c5_requested_family=%u\r\n"
+        "dual_ble_c5_published_family=%u\r\n"
+        "dual_ble_family_scope=UI_desired_controller_request_and_retained_bank_not_RF_identity\r\n",
+        d.requested_family, d.c5_requested_family, d.c5_published_family);
     console_printf("dual_ble_c5_live_updates=%u\r\ndual_ble_c5_snapshots=%" PRIu32
         "\r\ndual_ble_c5_has_first_result=%u\r\ndual_ble_c5_first_result_ms=%" PRIu32 "\r\n"
         "dual_ble_snapshot_scope=coherent_bank_publications_in_current_discovery_not_RF_sweeps\r\n"

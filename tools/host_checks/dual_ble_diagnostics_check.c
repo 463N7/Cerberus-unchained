@@ -16,6 +16,7 @@ void draft_exit_critical(unsigned *lock){(void)lock;assert(held);held=0;}
 #include "dual_ble_diagnostics.c"
 static cerberus_dual_ble_scan_t storage,*dual_ble_ui_store;
 static int dual_ble_ui_mode=-1;
+static uint8_t dual_ble_ui_family;
 static bool ble_scan_checked,ble_fox_hunt_start_pending,ble_fox_hunt_exit_pending;
 static esp_err_t ble_scan_error,ble_fox_hunt_error,sample_error;
 static cerberus_ble_scan_status_payload_t ble_scan_status;
@@ -62,13 +63,36 @@ static void check_memory_console(void)
     assert(strstr(printed,"not_ble_allocation_totals") && !strstr(printed,"largest"));
 }
 
+static void check_family_scopes(void)
+{
+    cerberus_dual_ble_diagnostics_t out;
+    dual_ble_ui_mode=CERBERUS_DUAL_BLE_FAMILY;dual_ble_ui_family=1;
+    storage.start.mode=CERBERUS_DUAL_BLE_FAMILY;storage.start.reserved=2;
+    storage.published_family=6;
+    dual_ble_publish_diagnostics(195,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(out.requested_family==1&&out.c5_requested_family==2&&out.c5_published_family==6);
+    printed[0]=0;unsigned reads=scanner_reads+host_reads;print_dual_ble();
+    assert(scanner_reads+host_reads==reads);
+    assert(strstr(printed,"dual_ble_requested_family=1")&&strstr(printed,"dual_ble_c5_requested_family=2"));
+    assert(strstr(printed,"dual_ble_c5_published_family=6")&&strstr(printed,"retained_bank_not_RF_identity"));
+    assert(!strstr(printed,"address=")&&!strstr(printed,"ABCDEF"));
+    dual_ble_ui_mode=-1;dual_ble_ui_family=0;
+    cerberus_dual_ble_stop(&storage);
+    dual_ble_publish_diagnostics(196,true);cerberus_dual_ble_diagnostics_get(&out);
+    assert(!out.requested_family&&out.c5_requested_family==2&&out.c5_published_family==6);
+    storage.start.mode=CERBERUS_DUAL_BLE_DISCOVERY;storage.start.reserved=0;
+    storage.published_family=0;
+    dual_ble_publish_diagnostics(197,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(!out.requested_family&&!out.c5_requested_family&&!out.c5_published_family);
+}
+
 int main(void)
 {
     cerberus_dual_ble_diagnostics_t out,zero={0};
     cerberus_dual_ble_diagnostics_get(&out);assert(!memcmp(&out,&zero,sizeof(out)));
     unsigned locks=enters;cerberus_dual_ble_diagnostics_get(NULL);assert(enters==locks);
     dual_ble_publish_diagnostics(100,false);cerberus_dual_ble_diagnostics_get(&out);
-    assert(out.available&&out.sequence==1&&out.published_ms==100&&out.clock_valid&&out.version==2U);
+    assert(out.available&&out.sequence==1&&out.published_ms==100&&out.clock_valid&&out.version==3U);
     assert(!out.allocated&&out.released&&out.requested_mode==-1&&!scanner_reads);
     unsigned reads=scanner_reads+host_reads;print_dual_ble();
     assert(scanner_reads+host_reads==reads&&!held); /* Console only copies cached data. */
@@ -129,6 +153,7 @@ int main(void)
     assert(out.s3_scan_cached&&out.s3_state==CERBERUS_BLE_SCAN_RUNNING);
     printed[0]=0;reads=scanner_reads+host_reads;print_dual_ble();assert(scanner_reads+host_reads==reads);
     assert(strstr(printed,"dual_ble_s3_rssi=-44")&&strstr(printed,"independent_received_reports"));
+    check_family_scopes();
     cerberus_dual_ble_diagnostics_t input=out;input.c5_sweeps=123;
     input.c5_snapshots=UINT32_MAX;input.c5_first_result_ms=UINT32_MAX;input.c5_has_first_result=true;
     input.c5_inventory_known=input.c5_inventory_replacement_enabled=true;

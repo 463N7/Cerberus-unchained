@@ -107,7 +107,9 @@ static void dual_ble_live_tick(uint64_t now, bool asleep)
         ble_mode == UI_BLE_MODE_FOX_HUNT && !ble_fox_hunt_start_pending &&
         !ble_fox_hunt_exit_pending)
         mode = CERBERUS_DUAL_BLE_TRACK;
-    dual_ble_ui_sync(mode, mode == CERBERUS_DUAL_BLE_TRACK ?
+    if (mode == CERBERUS_DUAL_BLE_DISCOVERY)
+        dual_ble_ui_sync_family((uint8_t)ble_filter, now);
+    else dual_ble_ui_sync(mode, mode == CERBERUS_DUAL_BLE_TRACK ?
         ble_fox_hunt_target.address : NULL, ble_fox_hunt_target.address_type, now);
     dual_ble_publish_diagnostics(now, asleep);
     static uint64_t last_draw;

@@ -9,6 +9,9 @@ static void dual_ble_publish_diagnostics(uint64_t now, bool asleep)
     cerberus_dual_ble_view_t view;
     dual_ble_ui_get_view(&view);
     out.requested_mode = (int8_t)dual_ble_ui_mode;
+    out.requested_family = dual_ble_ui_mode == CERBERUS_DUAL_BLE_FAMILY ? dual_ble_ui_family : 0U;
+    out.c5_requested_family = view.requested_family;
+    out.c5_published_family = view.published_family;
     out.awake = !asleep;
     out.allocated = dual_ble_ui_store != NULL;
     out.enabled = view.enabled; out.attached = view.attached;

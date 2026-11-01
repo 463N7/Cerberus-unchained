@@ -20,7 +20,11 @@ typedef struct {
     cerberus_dual_ble_sample_diagnostics_t s3, c5;
     uint8_t version, c5_phase, c5_state, c5_generation, c5_rows, c5_read_index;
     uint8_t s3_owner, s3_state;
-    int8_t requested_mode; /* -1 off, 0 discovery, 1 exact-address tracking. */
+    int8_t requested_mode; /* -1 off, 0 discovery, 1 tracking, 2 Analyzer, 3 family. */
+    /* Desired UI family, controller's retained request and published bank are
+     * separate scopes during drain/rebind. Zero means no focused family; the
+     * latter two values do not establish current ownership or freshness. */
+    uint8_t requested_family, c5_requested_family, c5_published_family;
     bool available, clock_valid, sequence_saturated, awake, allocated;
     bool enabled, attached, receiving, reading, stopping, released, extended_configured;
     bool c5_has_first_result, c5_live_updates;

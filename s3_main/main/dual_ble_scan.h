@@ -19,6 +19,9 @@ typedef struct {
     /* Frozen original-ADV receive evidence. Older peers provide canonical
      * UNKNOWN, not an inferred PHY/event mode or full-AD validation result. */
     cerberus_dual_ble_receive_metadata_t receive;
+    /* Same frozen original callback, including evidence beyond the retained
+     * 31-byte preview. Canonical zero for ordinary/older peer rows. */
+    cerberus_dual_ble_family_wire_t family;
 } cerberus_dual_ble_row_t;
 /* Historical identity of the published bank, not the currently running job.
  * Freeze beside a copied row. Generation zero is valid after wrap; the full
@@ -47,6 +50,7 @@ typedef struct {
     union {
         cerberus_dual_ble_snapshot_row_t snapshot_row;
         cerberus_dual_ble_snapshot_metadata_row_t snapshot_metadata;
+        cerberus_dual_ble_snapshot_family_row_t snapshot_family;
     };
     uint64_t snapshot_request_id, snapshot_request_started_ms, next_snapshot_ms;
     uint64_t published_epoch, published_boot_id, track_request_ms, next_poll_ms, last_tick_ms;
@@ -61,6 +65,7 @@ typedef struct {
     uint64_t discovery_started_ms;
     esp_err_t error;
     uint8_t phase, count, read_index, copied, retries, published_generation, inventory_retries;
+    uint8_t published_family;
     bool enabled, extended, has_track, stop_requested;
     bool has_first_result, live_updates, discovery_clock_valid, snapshot_anchor_valid, snapshots_capable;
     bool inventory_known, inventory_replacement_enabled, pending_inventory_known, inventory_query_enabled;
@@ -70,6 +75,9 @@ typedef struct {
 typedef struct {
     bool enabled, attached, receiving, reading, stopping, extended;
     uint8_t count;
+    /* Requested mode versus the last committed bank. Retained rows do not
+     * become evidence of the newly requested family before publication. */
+    uint8_t requested_family, published_family;
     uint32_t sweeps;
     uint32_t snapshots, first_result_ms;
     bool has_first_result, live_updates;
@@ -95,6 +103,9 @@ typedef struct {
 void cerberus_dual_ble_init(cerberus_dual_ble_scan_t *, const cerberus_dual_ble_ops_t *);
 esp_err_t cerberus_dual_ble_begin(cerberus_dual_ble_scan_t *, uint8_t mode,
     const uint8_t address[6], uint8_t address_type);
+/* Family codes 1..6 match the passive S3 family selectors. Unsupported peers
+ * fail before START; this never substitutes ordinary discovery admission. */
+esp_err_t cerberus_dual_ble_begin_family(cerberus_dual_ble_scan_t *, uint8_t family);
 void cerberus_dual_ble_stop(cerberus_dual_ble_scan_t *);
 /* At most four transport calls; stop starting more at an eight-ms local
  * budget. Cache recovery may add one passive peer-status probe within a

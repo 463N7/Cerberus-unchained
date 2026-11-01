@@ -14,8 +14,52 @@ static esp_err_t draw_button(uint16_t x,uint16_t y,uint16_t w,uint16_t h,const c
 {if(companion_fail_final_control&&y==370){companion_fail_final_control=false;return ESP_FAIL;}
  return draw_small_button(x,y,w,h,s);}
 static unsigned companion_exchanges;
+#include "dual_ble_scan.h"
+static bool family_peer_enabled, family_peer_supported, family_peer_attached, family_peer_owned;
+static bool family_peer_hold_stop;
+static unsigned family_peer_starts, family_peer_stop_requests, family_peer_releases;
+static unsigned family_peer_lost_release;
+static uint32_t family_peer_next_job;
+static cerberus_dual_ble_start_t family_peer_start;
+static esp_err_t family_peer_exchange(uint8_t cmd,const void *q,size_t qn,void *r,size_t rn)
+{
+    assert(rn==22U);
+    if(cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_INFO){
+        assert(!qn);
+        cerberus_dual_ble_info_t info={.boot_id=0x12345678,.next_job_id=family_peer_next_job,
+            .version=CERBERUS_DUAL_BLE_VERSION,.capacity=32,.raw_bytes=31,
+            .flags=CERBERUS_DUAL_BLE_READY|CERBERUS_DUAL_BLE_SNAPSHOTS};
+        memcpy(r,&info,sizeof(info));return ESP_OK;
+    }
+    if(cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_START){
+        assert(qn==sizeof(family_peer_start));
+        const cerberus_dual_ble_start_t *start=q;
+        if(start->mode==CERBERUS_DUAL_BLE_FAMILY&&!family_peer_supported)return ESP_ERR_NOT_SUPPORTED;
+        assert(!family_peer_attached&&start->job_id==family_peer_next_job);
+        family_peer_start=*start;family_peer_attached=family_peer_owned=true;
+        ++family_peer_starts;++family_peer_next_job;
+    }else{
+        const cerberus_dual_ble_binding_t *binding=q;
+        assert(qn==sizeof(*binding)&&family_peer_attached);
+        assert(binding->boot_id==family_peer_start.boot_id&&binding->job_id==family_peer_start.job_id);
+        if(cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_STOP){
+            ++family_peer_stop_requests;if(!family_peer_hold_stop)family_peer_owned=false;
+        }else if(cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_RELEASE){
+            assert(!family_peer_owned);
+            if(family_peer_lost_release){--family_peer_lost_release;return ESP_ERR_TIMEOUT;}
+            ++family_peer_releases;family_peer_attached=false;
+        }else assert(cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_STATUS);
+    }
+    cerberus_dual_ble_status_t status={.epoch=77U+family_peer_start.job_id,
+        .job_id=family_peer_start.job_id,.version=family_peer_start.version,
+        .state=family_peer_owned?CERBERUS_BLE_SCAN_RUNNING:CERBERUS_BLE_SCAN_COMPLETE,
+        .flags=family_peer_attached?(CERBERUS_DUAL_BLE_ATTACHED|CERBERUS_DUAL_BLE_SNAPSHOTS|
+            (family_peer_owned?CERBERUS_DUAL_BLE_OWNED:0U)):0U};
+    memcpy(r,&status,sizeof(status));return ESP_OK;
+}
 esp_err_t c5_spi_link_dual_ble_exchange(uint8_t cmd,const void *q,size_t qn,void *r,size_t rn)
-{(void)cmd;(void)q;(void)qn;memset(r,0,rn);++companion_exchanges;return ESP_ERR_NOT_SUPPORTED;}
+{memset(r,0,rn);++companion_exchanges;
+ return family_peer_enabled?family_peer_exchange(cmd,q,qn,r,rn):ESP_ERR_NOT_SUPPORTED;}
 static unsigned companion_allocations;
 static void *companion_calloc(size_t n,size_t size,unsigned caps)
 {++companion_allocations;return heap_caps_calloc(n,size,caps);}
@@ -344,7 +388,8 @@ static void show_hints(const cerberus_dual_ble_row_t *row,const cerberus_dual_bl
     dual_ble_ui_select_frozen(row,proof);
     assert(!dual_ble_ui_hints&&!dual_ble_ui_receive_info&&!dual_ble_ui_hint_page);
     assert(dual_ble_ui_tap(250,210)==DUAL_BLE_UI_REDRAW&&dual_ble_ui_hints&&!dual_ble_ui_receive_info);
-    paint_list();assert(strstr(drawn,"C5 ORIGINAL")&&strstr(drawn,"/ HINTS")&&strstr(drawn,"HINTS *"));
+    paint_list();assert((strstr(drawn,"C5 ORIGINAL")||strstr(drawn,"C5 FULL ORIGINAL"))&&
+        strstr(drawn,"/ HINTS")&&strstr(drawn,"HINTS *"));
     assert(!strstr(drawn,"BEEP")&&!strstr(drawn,"CONNECT"));
 }
 static void hint_next(void)
@@ -446,6 +491,131 @@ static void check_family_hints(const char *prefix)
     assert(!memcmp(&s3_before,&ble_selected_result,sizeof(s3_before)));
 }
 
+static void family_tick(uint8_t family,uint64_t now)
+{
+    clock_ms=(int64_t)now;unsigned calls=companion_exchanges;
+    dual_ble_ui_sync_family(family,now);
+    assert(companion_exchanges-calls<=4U);
+}
+
+static void check_full_original_hints(const char *prefix)
+{
+    static const uint8_t beacon[27]={26,0xff,0x4c,0,2,0x15,1,2,3,4};
+    static const uint8_t findmy[]={3,3,0x44,0xfd},flipper[]={3,3,0x82,0x30};
+    static const uint8_t flock[]={4,0xff,0xc8,9,1},meta[]={3,0xff,0x5f,0xfd};
+    static const uint8_t hc[]={6,9,'H','C','-','0','5'};
+    const struct {const uint8_t *data;size_t length;const char *label;} cases[]={
+        {beacon,sizeof(beacon),"IBEACON"},{findmy,sizeof(findmy),"FIND MY"},
+        {flipper,sizeof(flipper),"FLIPPER"},{flock,sizeof(flock),"FLOCK"},
+        {meta,sizeof(meta),"META"},{hc,sizeof(hc),"HC NAME"}};
+    unsigned exchanges=companion_exchanges,radio_starts=starts,radio_stops=stops;
+    const cerberus_dual_ble_provenance_t proof={.boot_id=123,.epoch=456,.generation=0,.index=31};
+    for(unsigned i=0;i<6;++i){
+        uint8_t full[255]={0};size_t prefix_length=sizeof(full)-cases[i].length;
+        full[0]=(uint8_t)(prefix_length-1U);full[1]=0xff;
+        memcpy(full+prefix_length,cases[i].data,cases[i].length);
+        cerberus_dual_ble_row_t row;
+        hint_row(&row,full,31);row.raw_flags=3;
+        row.receive=(cerberus_dual_ble_receive_metadata_t){
+            .source_kind=CERBERUS_DUAL_BLE_RECEIVE_EXTENDED,.callback_length=255,
+            .sid=0xff,.primary_phy=1,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+        cerberus_dual_ble_family_evidence_t evidence;
+        assert(cerberus_dual_ble_family_parse_ad(full,sizeof(full),row.address,row.address_type,&evidence));
+        assert(evidence.categories&(1U<<i));
+        assert(cerberus_dual_ble_family_wire_encode(&evidence,(uint8_t)(i+1U),&row.family));
+        show_hints(&row,&proof);
+        assert(strstr(drawn,"C5 FULL ORIGINAL")&&strstr(drawn,"FULL 255 B / PREVIEW 31 B"));
+        assert(strstr(drawn,cases[i].label)&&strstr(drawn,"FULL HINTS NOT SAVED"));
+        if(i==2U)save(prefix,"hints-full255-summary");
+        cerberus_dual_ble_row_t frozen=dual_ble_ui_selected;
+        memset(dual_ble_ui_store->rows,0,sizeof(dual_ble_ui_store->rows));
+        ++dual_ble_ui_store->published_boot_id;++dual_ble_ui_store->published_epoch;
+        memset(&row,0,sizeof(row));hint_next();
+        assert(!memcmp(&frozen,&dual_ble_ui_selected,sizeof(frozen)));
+        assert(!memcmp(&proof,&dual_ble_ui_selected_provenance,sizeof(proof)));
+        if(i==2U){assert(strstr(drawn,"CODES: 3082"));save(prefix,"hints-full255-frozen-flipper");}
+        assert(dual_ble_ui_tap(20,210)==DUAL_BLE_UI_REDRAW);paint_list();
+        assert(strstr(drawn,"ORIGINAL ADV 31 B")&&!strstr(drawn,"FULL 255 B"));
+        assert(dual_ble_ui_tap(200,210)==DUAL_BLE_UI_REDRAW);paint_list();
+        assert(strstr(drawn,"CALLBACK 255 B / PREVIEW 31 B")&&strstr(drawn,"FULL AD LAYOUT VALID / PREVIEW CUT"));
+        frozen.family.version=0xff;show_hints(&frozen,&proof);
+        assert(!strstr(drawn,"COMPLETE REPORT")&&!strstr(drawn,"C5 FULL ORIGINAL"));
+        memset(&frozen.family,0,sizeof(frozen.family));show_hints(&frozen,&proof);
+        assert(strstr(drawn,"FULL ORIGINAL NOT RETAINED"));
+    }
+    /* A dense full report exercises the longest family summary plus blocked
+     * Meta detail without replacing any of the frozen raw bytes. */
+    uint8_t dense[255]={0};
+    const uint8_t mixed[]={7,3,0x44,0xfd,0x81,0x30,0x5f,0xfd,6,9,'H','C','-','0','5'};
+    const uint8_t raven[]={5,3,0,0x31,0,0x32};
+    size_t at=sizeof(dense)-sizeof(beacon)-sizeof(mixed)-sizeof(raven);
+    dense[0]=(uint8_t)(at-1U);dense[1]=0xff;
+    memcpy(dense+at,beacon,sizeof(beacon));at+=sizeof(beacon);
+    memcpy(dense+at,mixed,sizeof(mixed));at+=sizeof(mixed);memcpy(dense+at,raven,sizeof(raven));
+    cerberus_dual_ble_row_t dense_row;hint_row(&dense_row,dense,31);dense_row.raw_flags=3;
+    dense_row.receive=(cerberus_dual_ble_receive_metadata_t){
+        .source_kind=CERBERUS_DUAL_BLE_RECEIVE_EXTENDED,.callback_length=255,
+        .sid=255,.primary_phy=1,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+    cerberus_dual_ble_family_evidence_t dense_evidence;
+    assert(cerberus_dual_ble_family_parse_ad(dense,sizeof(dense),dense_row.address,dense_row.address_type,&dense_evidence));
+    assert(cerberus_dual_ble_family_wire_encode(&dense_evidence,1,&dense_row.family));
+    show_hints(&dense_row,&proof);
+    assert(strstr(drawn,"IBEACON FIND MY FLIPPER FLOCK HC NAME")&&strstr(drawn,"FULL 255 B / PREVIEW 31 B / 5 HINTS"));
+    assert(dual_ble_ui_hint_pages==7);save(prefix,"hints-full255-multiple");
+    for(unsigned i=0;i<5;++i)hint_next();
+    assert(strstr(drawn,"META HINT SUPPRESSED BY ID RULE")&&strstr(drawn,"ID 004C / MFG16"));
+    save(prefix,"hints-full255-blocked-meta");
+    assert(companion_exchanges==exchanges&&starts==radio_starts&&stops==radio_stops);
+}
+
+static void check_focused_lifecycle(const char *prefix)
+{
+    unsigned radio_starts=starts,radio_stops=stops;
+    assert(!dual_ble_ui_store);
+    dual_ble_ui_mode=-1;dual_ble_ui_family=0;dual_ble_ui_attempted=false;
+    family_peer_enabled=family_peer_supported=true;family_peer_next_job=1;
+    family_tick(1,100);family_tick(1,101);
+    assert(family_peer_starts==1&&family_peer_attached&&dual_ble_ui_store->start.mode==CERBERUS_DUAL_BLE_FAMILY);
+    cerberus_dual_ble_view_t view;dual_ble_ui_get_view(&view);assert(view.requested_family==1);
+    cerberus_dual_ble_row_t row={.address={1,2,3,4,5,6},.address_type=2};
+    const cerberus_dual_ble_provenance_t proof={.boot_id=11,.epoch=22,.index=3};
+    strcpy(row.name,"Retained before family change");dual_ble_ui_select_frozen(&row,&proof);
+    family_peer_hold_stop=true;
+    family_tick(2,110);family_tick(2,500);family_tick(3,13000);
+    assert(family_peer_starts==1&&family_peer_stop_requests>=3&&family_peer_attached);
+    assert(dual_ble_ui_family==3&&!dual_ble_ui_attempted&&!dual_ble_ui_released());
+    assert(!memcmp(&row,&dual_ble_ui_selected,sizeof(row))&&
+        !memcmp(&proof,&dual_ble_ui_selected_provenance,sizeof(proof)));
+    family_peer_hold_stop=false;family_peer_lost_release=1;
+    for(uint64_t now=14000;now<18000&&family_peer_starts<2;now+=250)family_tick(3,now);
+    assert(family_peer_starts==2&&family_peer_releases==1&&family_peer_attached);
+    dual_ble_ui_get_view(&view);assert(view.requested_family==3);
+    assert(!memcmp(&row,&dual_ble_ui_selected,sizeof(row)));
+    /* STOP/Back/sleep all submit mode -1; none may rearm a pending family. */
+    family_peer_hold_stop=true;family_tick(4,18000);
+    clock_ms=18001;dual_ble_ui_sync(-1,NULL,0,18001);assert(family_peer_starts==2);
+    family_peer_hold_stop=false;
+    for(uint64_t now=18250;now<20000&&!dual_ble_ui_released();now+=250){
+        clock_ms=(int64_t)now;
+        dual_ble_ui_sync(-1,NULL,0,now);
+    }
+    assert(dual_ble_ui_released()&&!family_peer_attached&&family_peer_starts==2);
+    family_tick(7,20000);assert(dual_ble_ui_mode==-1&&family_peer_starts==2);
+    family_peer_supported=false;family_tick(2,21000);family_tick(2,21001);
+    assert(!family_peer_attached&&family_peer_starts==2&&dual_ble_ui_released());
+    dual_ble_ui_get_view(&view);assert(view.error==ESP_ERR_NOT_SUPPORTED&&view.requested_family==2);
+    dual_ble_ui_detail=false;paint_list();
+    assert(strstr(drawn,"FOCUS UNAVAILABLE / S3 VIEW AVAILABLE")&&strstr(drawn,"C5 FOCUSED / 0 OF 0 RETAINED"));
+    assert(strstr(drawn,"NO C5 RESULTS / FOCUS UNAVAILABLE")&&!strstr(drawn,"C5 LIVE"));save(prefix,"focus-unavailable");
+    unsigned calls=companion_exchanges;
+    family_tick(2,22000);family_tick(2,23000);assert(companion_exchanges==calls);
+    family_tick(0,24000);family_tick(0,24001);
+    assert(family_peer_starts==3&&family_peer_start.mode==CERBERUS_DUAL_BLE_DISCOVERY);
+    clock_ms=24002;dual_ble_ui_sync(-1,NULL,0,24002);assert(dual_ble_ui_released()&&!family_peer_attached);
+    assert(starts==radio_starts&&stops==radio_stops);
+    family_peer_enabled=false;heap_caps_free(dual_ble_ui_store);dual_ble_ui_store=NULL;
+}
+
 int main(int argc,char **argv)
 {
     check_list_order();
@@ -525,7 +695,9 @@ int main(int argc,char **argv)
     check_receive_metadata(argv[1]);
     check_paint_failure_and_unified_selection(argv[1]);
     check_family_hints(argv[1]);
+    check_full_original_hints(argv[1]);
     heap_caps_free(dual_ble_ui_store);dual_ble_ui_store=NULL;
+    check_focused_lifecycle(argv[1]);
     puts("Dual BLE UI: frozen typed rows, raw/receive/hints tabs, all family evidence and complete Meta paging without RF/allocation, unavailable/nohint distinction, source labels, reader metrics and old-target isolation passed");
     return 0;
 }

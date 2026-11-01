@@ -12,11 +12,12 @@
 #define CERBERUS_DUAL_BLE_INVENTORY_MIN_FIRMWARE 63U
 #define CERBERUS_DUAL_BLE_METADATA_MIN_FIRMWARE 64U
 #define CERBERUS_DUAL_BLE_ANALYZER_MIN_FIRMWARE 65U
+#define CERBERUS_DUAL_BLE_FAMILY_MIN_FIRMWARE 66U
 #define CERBERUS_DUAL_BLE_CAPACITY 32U
 #define CERBERUS_DUAL_BLE_RAW_BYTES 31U
 #define CERBERUS_DUAL_BLE_STALE_MS 5000U
 #define CERBERUS_DUAL_BLE_ORPHAN_MS 12000U
-enum { CERBERUS_DUAL_BLE_DISCOVERY, CERBERUS_DUAL_BLE_TRACK, CERBERUS_DUAL_BLE_ANALYZER };
+enum { CERBERUS_DUAL_BLE_DISCOVERY, CERBERUS_DUAL_BLE_TRACK, CERBERUS_DUAL_BLE_ANALYZER, CERBERUS_DUAL_BLE_FAMILY };
 enum { CERBERUS_DUAL_BLE_ATTACHED = 1U, CERBERUS_DUAL_BLE_OWNED = 2U,
        CERBERUS_DUAL_BLE_EXTENDED = 4U, CERBERUS_DUAL_BLE_READY = 8U,
        CERBERUS_DUAL_BLE_SNAPSHOTS = 16U };
@@ -31,6 +32,8 @@ enum { CERBERUS_DUAL_BLE_SNAPSHOT_OK, CERBERUS_DUAL_BLE_SNAPSHOT_BUSY,
 #define CERBERUS_DUAL_BLE_SNAPSHOT_CHUNKS 11U
 #define CERBERUS_DUAL_BLE_SNAPSHOT_METADATA_ROW_BYTES 110U
 #define CERBERUS_DUAL_BLE_SNAPSHOT_METADATA_CHUNKS 11U
+#define CERBERUS_DUAL_BLE_SNAPSHOT_FAMILY_ROW_BYTES 158U
+#define CERBERUS_DUAL_BLE_SNAPSHOT_FAMILY_CHUNKS 16U
 
 enum { CERBERUS_DUAL_BLE_RECEIVE_UNKNOWN, CERBERUS_DUAL_BLE_RECEIVE_LEGACY,
        CERBERUS_DUAL_BLE_RECEIVE_EXTENDED };
@@ -90,7 +93,7 @@ typedef struct __attribute__((packed)) {
 typedef struct __attribute__((packed)) {
     uint64_t boot_id;
     uint32_t job_id;
-    uint8_t address[6], address_type, mode, version, reserved;
+    uint8_t address[6], address_type, mode, version, reserved; /* FAMILY: selected code1..6; other modes:0. */
 } cerberus_dual_ble_start_t;
 typedef struct __attribute__((packed)) {
     uint64_t boot_id;
@@ -166,7 +169,8 @@ typedef struct __attribute__((packed)) {
  * FIRST BEGIN, not distinct devices and not cumulative session totals.
  * Dropped counts typed complete-original callbacks for unretained addresses
  * rejected at a full bank; stale epochs, responses, partial extended reports
- * and invalid address types are excluded. Counters saturate at UINT32_MAX. */
+ * and invalid address types are excluded. FAMILY also excludes filtered-out
+ * unrelated originals. Counters saturate at UINT32_MAX. */
 enum { CERBERUS_DUAL_BLE_INVENTORY_REPLACEMENT = 1U };
 typedef struct __attribute__((packed)) {
     uint64_t handle;
@@ -202,6 +206,28 @@ typedef struct __attribute__((packed)) {
     cerberus_dual_ble_receive_metadata_t receive;
 } cerberus_dual_ble_snapshot_metadata_row_t;
 
+/* Firmware66 FAMILY-only evidence from the same full complete callback.
+ * Byte fields are canonical, multibyte tuple fields explicitly little endian.
+ * Version0 is allzero/absent for older and ordinary scan rows. */
+typedef struct __attribute__((packed)) {
+    uint8_t version, family_code, state, categories, hc_name, ibeacon_result, flags;
+    uint8_t findmy_bits, findmy_uuid_widths, flipper_bits, flipper_flags;
+    uint8_t flock_facts, flock_accessory_contexts;
+    uint8_t flock_raven_3100_contexts, flock_raven_3200_contexts;
+    uint8_t meta_pairs[10], ibeacon_uuid[16];
+    uint8_t ibeacon_major_le[2], ibeacon_minor_le[2];
+    int8_t ibeacon_power;
+    uint8_t reserved[2];
+} cerberus_dual_ble_family_wire_t;
+
+typedef struct __attribute__((packed)) {
+    cerberus_dual_ble_snapshot_metadata_row_t metadata;
+    cerberus_dual_ble_family_wire_t family;
+} cerberus_dual_ble_snapshot_family_row_t;
+
+_Static_assert(sizeof(cerberus_dual_ble_family_wire_t) == 48U, "family evidence layout");
+_Static_assert(sizeof(cerberus_dual_ble_snapshot_family_row_t) == 158U, "family snapshot row layout");
+
 _Static_assert(sizeof(cerberus_dual_ble_info_t) == 22U, "dual BLE info frame");
 _Static_assert(sizeof(cerberus_dual_ble_start_t) == 22U, "dual BLE start frame");
 _Static_assert(sizeof(cerberus_dual_ble_status_t) == 22U, "dual BLE status frame");
@@ -222,8 +248,9 @@ static inline bool cerberus_dual_ble_start_valid(const cerberus_dual_ble_start_t
 {
     if (!r || !r->boot_id || !r->job_id ||
         (r->version != CERBERUS_DUAL_BLE_VERSION && r->version != CERBERUS_DUAL_BLE_LEGACY_VERSION) ||
-        r->reserved || r->mode > CERBERUS_DUAL_BLE_ANALYZER || r->address_type > 3U ||
-        (r->mode == CERBERUS_DUAL_BLE_ANALYZER && r->version != CERBERUS_DUAL_BLE_VERSION)) return false;
+        r->mode > CERBERUS_DUAL_BLE_FAMILY || r->address_type > 3U ||
+        (r->mode == CERBERUS_DUAL_BLE_FAMILY ? (r->reserved < 1U || r->reserved > 6U) : r->reserved != 0U) ||
+        (r->mode >= CERBERUS_DUAL_BLE_ANALYZER && r->version != CERBERUS_DUAL_BLE_VERSION)) return false;
     if (r->mode != CERBERUS_DUAL_BLE_TRACK) {
         if (r->address_type) return false;
         for (size_t i = 0; i < 6U; ++i) if (r->address[i]) return false;

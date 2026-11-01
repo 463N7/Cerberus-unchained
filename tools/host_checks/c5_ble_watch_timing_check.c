@@ -2,6 +2,7 @@
 #include "cerberus_watch_capture.h"
 #include "dual_ble_protocol.h"
 #include "ble_analyzer_counter.h"
+#include "ble_family_wire.h"
 #include "../../c5_firmware/main/ble_inventory_admission.h"
 #include <assert.h>
 #include <stdio.h>
@@ -55,8 +56,9 @@ static uint32_t scan_callback_epoch;
  * scanner admission and callback branches compiled; companion lifecycle and
  * typed-target behavior are exercised by check_dual_ble.py. */
 static bool dual_attached,dual_radio_active,dual_track_seen;
-static uint8_t dual_mode,dual_address[6],dual_address_type,dual_generation,dual_version;
+static uint8_t dual_mode,dual_address[6],dual_address_type,dual_generation,dual_version,dual_family;
 static cerberus_ble_inventory_admission_t scan_inventory;
+static cerberus_dual_ble_family_wire_t scan_family[CERBERUS_DUAL_BLE_CAPACITY];
 static uint32_t dual_track_ms,dual_track_reports;
 static int8_t dual_track_rssi;
 static int32_t dual_error;
@@ -300,9 +302,33 @@ static void analyzer_actual_lifecycle(void)
     dual_attached=true;CHECK(start_scan(true)==ESP_ERR_INVALID_STATE);
     dual_attached=false;dual_radio_active=false;
 }
+
+static void family_actual_lifecycle(void)
+{
+    dual_attached=true;dual_mode=CERBERUS_DUAL_BLE_FAMILY;dual_family=6;dual_version=2;
+    analyzer_callback_exhausted=false;scan_callback_epoch=100;
+    dual_radio_active=false;dual_error=0;scan_status.state=CERBERUS_BLE_SCAN_IDLE;
+    memset(scan_family,0xa5,sizeof(scan_family));clock_us=10000000;
+    CHECK(start_scan(true)==ESP_OK&&scan_inventory.enabled);
+    for(size_t i=0;i<sizeof(scan_family);++i)CHECK(!((uint8_t*)scan_family)[i]);
+    start_scan_event(&start_event);CHECK(dual_radio_active);
+    complete();CHECK(!dual_radio_active);
+    for(unsigned fault=0;fault<3;++fault){
+        dual_error=0;clock_us+=100000;CHECK(start_scan(true)==ESP_OK);
+        infer_error=fault==0?9:0;rf_error=fault==1?8:0;callout_error=fault==2?7:0;
+        start_scan_event(&start_event);CHECK(scan_status.state==CERBERUS_BLE_SCAN_ERROR&&dual_error&&!scan_status.stored_count);
+        infer_error=rf_error=callout_error=0;dual_radio_active=false;
+    }
+    scan_status.state=CERBERUS_BLE_SCAN_IDLE;dual_error=0;unsigned queued_before=queued;
+    for(unsigned exhausted=0;exhausted<2;++exhausted){
+        scan_callback_epoch=exhausted?100:UINT32_MAX;analyzer_callback_exhausted=exhausted!=0;
+        CHECK(start_scan(true)==ESP_ERR_INVALID_STATE&&queued==queued_before&&!dual_radio_active);
+    }
+    dual_attached=false;analyzer_callback_exhausted=false;
+}
 int main(void)
 {
-    entry_clock_and_qualification();stale_delivery_and_saturation();extended_admission();motion_wire();analyzer_actual_lifecycle();
+    entry_clock_and_qualification();stale_delivery_and_saturation();extended_admission();motion_wire();analyzer_actual_lifecycle();family_actual_lifecycle();
     CHECK(!locked);printf("C5 BLE timing (%s): %u checks; actual passive start/GAP/getters, atomic motion and own Location age, partial/response/malformed exclusion, stale callback/completion, zero/negative/full-width time, replacement and epoch saturation passed.\n",TEST_EXTENDED?"extended":"legacy",checks);
     return 0;
 }

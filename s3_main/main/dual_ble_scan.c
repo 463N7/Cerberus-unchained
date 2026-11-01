@@ -1,5 +1,11 @@
 #include "dual_ble_scan.h"
+#include "ble_family_wire.h"
 #include <string.h>
+
+_Static_assert(sizeof(cerberus_dual_ble_snapshot_family_row_t) <= UINT8_MAX,
+    "Snapshot row offset must fit the bounded reader");
+_Static_assert(offsetof(cerberus_dual_ble_snapshot_family_row_t, family) ==
+    sizeof(cerberus_dual_ble_snapshot_metadata_row_t), "Family wire preserves metadata prefix");
 
 enum { OFF, INFO, START, POLL, META, NAME, UUID, RAW, TIME, FENCE, TRACK,
     SNAP_BEGIN, SNAP_READ, SNAP_FENCE, STOP, RELEASE, FAILED, SNAP_INVENTORY,
@@ -15,14 +21,16 @@ void cerberus_dual_ble_init(cerberus_dual_ble_scan_t *s, const cerberus_dual_ble
 bool cerberus_dual_ble_released(const cerberus_dual_ble_scan_t *s)
 { return !s || !s->start.job_id; }
 
-esp_err_t cerberus_dual_ble_begin(cerberus_dual_ble_scan_t *s, uint8_t mode,
-    const uint8_t address[6], uint8_t type)
+static esp_err_t begin_request(cerberus_dual_ble_scan_t *s, uint8_t mode,
+    const uint8_t address[6], uint8_t type, uint8_t family)
 {
-    if (!s || !s->ops.exchange || mode > CERBERUS_DUAL_BLE_ANALYZER ||
+    if (!s || !s->ops.exchange || mode > CERBERUS_DUAL_BLE_FAMILY ||
+        (mode == CERBERUS_DUAL_BLE_FAMILY ? family < 1U || family > 6U : family != 0U) ||
         (mode == CERBERUS_DUAL_BLE_TRACK && (!address || type > 3U))) return ESP_ERR_INVALID_ARG;
     if (s->start.job_id || s->enabled) return ESP_ERR_INVALID_STATE;
     memset(&s->start, 0, sizeof(s->start));
     s->start.mode = mode;
+    s->start.reserved = family;
     s->start.version = CERBERUS_DUAL_BLE_VERSION;
     if (mode == CERBERUS_DUAL_BLE_ANALYZER) memset(&s->analyzer, 0, sizeof(s->analyzer));
     if (mode == CERBERUS_DUAL_BLE_TRACK) {
@@ -42,6 +50,16 @@ esp_err_t cerberus_dual_ble_begin(cerberus_dual_ble_scan_t *s, uint8_t mode,
     s->phase = INFO; s->retries = 0; s->next_poll_ms = 0; s->last_tick_ms = 0;
     return ESP_OK;
 }
+
+esp_err_t cerberus_dual_ble_begin(cerberus_dual_ble_scan_t *s, uint8_t mode,
+    const uint8_t address[6], uint8_t type)
+{
+    if (mode > CERBERUS_DUAL_BLE_ANALYZER) return ESP_ERR_INVALID_ARG;
+    return begin_request(s, mode, address, type, 0U);
+}
+
+esp_err_t cerberus_dual_ble_begin_family(cerberus_dual_ble_scan_t *s, uint8_t family)
+{ return begin_request(s, CERBERUS_DUAL_BLE_FAMILY, NULL, 0U, family); }
 
 void cerberus_dual_ble_stop(cerberus_dual_ble_scan_t *s)
 {
@@ -104,6 +122,7 @@ static uint64_t publish_bank(cerberus_dual_ble_scan_t *s, uint8_t count, uint64_
     s->published_boot_id = s->start.boot_id;
     s->published_epoch = s->remote.epoch;
     s->published_generation = s->remote.generation;
+    s->published_family = s->start.mode == CERBERUS_DUAL_BLE_FAMILY ? s->start.reserved : 0U;
     s->inventory_known = s->live_updates && s->pending_inventory_known;
     s->inventory_replacement_enabled = s->inventory_known &&
         (s->pending_inventory.flags & CERBERUS_DUAL_BLE_INVENTORY_REPLACEMENT) != 0U;
@@ -158,6 +177,13 @@ static esp_err_t decode_snapshot_row(cerberus_dual_ble_scan_t *s)
         !zero_bytes(r->raw + r->raw_length, sizeof(r->raw) - r->raw_length) ||
         !cerberus_dual_ble_receive_metadata_valid(&s->snapshot_metadata.receive,
             r->raw_length, r->event_type, r->raw_flags)) return ESP_ERR_INVALID_RESPONSE;
+    if (s->start.mode == CERBERUS_DUAL_BLE_FAMILY) {
+        cerberus_dual_ble_family_evidence_t evidence;
+        if (s->snapshot_family.family.family_code != s->start.reserved ||
+            !cerberus_dual_ble_family_wire_decode(&s->snapshot_family.family,
+                &s->snapshot_metadata.receive, r->raw_length, r->event_type,
+                r->raw_flags, r->address, r->address_type, &evidence)) return ESP_ERR_INVALID_RESPONSE;
+    }
     for (uint8_t i = 0U; i < s->read_index; ++i)
         if (s->staging[i].address_type == r->address_type &&
             !memcmp(s->staging[i].address, r->address, sizeof(r->address))) return ESP_ERR_INVALID_RESPONSE;
@@ -175,6 +201,7 @@ static esp_err_t decode_snapshot_row(cerberus_dual_ble_scan_t *s)
      * reply arrives later. Download/fence time can only make the upper age grow. */
     row->request_started_ms = s->snapshot_request_started_ms;
     row->receive = s->snapshot_metadata.receive;
+    row->family = s->snapshot_family.family;
     return ESP_OK;
 }
 
@@ -197,24 +224,26 @@ static esp_err_t snapshot_step(cerberus_dual_ble_scan_t *s, uint64_t now)
         s->pending_inventory_known = false; s->inventory_retries = 0U;
         memset(&s->pending_inventory, 0, sizeof(s->pending_inventory));
         memset(s->staging, 0, sizeof(s->staging));
-        memset(&s->snapshot_metadata, 0, sizeof(s->snapshot_metadata));
+        memset(&s->snapshot_family, 0, sizeof(s->snapshot_family));
         s->read_index = 0U; s->copied = 0U;
         s->phase = result.count ? SNAP_READ : s->inventory_query_enabled ? SNAP_INVENTORY : SNAP_FENCE;
     } else if (s->phase == SNAP_READ) {
         cerberus_dual_ble_snapshot_read_t request = {b, s->snapshot.handle, s->read_index,
             (uint8_t)(s->copied / CERBERUS_DUAL_BLE_SNAPSHOT_CHUNK_BYTES)};
         cerberus_dual_ble_snapshot_chunk_t result;
-        uint8_t command = s->metadata_read_enabled ? CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA :
+        bool family = s->start.mode == CERBERUS_DUAL_BLE_FAMILY;
+        uint8_t command = family ? CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY :
+            s->metadata_read_enabled ? CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA :
             CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ;
         esp_err_t error = exchange(s, command,
             &request, sizeof(request), &result, sizeof(result));
-        if (error == ESP_ERR_NOT_SUPPORTED && s->metadata_read_enabled) {
+        if (error == ESP_ERR_NOT_SUPPORTED && !family && s->metadata_read_enabled) {
             /* Optional projection only. Discard every partially copied row,
              * including completed metadata rows, then reread this exact frozen
              * handle through READ. FIRST BEGIN's age anchor must not move. */
             s->metadata_read_enabled = false;
             memset(s->staging, 0, sizeof(s->staging));
-            memset(&s->snapshot_metadata, 0, sizeof(s->snapshot_metadata));
+            memset(&s->snapshot_family, 0, sizeof(s->snapshot_family));
             s->read_index = 0U; s->copied = 0U;
             return ESP_OK;
         }
@@ -226,17 +255,18 @@ static esp_err_t snapshot_step(cerberus_dual_ble_scan_t *s, uint64_t now)
             return result.error == CERBERUS_DUAL_BLE_SNAPSHOT_BUSY ? ESP_ERR_TIMEOUT :
                 result.error == CERBERUS_DUAL_BLE_SNAPSHOT_STALE ? ESP_ERR_NOT_FOUND : ESP_ERR_INVALID_RESPONSE;
         }
-        uint8_t wire_size = s->metadata_read_enabled ? sizeof(s->snapshot_metadata) : sizeof(s->snapshot_row);
+        uint8_t wire_size = family ? sizeof(s->snapshot_family) :
+            s->metadata_read_enabled ? sizeof(s->snapshot_metadata) : sizeof(s->snapshot_row);
         uint8_t amount = wire_size - s->copied;
         if (amount > CERBERUS_DUAL_BLE_SNAPSHOT_CHUNK_BYTES) amount = CERBERUS_DUAL_BLE_SNAPSHOT_CHUNK_BYTES;
         if (result.byte_count != amount || !zero_bytes(result.data + amount, sizeof(result.data) - amount))
             return ESP_ERR_INVALID_RESPONSE;
-        memcpy((uint8_t *)&s->snapshot_metadata + s->copied, result.data, amount); s->copied += amount;
+        memcpy((uint8_t *)&s->snapshot_family + s->copied, result.data, amount); s->copied += amount;
         if (s->copied == wire_size) {
             error = decode_snapshot_row(s);
             if (error != ESP_OK) return error;
             s->copied = 0U; ++s->read_index;
-            memset(&s->snapshot_metadata, 0, sizeof(s->snapshot_metadata));
+            memset(&s->snapshot_family, 0, sizeof(s->snapshot_family));
             if (s->read_index == s->snapshot.count)
                 s->phase = s->inventory_query_enabled ? SNAP_INVENTORY : SNAP_FENCE;
         }
@@ -303,7 +333,10 @@ static void step(cerberus_dual_ble_scan_t *s, uint64_t now)
                     CERBERUS_DUAL_BLE_ATTACHED | CERBERUS_DUAL_BLE_SNAPSHOTS)) ||
                 (info.version == CERBERUS_DUAL_BLE_LEGACY_VERSION && (info.flags & CERBERUS_DUAL_BLE_SNAPSHOTS)))
                 error = ESP_ERR_INVALID_RESPONSE;
-            else if (s->start.mode == CERBERUS_DUAL_BLE_ANALYZER && info.version != CERBERUS_DUAL_BLE_VERSION)
+            else if ((s->start.mode == CERBERUS_DUAL_BLE_ANALYZER || s->start.mode == CERBERUS_DUAL_BLE_FAMILY) &&
+                info.version != CERBERUS_DUAL_BLE_VERSION)
+                error = ESP_ERR_NOT_SUPPORTED;
+            else if (s->start.mode == CERBERUS_DUAL_BLE_FAMILY && !(info.flags & CERBERUS_DUAL_BLE_SNAPSHOTS))
                 error = ESP_ERR_NOT_SUPPORTED;
             else if (!(info.flags & CERBERUS_DUAL_BLE_READY) || (info.flags & CERBERUS_DUAL_BLE_ATTACHED))
                 error = ESP_ERR_INVALID_STATE;
@@ -314,7 +347,8 @@ static void step(cerberus_dual_ble_scan_t *s, uint64_t now)
                 s->job_counter = info.next_job_id;
                 s->extended = (info.flags & CERBERUS_DUAL_BLE_EXTENDED) != 0;
                 s->snapshots_capable = (info.flags & CERBERUS_DUAL_BLE_SNAPSHOTS) != 0U;
-                s->live_updates = s->start.mode == CERBERUS_DUAL_BLE_DISCOVERY && s->snapshots_capable;
+                s->live_updates = (s->start.mode == CERBERUS_DUAL_BLE_DISCOVERY ||
+                    s->start.mode == CERBERUS_DUAL_BLE_FAMILY) && s->snapshots_capable;
                 s->snapshot_request_id = 0U; s->snapshot_anchor_valid = false;
                 memset(&s->snapshot, 0, sizeof(s->snapshot));
                 s->phase = START;
@@ -322,7 +356,7 @@ static void step(cerberus_dual_ble_scan_t *s, uint64_t now)
         }
     } else if (phase == START) {
         error = exchange(s, CERBERUS_SPI_COMMAND_DUAL_BLE_START, &s->start, sizeof(s->start), &status, sizeof(status));
-        /* The transport gates Analyzer START itself before any RF command on
+        /* The transport gates Analyzer/Family START before any RF command on
          * older peers. NOT_SUPPORTED establishes that no owner was acquired. */
         if (error == ESP_ERR_NOT_SUPPORTED) s->start.job_id = 0U;
         if (error == ESP_OK) {
@@ -544,6 +578,8 @@ void cerberus_dual_ble_view(const cerberus_dual_ble_scan_t *s, cerberus_dual_ble
         (s->phase >= SNAP_BEGIN && s->phase <= SNAP_FENCE) || s->phase == SNAP_INVENTORY;
     out->stopping = s->phase == STOP || s->phase == RELEASE;
     out->extended = s->extended; out->count = s->count; out->sweeps = s->sweeps; out->error = s->error;
+    out->requested_family = s->start.mode == CERBERUS_DUAL_BLE_FAMILY ? s->start.reserved : 0U;
+    out->published_family = s->published_family;
     out->snapshots = s->snapshots; out->first_result_ms = s->first_result_ms;
     out->has_first_result = s->has_first_result; out->live_updates = s->live_updates;
     out->inventory_known = s->inventory_known;

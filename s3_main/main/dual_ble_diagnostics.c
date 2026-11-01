@@ -12,7 +12,7 @@ void cerberus_dual_ble_diagnostics_publish(const cerberus_dual_ble_diagnostics_t
     /* Build the value before locking. Only the UI task may publish. */
     cerberus_dual_ble_diagnostics_t next = {0};
     if (input) next = *input;
-    next.version = 2U;
+    next.version = 3U;
     next.available = input != NULL;
     next.clock_valid = now >= 0 && (!have_clock || (uint64_t)now >= last_valid_ms);
     if (next.clock_valid) { last_valid_ms = (uint64_t)now; have_clock = true; }

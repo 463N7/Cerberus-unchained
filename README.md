@@ -1,6 +1,6 @@
 # Cerberus Unchained
 
-Experimental Cerberus firmware for the expanded rev107 feature set: integrated
+Experimental Cerberus firmware for the expanded rev108 feature set: integrated
 wardriving, C5 Wi-Fi capture and analysis, S3 BLE discovery and tools, Remote ID
 receive workflows, AP/client navigation, and optional expansion radios.
 
@@ -9,8 +9,8 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev107`, paired with onboard
-C5 protocol firmware revision 65. No Unchained binary release is selected yet.**
+**Current source version: `0.1.0-dev.rev108`, paired with onboard
+C5 protocol firmware revision 66. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
 
@@ -40,6 +40,16 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev108 adds C5 full-original classification and focused admission for the six
+passive BLE family views. The S3 retains its independent evidence and controls
+the combined list and owner transitions. Generic discovery, tracking and
+Analyzer avoid the additional family parsing and transfer. All 124 host suites
+and five native targets pass. Measured additions are 3,312 bytes across optional
+S3 PSRAM stores, 240 S3 internal bytes and 3,072 C5 internal bytes. Behavior,
+resource costs and limits are tracked in
+[the rev108 checkpoint](docs/DUAL_RADIO_REV108.md). Rev106 remains the last
+installed build; this candidate is not hardware accepted.
 
 Rev107 extends the existing concurrent receivers into source-labelled BLE
 family lists and C5 original-advertisement hint details. It reuses committed

@@ -12,6 +12,7 @@ static esp_err_t dual_ble_hint_ui_draw(const cerberus_dual_ble_row_t *row,
     char line[64];
     *painted_pages = 0U;
     bool available = cerberus_dual_ble_family_classify(row, proof, &evidence);
+    bool full_callback = available && row->family.version != 0U;
     uint8_t page_bits = evidence.categories;
     if (available && evidence.meta_blocked) page_bits |= CERBERUS_DUAL_BLE_FAMILY_META_HINT;
     uint8_t meta_count = cerberus_ble_meta_evidence_count(&evidence.meta);
@@ -23,7 +24,8 @@ static esp_err_t dual_ble_hint_ui_draw(const cerberus_dual_ble_row_t *row,
         if (evidence.categories & (1U << bit)) ++matches;
     }
     uint8_t page = requested_page < pages ? requested_page : 0U;
-    snprintf(line, sizeof(line), address_only ? "C5 ORIGINAL + ADDRESS / HINTS %u/%u" :
+    snprintf(line, sizeof(line), full_callback ? "C5 FULL ORIGINAL / HINTS %u/%u" :
+        address_only ? "C5 ORIGINAL + ADDRESS / HINTS %u/%u" :
         "C5 ORIGINAL ADV / HINTS %u/%u", page + 1U, pages);
     ESP_RETURN_ON_ERROR(draw_centered(230, line, UI_MUTED, 1), TAG, "C5 hint source");
     if (!available) {
@@ -37,7 +39,9 @@ static esp_err_t dual_ble_hint_ui_draw(const cerberus_dual_ble_row_t *row,
         ESP_RETURN_ON_ERROR(draw_centered(264, "COMPLETE SOURCE EVIDENCE REQUIRED", UI_MUTED, 1), TAG, "C5 hint limit");
         ESP_RETURN_ON_ERROR(draw_centered(282, "RAW ADV AND RX INFO STILL AVAILABLE", UI_MUTED, 1), TAG, "C5 hint recovery");
     } else if (!page) {
-        snprintf(line, sizeof(line), address_only ? "COMPLETE SOURCE / %u FAMILY HINTS" :
+        if (full_callback) snprintf(line, sizeof(line), "FULL %u B / PREVIEW %u B / %u HINTS",
+            row->receive.callback_length, row->raw_length, matches);
+        else snprintf(line, sizeof(line), address_only ? "COMPLETE SOURCE / %u FAMILY HINTS" :
             "COMPLETE REPORT / %u FAMILY HINTS", matches);
         ESP_RETURN_ON_ERROR(draw_centered(244, line, UI_TEXT, 1), TAG, "C5 hint count");
         if (!matches) snprintf(line, sizeof(line), "NO SUPPORTED FAMILY HINT");
@@ -50,7 +54,8 @@ static esp_err_t dual_ble_hint_ui_draw(const cerberus_dual_ble_row_t *row,
             evidence.categories & CERBERUS_DUAL_BLE_FAMILY_HC_NAME_HINT ? "HC NAME" : "");
         ESP_RETURN_ON_ERROR(draw_centered(256, line, UI_TEXT, 1), TAG, "C5 hint families");
         ESP_RETURN_ON_ERROR(draw_centered(268, "ORIGINAL ADV ONLY / NO RESPONSE DATA", UI_MUTED, 1), TAG, "C5 hint provenance");
-        ESP_RETURN_ON_ERROR(draw_centered(280, evidence.meta_blocked ? "META ID RULE SUPPRESSES META HINT" :
+        ESP_RETURN_ON_ERROR(draw_centered(280, full_callback ? "SD SAVES PREVIEW / FULL HINTS NOT SAVED" :
+            evidence.meta_blocked ? "META ID RULE SUPPRESSES META HINT" :
             evidence.ibeacon_result == CERBERUS_IBEACON_MALFORMED ? "IBEACON TUPLE AMBIGUOUS / NOT RETAINED" :
             "ADVERTISED HINTS / NOT VERIFIED ID", UI_MUTED, 1), TAG, "C5 hint meaning");
     } else {

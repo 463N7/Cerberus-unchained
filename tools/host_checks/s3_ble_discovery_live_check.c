@@ -155,11 +155,15 @@ static void continuous_family_and_stop(const char *prefix)
     handle_ble_tap(100,65); /* Actual family control requests iBeacon. */
     CHECK(ble_filter==CERBERUS_S3_BLE_FILTER_IBEACON);
     CHECK(ble_discovery_live->session.requested_family==1&&ble_discovery_live->session.active_family==0);
+    dual_ble_live_tick(9110,false);
+    CHECK(companion_requested_mode==CERBERUS_DUAL_BLE_FAMILY&&companion_requested_family==1);
     discovery_native.hold_stop=true;
     native_tick(9150,false);
     CHECK(discovery_native.stop==1&&discovery_native.start==2);
     handle_ble_tap(100,65);handle_ble_tap(100,65); /* Latest request wins: Flipper. */
     CHECK(ble_filter==CERBERUS_S3_BLE_FILTER_FLIPPER);
+    dual_ble_live_tick(9300,false);
+    CHECK(companion_requested_mode==CERBERUS_DUAL_BLE_FAMILY&&companion_requested_family==3);
     native_tick(9400,false);CHECK(discovery_native.start==2);
     discovery_native_finish(true);
     native_tick(9600,false);native_tick(9800,false);native_tick(10000,false);
@@ -173,6 +177,7 @@ static void continuous_family_and_stop(const char *prefix)
     discovery_native.hold_stop=false;
     handle_live_scan_tap(100,380); /* Production pause control position. */
     CHECK(!ble_discovery_live->session.enabled);
+    dual_ble_live_tick(10051,false);CHECK(companion_requested_mode==-1);
     stop_and_release(10100);
     unsigned starts_before=discovery_native.start;
     handle_ble_tap(100,65);native_tick(12000,false);
@@ -450,6 +455,8 @@ static void unified_all_families(const char *prefix)
     for(unsigned family=1U;family<CERBERUS_S3_BLE_FILTER_COUNT;++family){
         const unsigned c=family-1U;seed_native((cerberus_s3_ble_filter_t)family);
         native_tick(1000,false);clock_ms=1050;
+        dual_ble_live_tick(1000,false);
+        CHECK(companion_requested_mode==CERBERUS_DUAL_BLE_FAMILY&&companion_requested_family==family);
         s3_payload(0,70,1,cases[c].data,cases[c].size,false,false);
         companion_row(0,70,1,-20);c5_payload(0,cases[c].data,cases[c].size);
         companion_row(1,70,2,-40);c5_payload(1,cases[c].data,cases[c].size);
@@ -466,7 +473,7 @@ static void unified_all_families(const char *prefix)
             ble_discovery_live->painted_source[2]==CERBERUS_BLE_DISCOVERY_LIST_S3);
         CHECK(ble_discovery_live->painted_c5[0].address_type==1U&&ble_discovery_live->painted_c5[1].address_type==2U);
         CHECK(strstr(live_badges[0],"C5 ADV HINT")&&strstr(live_details[2],"S3 PEAK"));
-        CHECK(strstr(live_hint,"C5 UNCLASSIFIED 1"));
+        CHECK(strstr(live_hint,"C5 2 RETAINED / UNCLASSIFIED 1"));
         CHECK(unified_classify_calls==4U);
         unsigned parsed=unified_classify_calls,boundaries=all_boundary_calls(),sorts=unified_sort_calls;
         for(unsigned i=0;i<4U;++i){clock_ms+=200;repaint_unified();}
@@ -555,7 +562,7 @@ static void unified_family_cache_and_unavailable(const char *prefix)
     companion_store.rows[0].receive.source_kind=CERBERUS_DUAL_BLE_RECEIVE_EXTENDED;
     companion_store.rows[0].receive.callback_length=32U;companion_store.rows[0].receive.data_status=0U;
     companion_store.rows[0].receive.primary_phy=1U;++companion_store.snapshots;
-    repaint_unified();CHECK(!live_view.total_count&&strstr(live_hint,"C5 UNCLASSIFIED 1"));++parsed;
+    repaint_unified();CHECK(!live_view.total_count&&strstr(live_hint,"C5 0 RETAINED / UNCLASSIFIED 1"));++parsed;
     drawn[0]=0;CHECK(live_paint(true)==ESP_OK);
     CHECK(strstr(drawn,"WAITING FOR HINTS")&&strstr(drawn,"LIVE RESULTS UPDATE AS AVAILABLE"));
     save(prefix,"family-unclassifiable-prefix");
@@ -755,6 +762,53 @@ static void empty_receive_explanation(void)
     CHECK(!strstr(drawn,"LIVE RESULTS UPDATE AS AVAILABLE"));
 }
 
+static void unified_full_original_and_focus(const char *prefix)
+{
+    seed_native(CERBERUS_S3_BLE_FILTER_FLIPPER);native_tick(1000,false);
+    dual_ble_live_tick(1000,false);
+    CHECK(companion_requested_mode==CERBERUS_DUAL_BLE_FAMILY&&companion_requested_family==3U);
+    companion_row(0,87,2,-35);
+    cerberus_dual_ble_row_t *row=&companion_store.rows[0];
+    uint8_t full[255]={250,0xff};full[251]=3;full[252]=3;full[253]=0x82;full[254]=0x30;
+    memcpy(row->raw,full,31U);row->raw_length=31U;row->raw_flags=3U;
+    row->receive=(cerberus_dual_ble_receive_metadata_t){
+        .source_kind=CERBERUS_DUAL_BLE_RECEIVE_EXTENDED,.callback_length=255U,
+        .sid=255U,.primary_phy=1U,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+    cerberus_dual_ble_family_evidence_t evidence;
+    CHECK(cerberus_dual_ble_family_parse_ad(full,sizeof(full),row->address,row->address_type,&evidence));
+    CHECK(cerberus_dual_ble_family_wire_encode(&evidence,3U,&row->family));
+    ++companion_store.snapshots;clock_ms=1100;native_tick(1100,false);
+    CHECK(live_view.total_count==1U&&strstr(live_badges[0],"C5 FULL HINT"));
+    save(prefix,"family-full255-list");
+    cerberus_dual_ble_row_t frozen=ble_discovery_live->painted_c5[0];
+    cerberus_dual_ble_provenance_t proof=ble_discovery_live->painted_c5_provenance[0];
+    memset(&row->family,0,sizeof(row->family));++companion_store.snapshots;
+    ++companion_store.published_boot_id;++companion_store.published_epoch;
+    handle_live_scan_tap(20,135);
+    CHECK(ble_mode==UI_BLE_MODE_C5&&dual_ble_ui_from_unified);
+    CHECK(!memcmp(&frozen,&dual_ble_ui_selected,sizeof(frozen))&&
+        !memcmp(&proof,&dual_ble_ui_selected_provenance,sizeof(proof)));
+    actual_c5_footer_tap(250,440);CHECK(archive_save_calls==1U&&archive_save_selected);
+    CHECK(!memcmp(&archive_saved_c5,&frozen,sizeof(frozen)));
+    actual_c5_footer_tap(40,440);CHECK(ble_mode==UI_BLE_MODE_LIST);
+    repaint_unified();CHECK(!live_view.total_count); /* Old truncated row has no full evidence. */
+    companion_store.rows[0]=frozen;++companion_store.snapshots;
+    companion_store.start.mode=CERBERUS_DUAL_BLE_FAMILY;companion_store.start.reserved=3U;
+    companion_store.error=ESP_ERR_NOT_SUPPORTED;repaint_unified();
+    CHECK(live_view.total_count==1U&&strstr(live_subtitle,"C5 FOCUS UNAVAILABLE / S3 VIEW"));
+    CHECK(strstr(live_hint,"C5 1 RETAINED"));save(prefix,"family-focus-unavailable-retained");
+    unsigned parsed=unified_classify_calls,boundaries=all_boundary_calls();
+    clock_ms=1200;repaint_unified();
+    CHECK(unified_classify_calls==parsed&&all_boundary_calls()==boundaries);
+    /* Sleep, another passive owner and leaving the page all request normal
+     * companion cleanup, rather than creating a focused job in the background. */
+    dual_ble_live_tick(1300,true);CHECK(companion_requested_mode==-1);
+    analyzer_wifi_busy=true;dual_ble_live_tick(1400,false);CHECK(companion_requested_mode==-1);
+    analyzer_wifi_busy=false;ble_discovery_leave();dual_ble_live_tick(1500,false);
+    CHECK(companion_requested_mode==-1);
+    stop_and_release(1600);clean_live();
+}
+
 int main(int argc,char **argv)
 {
     CHECK(argc==2);
@@ -773,6 +827,7 @@ int main(int argc,char **argv)
     unified_all_families(argv[1]);
     unified_family_recency(argv[1]);
     unified_family_cache_and_unavailable(argv[1]);
+    unified_full_original_and_focus(argv[1]);
     printf("Ordinary BLE live UI: %u checks passed; active updates, frozen painted selection, scoped cleanup and C5 independence\n",live_checks);
     return 0;
 }
