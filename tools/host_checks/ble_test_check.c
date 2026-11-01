@@ -20,6 +20,7 @@ int xTaskCreate(void(*fn)(void*),const char*n,unsigned stack,void*a,unsigned p,v
 void vTaskDelete(void*p){(void)p;}
 int64_t esp_timer_get_time(void){return (int64_t)tick*1000;}
 size_t heap_caps_get_free_size(unsigned caps){(void)caps;return free_bytes;}
+size_t heap_caps_get_minimum_free_size(unsigned caps){(void)caps;return free_bytes;}
 int nimble_port_init(void){++init_calls;return fail_init?ESP_FAIL:ESP_OK;}
 void nimble_port_run(void){}
 void nimble_port_freertos_init(void(*fn)(void*)){(void)fn;assert(ble_hs_cfg.sync_cb);ble_hs_cfg.sync_cb();}

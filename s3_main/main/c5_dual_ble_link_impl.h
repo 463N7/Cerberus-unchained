@@ -1,5 +1,6 @@
-/* Included once by c5_spi_link.c. One bounded transaction, no retry loop and
- * no UI-thread bank transfer. Scoped START is idempotent after a lost reply. */
+/* Included once by c5_spi_link.c. One bounded call, no retry loop and no
+ * bank transfer. An unknown firmware cache adds one passive v2 status probe
+ * inside the same deadline. Scoped START retries keep their bound identity. */
 esp_err_t c5_spi_link_dual_ble_exchange(uint8_t command, const void *input,
     size_t input_size, void *output, size_t output_size)
 {
@@ -15,7 +16,19 @@ esp_err_t c5_spi_link_dual_ble_exchange(uint8_t command, const void *input,
     if (start < 0) return ESP_ERR_INVALID_STATE;
     uint32_t deadline = (uint32_t)((uint64_t)start / 1000U) + 20U;
     if (take_link_mutex(pdMS_TO_TICKS(5U)) != pdTRUE) return ESP_ERR_TIMEOUT;
-    esp_err_t error = peer_firmware_version < CERBERUS_DUAL_BLE_MIN_FIRMWARE ? ESP_ERR_NOT_SUPPORTED : ESP_OK;
+    esp_err_t error = ESP_OK;
+    if (peer_firmware_version == 0U) {
+        /* A failed unrelated status poll clears the shared cache. Unknown is
+         * not proof of an old firmware: revalidate without a legacy fallback. */
+        cerberus_c5_status_t peer = {0};
+        error = get_status_v2_passive_locked(++sequence, deadline, &peer);
+        int64_t probed = esp_timer_get_time();
+        if (error == ESP_OK && (probed < start || probed - start >= 20000LL))
+            error = ESP_ERR_TIMEOUT;
+        peer_firmware_version = error == ESP_OK ? peer.firmware_version : 0U;
+    }
+    if (error == ESP_OK && peer_firmware_version < CERBERUS_DUAL_BLE_MIN_FIRMWARE)
+        error = ESP_ERR_NOT_SUPPORTED;
     if (error == ESP_OK) {
         cerberus_spi_frame_t request, response = {0};
         uint8_t discard[CERBERUS_SPI_TRANSFER_SIZE] = {0};

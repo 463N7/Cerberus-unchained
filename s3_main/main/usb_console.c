@@ -1,5 +1,6 @@
 #include "usb_console.h"
 #include "battery.h"
+#include "dual_ble_diagnostics.h"
 
 #include "c5_spi_link.h"
 #include "csi_link.h"
@@ -16,6 +17,7 @@
 #include "ble_archive_io.h"
 #include "remote_id_diagnostics.h"
 #include "wifi_readout_diagnostics.h"
+#include "dual_wifi_diagnostics.h"
 #include "wifi_multissid_session.h"
 #include "wifi_pinescan_session.h"
 #include "ble_test.h"
@@ -74,12 +76,15 @@ static __attribute__((noinline)) void print_usb(void);
 static __attribute__((noinline)) void print_network(void);
 static __attribute__((noinline)) void print_wifi_seen(void);
 static __attribute__((noinline)) void print_wifi_readout(void);
+static __attribute__((noinline)) void print_wifi_dual(void);
 static __attribute__((noinline)) void print_recon_record(void);
 static __attribute__((noinline)) void print_ble_archive(void);
 static __attribute__((noinline)) void print_remote_id(void);
 static __attribute__((noinline)) void print_stations(void);
 static __attribute__((noinline)) void print_reports(void);
 static __attribute__((noinline)) void print_radio(void);
+static __attribute__((noinline)) void print_dual_ble(void);
+static __attribute__((noinline)) void print_ble_memory(void);
 static __attribute__((noinline)) void print_battery(void);
 
 static void console_write(const char *text)
@@ -143,10 +148,13 @@ static void print_help(void)
         "network  Show onboard C5 network scan status\r\n"
         "wifi_seen Read completed Wi-Fi source-age coverage without scanning\r\n"
         "wifi_readout Read local UI AP transfer metrics without SPI or scanning\r\n"
+        "wifi_dual Read UI-published split Wi-Fi state without SPI or scanning\r\n"
         "remote_id Read published Remote ID session counts without scanning\r\n"
         "stations Read passive station capture without renewing its lease\r\n"
         "reports  Read the first 32 SD log names and network CSVs\r\n"
         "radio    Show C5, S3 BLE/Wi-Fi and Wardriving status without renewing leases\r\n"
+        "dual_ble Read cached two-receiver BLE/Fox state without SPI or scanning\r\n"
+        "ble_memory Read cached S3 BLE lifecycle heap samples without heap walks\r\n"
         "battery  Show cached onboard battery gauge status\r\n"
         "All commands are read-only and accept no arguments.\r\n");
 }
@@ -518,6 +526,66 @@ static void print_battery(void)
         (unsigned)status.version, status.last_read_ms);
 }
 
+static void print_dual_ble(void)
+{
+    cerberus_dual_ble_diagnostics_t d;
+    cerberus_dual_ble_diagnostics_get(&d);
+    console_printf("dual_ble_available=%u\r\ndual_ble_version=%u\r\ndual_ble_sequence=%" PRIu64
+        "\r\ndual_ble_sequence_saturated=%u\r\ndual_ble_published_ms=%" PRIu64
+        "\r\ndual_ble_clock_valid=%u\r\ndual_ble_time_scope=S3_UI_publication_not_RF_time\r\n",
+        d.available, d.version, d.sequence, d.sequence_saturated, d.published_ms, d.clock_valid);
+    if (!d.available) return;
+    console_printf("dual_ble_mode=%d\r\ndual_ble_awake=%u\r\ndual_ble_allocated=%u\r\n"
+        "dual_ble_enabled=%u\r\ndual_ble_attached=%u\r\ndual_ble_receiving=%u\r\n"
+        "dual_ble_reading=%u\r\ndual_ble_stopping=%u\r\ndual_ble_released=%u\r\n"
+        "dual_ble_c5_phase=%u\r\ndual_ble_c5_state=%u\r\ndual_ble_c5_generation=%u\r\n"
+        "dual_ble_c5_sweeps=%" PRIu32 "\r\ndual_ble_c5_rows=%u\r\ndual_ble_c5_read_index=%u\r\n"
+        "dual_ble_c5_extended_configured=%u\r\ndual_ble_c5_error=%" PRId32 "\r\n",
+        d.requested_mode, d.awake, d.allocated, d.enabled, d.attached, d.receiving,
+        d.reading, d.stopping, d.released, d.c5_phase, d.c5_state, d.c5_generation,
+        d.c5_sweeps, d.c5_rows, d.c5_read_index, d.extended_configured, d.c5_error);
+    console_printf("dual_ble_s3_initialized=%u\r\ndual_ble_s3_synced=%u\r\ndual_ble_s3_owner=%u\r\n"
+        "dual_ble_s3_scan_cached=%u\r\ndual_ble_s3_state=%u\r\n"
+        "dual_ble_s3_scan_error=%" PRId32 "\r\ndual_ble_s3_discovery_enabled=%u\r\n"
+        "dual_ble_s3_discovery_attached=%u\r\ndual_ble_s3_discovery_owned=%u\r\n"
+        "dual_ble_fox_open=%u\r\ndual_ble_fox_pending=%u\r\ndual_ble_fox_stopping=%u\r\n"
+        "dual_ble_fox_error=%" PRId32 "\r\ndual_ble_s3_track_error=%" PRId32 "\r\n",
+        d.s3_initialized, d.s3_synced, d.s3_owner, d.s3_scan_cached, d.s3_state,
+        d.s3_scan_error, d.s3_discovery_enabled, d.s3_discovery_attached, d.s3_discovery_owned,
+        d.fox_open, d.fox_pending, d.fox_stopping, d.fox_error, d.s3_track_error);
+    console_printf("dual_ble_s3_target_matches=%u\r\ndual_ble_s3_seen=%u\r\ndual_ble_s3_fresh=%u\r\n"
+        "dual_ble_s3_rssi=%d\r\ndual_ble_s3_age_ms=%" PRIu32 "\r\ndual_ble_s3_reports=%" PRIu32 "\r\n"
+        "dual_ble_c5_target_matches=%u\r\ndual_ble_c5_seen=%u\r\ndual_ble_c5_fresh=%u\r\n"
+        "dual_ble_c5_rssi=%d\r\ndual_ble_c5_age_upper_ms=%" PRIu32 "\r\ndual_ble_c5_reports=%" PRIu32 "\r\n"
+        "dual_ble_count_scope=independent_received_reports_not_unique_packets_or_devices\r\n"
+        "dual_ble_c5_reports_scope=last_sampled_C5_sweep\r\n",
+        d.s3.target_matches, d.s3.seen, d.s3.fresh, d.s3.rssi, d.s3.age_ms, d.s3.reports,
+        d.c5.target_matches, d.c5.seen, d.c5.fresh, d.c5.rssi, d.c5.age_ms, d.c5.reports);
+}
+
+static void print_ble_memory(void)
+{
+    cerberus_s3_ble_memory_diagnostics_t snapshot = {0};
+    cerberus_s3_ble_host_memory_diagnostics(&snapshot);
+    static const char *const phases[CERBERUS_S3_BLE_MEMORY_STAGE_COUNT] = {
+        "before_init", "after_init", "after_sync", "released", "refused"
+    };
+    console_printf("ble_memory_scope=cached_process_wide_phase_samples_not_ble_allocation_totals\r\n");
+    for (unsigned i = 0U; i < CERBERUS_S3_BLE_MEMORY_STAGE_COUNT; ++i) {
+        const cerberus_s3_ble_memory_sample_t *sample = &snapshot.samples[i];
+        console_printf(
+            "ble_memory_phase=%s valid=%u sequence=%" PRIu32 " receipt_us=%" PRId64
+            " requested_owner=%u initialized=%u synced=%u error=%" PRId32
+            " internal_free=%" PRIu32 " internal_minimum=%" PRIu32
+            " psram_free=%" PRIu32 " psram_minimum=%" PRIu32 "\r\n",
+            phases[i], sample->valid ? 1U : 0U, sample->sequence, sample->receipt_us,
+            (unsigned)sample->requested_owner, sample->initialized ? 1U : 0U,
+            sample->synced ? 1U : 0U, (int32_t)sample->error,
+            sample->internal_free, sample->internal_minimum,
+            sample->psram_free, sample->psram_minimum);
+    }
+}
+
 static void print_resources(void)
 {
     uint8_t digest[32];
@@ -625,6 +693,42 @@ static void print_wifi_readout(void)
         snapshot.step_calls, snapshot.error, (unsigned)snapshot.cancel_reason,
         snapshot.timing_valid ? 1U : 0U, snapshot.counters_saturated ? 1U : 0U,
         snapshot.sampled_us, snapshot.elapsed_us, snapshot.max_step_us, snapshot.max_tick_gap_us);
+}
+
+static void print_wifi_dual(void)
+{
+    cerberus_dual_wifi_diagnostics_t snapshot;
+    cerberus_dual_wifi_diagnostics_get(&snapshot);
+    const cerberus_dual_wifi_diagnostic_values_t *v = &snapshot.value;
+    console_printf("wifi_dual_scope=ui_published_aggregates_no_spi\r\n"
+        "wifi_dual_available=%u\r\nwifi_dual_publication_sequence=%" PRIu64 "\r\n"
+        "wifi_dual_published_us=%" PRIu64 "\r\nwifi_dual_time_valid=%u\r\n"
+        "wifi_dual_sequence_saturated=%u\r\n",
+        snapshot.available ? 1U : 0U, snapshot.publication_sequence,
+        snapshot.published_us, snapshot.time_valid ? 1U : 0U,
+        snapshot.sequence_saturated ? 1U : 0U);
+    console_printf("wifi_dual_state=%u\r\nwifi_dual_phase=%u\r\n"
+        "wifi_dual_generation=%" PRIu32 "\r\nwifi_dual_retained=%u\r\n"
+        "wifi_dual_split=%u\r\nwifi_dual_fallback=%u\r\n"
+        "wifi_dual_elapsed_ms=%" PRIu32 "\r\nwifi_dual_cleanup_pending=%u\r\n"
+        "wifi_dual_rebinding=%u\r\nwifi_dual_rebind_ready=%u\r\n",
+        (unsigned)v->state, (unsigned)v->phase, v->generation, (unsigned)v->count,
+        v->split ? 1U : 0U, v->fallback ? 1U : 0U, v->elapsed_ms,
+        v->cleanup_pending ? 1U : 0U, v->rebinding ? 1U : 0U, v->rebind_ready ? 1U : 0U);
+    console_printf("wifi_dual_s3_count=%u\r\nwifi_dual_s3_total=%u\r\n"
+        "wifi_dual_c5_count=%u\r\nwifi_dual_c5_total=%u\r\n"
+        "wifi_dual_error=%" PRId32 "\r\nwifi_dual_ui_error=%" PRId32 "\r\n"
+        "wifi_dual_s3_error=%" PRId32 "\r\nwifi_dual_c5_error=%" PRId32 "\r\n",
+        (unsigned)v->s3_count, (unsigned)v->s3_total, (unsigned)v->c5_count, (unsigned)v->c5_total,
+        v->error, v->ui_error, v->s3_error, v->c5_error);
+    console_printf("wifi_dual_s3_status_valid=%u\r\nwifi_dual_s3_job=%" PRIu32 "\r\n"
+        "wifi_dual_scan_s3_job=%" PRIu32 "\r\nwifi_dual_s3_state=%u\r\n"
+        "wifi_dual_s3_wifi_owner=%u\r\nwifi_dual_s3_radio_owned=%u\r\n"
+        "wifi_dual_scan_s3_owned=%u\r\nwifi_dual_s3_cleanup_error=%" PRId32 "\r\n"
+        "wifi_dual_c5_may_own=%u\r\n",
+        v->s3_status_valid ? 1U : 0U, v->s3_job, v->scan_s3_job, (unsigned)v->s3_state,
+        (unsigned)v->s3_wifi_owner, v->s3_radio_owned ? 1U : 0U,
+        v->scan_s3_owned ? 1U : 0U, v->s3_cleanup_error, v->c5_may_own ? 1U : 0U);
 }
 
 static void print_ble_archive(void)
@@ -1346,6 +1450,8 @@ static void execute_command(char *line)
         print_wifi_seen();
     } else if (strcmp(start, "wifi_readout") == 0) {
         print_wifi_readout();
+    } else if (strcmp(start, "wifi_dual") == 0) {
+        print_wifi_dual();
     } else if (strcmp(start, "recon_record") == 0) {
         print_recon_record();
     } else if (strcmp(start, "ble_archive") == 0) {
@@ -1356,6 +1462,10 @@ static void execute_command(char *line)
         print_stations();
     } else if (strcmp(start, "reports") == 0) {
         print_reports();
+    } else if (strcmp(start, "dual_ble") == 0) {
+        print_dual_ble();
+    } else if (strcmp(start, "ble_memory") == 0) {
+        print_ble_memory();
     } else if (strcmp(start, "radio") == 0) {
         print_radio();
     } else if (strcmp(start, "battery") == 0) {

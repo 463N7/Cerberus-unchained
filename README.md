@@ -1,6 +1,6 @@
 # Cerberus Unchained
 
-Experimental Cerberus firmware for the expanded rev94 feature set: integrated
+Experimental Cerberus firmware for the expanded rev95 feature set: integrated
 wardriving, C5 Wi-Fi capture and analysis, S3 BLE discovery and tools, Remote ID
 receive workflows, AP/client navigation, and optional expansion radios.
 
@@ -9,7 +9,7 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev94` (experimental), paired with onboard
+**Current source version: `0.1.0-dev.rev95` (candidate), paired with onboard
 C5 protocol firmware revision 61. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -40,6 +40,17 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev95 addresses the retained S3 memory limitation observed after Bluetooth use.
+It moves eligible NimBLE host allocations to PSRAM, preserves the existing
+buffer counts and host lifetime, and rejects BLE initialization when optional
+PSRAM is absent. It also adds cached per-radio/lifecycle diagnostics and bounded
+recovery from an unknown C5 firmware cache. All 119 host suites and all five
+native targets pass on stable inputs. The matched onboard package also passes
+image, partition, source and console-stack checks. The repeated
+BLE-to-split-Wi-Fi device check remains pending. The
+development board is still running rev94. See
+[radio memory recovery](docs/RADIO_MEMORY_RECOVERY.md).
 
 Rev94 adds adaptive dual-radio scanning: Wi-Fi-only scans use S3 for 2.4 GHz
 and C5 for 5 GHz when both are available; ordinary BLE discovery and fox hunting

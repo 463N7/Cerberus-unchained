@@ -1,5 +1,6 @@
 /* UI-task integration. Included after the existing discovery/session owner. */
 #pragma once
+#include "dual_ble_diagnostics_ui.h"
 
 static bool dual_ble_live_enabled(void)
 {
@@ -103,6 +104,7 @@ static void dual_ble_live_tick(uint64_t now, bool asleep)
         mode = CERBERUS_DUAL_BLE_TRACK;
     dual_ble_ui_sync(mode, mode == CERBERUS_DUAL_BLE_TRACK ?
         ble_fox_hunt_target.address : NULL, ble_fox_hunt_target.address_type, now);
+    dual_ble_publish_diagnostics(now, asleep);
     static uint64_t last_draw;
     if (ordinary && ble_mode == UI_BLE_MODE_C5 && !asleep && now - last_draw >= 500U) {
         last_draw = now;

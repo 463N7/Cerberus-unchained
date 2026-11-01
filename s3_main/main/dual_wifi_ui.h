@@ -267,8 +267,10 @@ static esp_err_t dual_wifi_ui_draw(void)
             ESP_RETURN_ON_ERROR(draw_button(8, 326, 304, 44,
                 status.rebinding ? "CHECKING AP" : "OPEN AP TOOLS"), TAG, "dual selected tools");
         } else {
-            const char *mode = status.fallback ? "C5: 2.4 + 5 GHz / S3 UNAVAILABLE" :
-                status.split ? "S3: 2.4 GHz + C5: 5 GHz" : "S3 + C5 / AUTOMATIC RADIO SELECTION";
+            const char *mode = status.split ? "S3: 2.4 GHz + C5: 5 GHz" :
+                "S3 + C5 / AUTOMATIC RADIO SELECTION";
+            if (status.fallback) mode = status.s3_error == ESP_ERR_NO_MEM ?
+                "C5: 2.4 + 5 GHz / S3 LOW MEMORY" : "C5: 2.4 + 5 GHz / S3 UNAVAILABLE";
             esp_err_t error = dual_wifi_ui_error != ESP_OK ? dual_wifi_ui_error : status.error;
             if (error != ESP_OK) snprintf(line, sizeof(line), "SCAN: %.40s", esp_err_to_name(error));
             else snprintf(line, sizeof(line), "%s", mode);

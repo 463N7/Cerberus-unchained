@@ -1,5 +1,7 @@
 #include "dual_wifi_scan.h"
 #include "s3_wifi_scanner.h"
+#include "s3_wifi_owner.h"
+#include "dual_wifi_diagnostics.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include <string.h>
@@ -395,4 +397,40 @@ esp_err_t cerberus_dual_wifi_scan_copy_legacy_bank(cerberus_c5_wifi_result_t *ro
     }
     *status = store->c5_status; *proof = store->proof; *selected_index = store->matched_index;
     return ESP_OK;
+}
+
+/* UI task only. The console reads the independent published value copy.
+ * All underlying observations here are local getters; none perform SPI. */
+void cerberus_dual_wifi_scan_publish_diagnostics(int32_t ui_error)
+{
+    cerberus_dual_wifi_status_t status;
+    cerberus_dual_wifi_scan_get_status(&status);
+    cerberus_s3_wifi_scan_status_t local = {0};
+    bool local_valid = cerberus_s3_wifi_scanner_get_status(&local) == ESP_OK;
+    cerberus_dual_wifi_diagnostic_values_t value = {
+        .generation = status.generation, .elapsed_ms = status.elapsed_ms,
+        .error = status.error, .ui_error = ui_error,
+        .s3_error = status.s3_error, .c5_error = status.c5_error,
+        .s3_total = status.s3_total, .c5_total = status.c5_total,
+        .state = status.state, .count = status.count,
+        .s3_count = status.s3_count, .c5_count = status.c5_count,
+        .split = status.split, .fallback = status.fallback,
+        .cleanup_pending = status.cleanup_pending,
+        .rebinding = status.rebinding, .rebind_ready = status.rebind_ready,
+        .s3_status_valid = local_valid,
+        .s3_wifi_owner = (uint8_t)cerberus_s3_wifi_owner(),
+    };
+    if (store) {
+        value.phase = store->phase;
+        value.scan_s3_job = store->s3_job;
+        value.c5_may_own = store->c5_possible;
+        value.scan_s3_owned = store->s3_owned && local_valid &&
+            local.job_id == store->s3_job && local.radio_owned;
+    }
+    if (local_valid) {
+        value.s3_job = local.job_id; value.s3_state = local.state;
+        value.s3_radio_owned = local.radio_owned;
+        value.s3_cleanup_error = local.cleanup_error;
+    }
+    cerberus_dual_wifi_diagnostics_publish(&value, esp_timer_get_time());
 }

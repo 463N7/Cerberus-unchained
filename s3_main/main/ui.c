@@ -11970,6 +11970,7 @@ void cerberus_ui_run(const cerberus_ui_config_t *config)
         live_scan_tick((uint32_t)now_ms, screen_asleep);
         dual_ble_live_tick((uint64_t)now_ms, screen_asleep);
         dual_wifi_live_tick((uint32_t)now_ms, screen_asleep);
+        cerberus_dual_wifi_scan_publish_diagnostics((int32_t)dual_wifi_ui_error);
         wifi_relation_tick((uint32_t)now_ms, !live_wifi_capture_defers_c5() && !screen_asleep && !wifi_attack_selecting &&
             current_page == UI_PAGE_WIFI && (wifi_mode == UI_WIFI_MODE_LIST ||
             wifi_mode == UI_WIFI_MODE_TARGET || wifi_mode == UI_WIFI_MODE_OBSERVED_CLIENTS),

@@ -66,3 +66,7 @@ esp_err_t cerberus_dual_wifi_scan_copy_legacy_bank(cerberus_c5_wifi_result_t *ro
     cerberus_s3_wifi_observation_t *observations, size_t capacity,
     cerberus_wifi_scan_status_payload_t *status, cerberus_c5_wifi_relation_bank_t *proof,
     uint8_t *selected_index);
+
+/* UI task only: publish local aggregates after the UI tick, including
+ * hidden cleanup. The console must use diagnostics_get instead. */
+void cerberus_dual_wifi_scan_publish_diagnostics(int32_t ui_error);

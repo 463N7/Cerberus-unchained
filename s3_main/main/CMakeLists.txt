@@ -43,7 +43,9 @@ idf_component_register(
         "s3_wifi_owner.c"
         "s3_wifi_scanner.c"
         "dual_wifi_scan.c"
+        "dual_wifi_diagnostics.c"
         "dual_ble_scan.c"
+        "dual_ble_diagnostics.c"
         "s3_wifi_relation.c"
         "s3_wifi_ssid_analysis.c"
         "s3_wifi_list.c"
@@ -117,6 +119,7 @@ idf_component_register(
         esp_driver_usb_serial_jtag
         esp_driver_uart
         esp_http_server
+        esp_psram
         esp_wifi
         esp_netif
         mbedtls

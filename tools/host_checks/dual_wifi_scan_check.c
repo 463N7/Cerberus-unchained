@@ -17,6 +17,12 @@ static bool allocation_fails, reject_start, fail_local_cleanup, keep_remote_runn
 static bool replace_local_on_row, replace_bank_on_proof, change_status_fence;
 
 int64_t esp_timer_get_time(void) { return (int64_t)clock_ms * 1000; }
+cerberus_s3_wifi_owner_t cerberus_s3_wifi_owner(void)
+{ return local_status.radio_owned ? CERBERUS_S3_WIFI_SCAN : CERBERUS_S3_WIFI_NONE; }
+/* Aggregate publication is covered with the real module by the diagnostics suite. */
+void cerberus_dual_wifi_diagnostics_publish(
+    const cerberus_dual_wifi_diagnostic_values_t *value, int64_t now_us)
+{ assert(value && now_us == (int64_t)clock_ms * 1000); }
 void *heap_caps_calloc(size_t count, size_t size, unsigned caps)
 { assert(caps == (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)); return allocation_fails ? NULL : calloc(count, size); }
 

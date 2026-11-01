@@ -79,6 +79,7 @@ static int64_t esp_timer_get_time(void) { return (int64_t)mock_ms * 1000; }
 static esp_err_t esp_netif_init(void) { return failing("netif") ? ESP_FAIL : ESP_OK; }
 static esp_err_t esp_event_loop_create_default(void) { return ESP_OK; }
 static size_t heap_caps_get_free_size(unsigned caps) { (void)caps; return internal_heap; }
+static size_t heap_caps_get_minimum_free_size(unsigned caps) { (void)caps; return internal_heap; }
 static void *heap_caps_calloc(size_t n, size_t size, unsigned caps)
 {
     assert(caps == (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));

@@ -51,8 +51,9 @@ void cerberus_dual_ble_init(cerberus_dual_ble_scan_t *, const cerberus_dual_ble_
 esp_err_t cerberus_dual_ble_begin(cerberus_dual_ble_scan_t *, uint8_t mode,
     const uint8_t address[6], uint8_t address_type);
 void cerberus_dual_ble_stop(cerberus_dual_ble_scan_t *);
-/* At most four single-frame operations; stop starting more at an eight-ms
- * local budget. One in-flight SDK transaction can exceed that budget. */
+/* At most four transport calls; stop starting more at an eight-ms local
+ * budget. Cache recovery may add one passive peer-status probe within a
+ * transport call. One in-flight SDK transaction can exceed that budget. */
 void cerberus_dual_ble_tick(cerberus_dual_ble_scan_t *, uint64_t now_ms);
 void cerberus_dual_ble_view(const cerberus_dual_ble_scan_t *, cerberus_dual_ble_view_t *);
 bool cerberus_dual_ble_row(const cerberus_dual_ble_scan_t *, uint8_t index,
