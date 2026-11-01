@@ -190,6 +190,13 @@ esp_err_t cerberus_wifi_channel_survey_preempt(void)
         xSemaphoreGive(scanner_mutex);
         return cleanup;
     }
+    /* No worker or retained SDK reservation remains. A prior setup/channel
+     * error is history, not an outstanding cleanup claim; Stop acknowledges
+     * quiescence explicitly so its caller need not infer it from ERROR. */
+    xSemaphoreTake(scanner_mutex, portMAX_DELAY);
+    channel_survey_status.state = CERBERUS_WIFI_CHANNEL_SURVEY_IDLE;
+    channel_survey_status.error_code = ESP_OK;
+    xSemaphoreGive(scanner_mutex);
     return ESP_OK;
 }
 

@@ -2,6 +2,15 @@
 
 ## Current local checkpoint
 
+[Rev121](DUAL_RADIO_REV121.md) implements C5 receive cleanup bound to private
+scan epochs, retained SDK ownership and Channel Survey admission/retry. Focused
+regressions, independent review, all 128 host suites, five native builds and
+matched package verification pass. The current Survey workflow requires C5
+firmware 69 for checked cleanup acknowledgement; the original firmware 46 wire
+layout is unchanged. Survey's generation-byte/band checks remain limited
+fencing, not a full job token. Rev113 remains installed, and physical acceptance
+is separate.
+
 [Rev120](DUAL_RADIO_REV120.md) binds shared S3 BLE host release to an exact
 claim and preserves pending initialization reservations across reset. Existing
 host clients are migrated together. This is a local candidate; rev113 remains
@@ -202,7 +211,7 @@ it does not infer bearing, exact distance or triangulation from their RSSI.
 Faster discovery and improved coverage are goals to measure. Compilation and
 host fixtures alone cannot establish either result on the Cerberus board.
 
-## Rev94 recorded validation — 2026-11-01 UTC
+## Rev94 recorded validation - 2026-11-01 UTC
 
 The final Windows checkpoint passed 22 targeted runners against stable inputs.
 This includes all eight new radio suites and the affected scan observation,
@@ -245,7 +254,7 @@ At that build checkpoint no device had been flashed and no hardware acceptance
 was claimed. The subsequent installation below is a separate evidence record.
 This development branch remains a local follow-up to the submitted rev93 contribution.
 
-## Installation and initial device checks — 2026-11-01 UTC
+## Installation and initial device checks - 2026-11-01 UTC
 
 The matched rev94 S3 application and C5 firmware 61 were installed on the
 connected Cerberus board. All three images for each programmed target passed

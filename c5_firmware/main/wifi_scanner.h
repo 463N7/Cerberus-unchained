@@ -72,6 +72,9 @@ esp_err_t cerberus_wifi_watch_get_motion_timing(const cerberus_watch_scan_data_r
     cerberus_watch_scan_timing_payload_t *out);
 esp_err_t cerberus_wifi_scanner_stop(void);
 esp_err_t cerberus_wifi_channel_survey_start(uint8_t band);
+/* Explicit background handoff: waits at most one second for the worker, then
+ * retries a retained failed disable. Failure never releases radio exclusion.
+ * The legacy SPI Stop has no job token; callers must serialize ownership. */
 esp_err_t cerberus_wifi_channel_survey_preempt(void);
 void cerberus_wifi_channel_survey_get_status(
     cerberus_wifi_channel_survey_status_payload_t *status);

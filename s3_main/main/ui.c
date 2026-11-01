@@ -678,6 +678,12 @@ static cerberus_wifi_channel_survey_result_payload_t
     wifi_channel_survey_rows[UI_WIFI_VISIBLE_ROWS];
 static uint8_t wifi_channel_survey_page;
 static bool wifi_channel_survey_attempted;
+static bool wifi_channel_survey_claimed;
+static bool wifi_channel_survey_cleanup_requested;
+static bool wifi_channel_survey_cleanup_polled;
+static uint8_t wifi_channel_survey_claim_generation;
+static uint8_t wifi_channel_survey_claim_band;
+static uint32_t wifi_channel_survey_cleanup_last_poll;
 static esp_err_t wifi_channel_survey_error = ESP_ERR_INVALID_STATE;
 static uint32_t wifi_channel_survey_last_poll;
 static cerberus_wifi_packet_monitor_status_payload_t packet_monitor_status;
@@ -2139,35 +2145,108 @@ static void packet_monitor_step_channel(int direction)
     packet_monitor_start_ui();
 }
 
+/* The legacy survey wire identifies only generation8 + band. Check that
+ * namespace before any unbound Stop; an observed replacement is never stopped.
+ * Reboot/wrap or another command between Status and Stop requires a future
+ * token-bearing protocol to exclude completely. */
+static bool wifi_channel_survey_matches_claim(
+    const cerberus_wifi_channel_survey_status_payload_t *status)
+{
+    return status->generation == wifi_channel_survey_claim_generation &&
+        status->band == wifi_channel_survey_claim_band;
+}
+
 static bool wifi_channel_survey_stop_ui(void)
 {
-    if (wifi_channel_survey_status.state == CERBERUS_WIFI_CHANNEL_SURVEY_RUNNING) {
-        cerberus_wifi_channel_survey_status_payload_t stopped;
-        esp_err_t err = c5_spi_link_wifi_channel_survey_stop(&stopped);
-        if (err == ESP_OK) wifi_channel_survey_status = stopped;
-        else { wifi_channel_survey_error = err; return false; }
+    wifi_channel_survey_cleanup_requested = true;
+    wifi_channel_survey_cleanup_polled = true;
+    wifi_channel_survey_cleanup_last_poll = (uint32_t)(esp_timer_get_time() / 1000LL);
+    wifi_channel_survey_last_poll = wifi_channel_survey_cleanup_last_poll;
+    if (!wifi_channel_survey_claimed) {
+        wifi_channel_survey_attempted = false;
+        return true;
     }
+    cerberus_wifi_channel_survey_status_payload_t current;
+    esp_err_t err = c5_spi_link_wifi_channel_survey_status(&current);
+    if (err != ESP_OK) {
+        wifi_channel_survey_error = err;
+        return false; /* A lost reply does not release our possible claim. */
+    }
+    if (!wifi_channel_survey_matches_claim(&current)) {
+        wifi_channel_survey_claimed = false;
+        wifi_channel_survey_attempted = false;
+        wifi_channel_survey_error = ESP_ERR_INVALID_STATE;
+        return true; /* Superseded; leave the replacement alone. */
+    }
+    wifi_channel_survey_status = current;
+    if (current.state != CERBERUS_WIFI_CHANNEL_SURVEY_IDLE) {
+        err = c5_spi_link_wifi_channel_survey_stop(&current);
+        if (err == ESP_OK && !wifi_channel_survey_matches_claim(&current))
+            err = ESP_ERR_INVALID_RESPONSE;
+        if (err != ESP_OK) {
+            wifi_channel_survey_error = err;
+            return false; /* ERROR can still retain the native radio. */
+        }
+        wifi_channel_survey_status = current;
+    }
+    if (current.state != CERBERUS_WIFI_CHANNEL_SURVEY_IDLE) {
+        wifi_channel_survey_error = ESP_ERR_NOT_FINISHED;
+        return false;
+    }
+    wifi_channel_survey_claimed = false;
     wifi_channel_survey_attempted = false;
+    wifi_channel_survey_error = ESP_OK;
     return true;
+}
+
+static void wifi_channel_survey_cleanup_ui(uint32_t now_ms)
+{
+    wifi_channel_survey_cleanup_requested = true;
+    if (!wifi_channel_survey_cleanup_polled ||
+        now_ms - wifi_channel_survey_cleanup_last_poll >= 700U)
+        (void)wifi_channel_survey_stop_ui();
 }
 
 static void wifi_channel_survey_start_ui(void)
 {
-    if (wifi_channel_survey_attempted) return;
-    if (c5_status.firmware_version < CERBERUS_WIFI_CHANNEL_SURVEY_MIN_FIRMWARE) {
+    if (wifi_channel_survey_attempted || wifi_channel_survey_cleanup_requested ||
+        wifi_channel_survey_claimed) return;
+    if (c5_status.firmware_version < CERBERUS_WIFI_CHANNEL_SURVEY_CLEANUP_MIN_FIRMWARE) {
         wifi_channel_survey_attempted = true;
         wifi_channel_survey_error = ESP_ERR_NOT_SUPPORTED;
+        memset(&wifi_channel_survey_status, 0, sizeof(wifi_channel_survey_status));
+        memset(wifi_channel_survey_rows, 0, sizeof(wifi_channel_survey_rows));
         return;
     }
     wifi_channel_survey_attempted = true;
     wifi_channel_survey_page = 0U;
-    memset(&wifi_channel_survey_status, 0, sizeof(wifi_channel_survey_status));
     memset(wifi_channel_survey_rows, 0, sizeof(wifi_channel_survey_rows));
+    cerberus_wifi_channel_survey_status_payload_t before;
+    wifi_channel_survey_error = c5_spi_link_wifi_channel_survey_status(&before);
+    if (wifi_channel_survey_error != ESP_OK) return;
+    if (before.state == CERBERUS_WIFI_CHANNEL_SURVEY_RUNNING) {
+        /* Never adopt another caller's current survey, including a queued one. */
+        wifi_channel_survey_attempted = false;
+        wifi_channel_survey_error = ESP_ERR_INVALID_STATE;
+        wifi_channel_survey_last_poll = (uint32_t)(esp_timer_get_time() / 1000LL);
+        return;
+    }
+    wifi_channel_survey_claim_generation = (uint8_t)(before.generation + 1U);
+    if (!wifi_channel_survey_claim_generation) wifi_channel_survey_claim_generation = 1U;
+    wifi_channel_survey_claim_band = wifi_channel_survey_band();
+    /* Retain the possible accepted generation before the command, including
+     * a lost Start reply or worker error before its response is assembled. */
+    wifi_channel_survey_claimed = true;
+    memset(&wifi_channel_survey_status, 0, sizeof(wifi_channel_survey_status));
     wifi_channel_survey_error = c5_spi_link_wifi_channel_survey_start(
-        wifi_channel_survey_band(), &wifi_channel_survey_status);
-    if (wifi_channel_survey_error == ESP_ERR_INVALID_STATE) {
-        /* An AP scan or previous-band survey may still be draining after its
-         * Stop acknowledgement. The next UI poll retries once it has left. */
+        wifi_channel_survey_claim_band, &wifi_channel_survey_status);
+    if (wifi_channel_survey_status.generation &&
+        !wifi_channel_survey_matches_claim(&wifi_channel_survey_status)) {
+        wifi_channel_survey_claimed = false;
+        if (wifi_channel_survey_error == ESP_OK)
+            wifi_channel_survey_error = ESP_ERR_INVALID_RESPONSE;
+    }
+    if (wifi_channel_survey_error == ESP_ERR_INVALID_STATE && !wifi_channel_survey_claimed) {
         wifi_channel_survey_attempted = false;
         wifi_channel_survey_last_poll = (uint32_t)(esp_timer_get_time() / 1000LL);
         return;
@@ -2183,8 +2262,29 @@ static void wifi_channel_survey_start_ui(void)
     wifi_channel_survey_last_poll = 0U;
 }
 
+static void wifi_channel_survey_begin_ui(void)
+{
+    if (wifi_channel_survey_claimed && (wifi_channel_survey_cleanup_requested ||
+        wifi_channel_survey_status.state != CERBERUS_WIFI_CHANNEL_SURVEY_RUNNING ||
+        wifi_channel_survey_error != ESP_OK)) {
+        (void)wifi_channel_survey_stop_ui();
+        return; /* A repeated tap during cleanup is still Stop, never rearm. */
+    }
+    wifi_channel_survey_cleanup_requested = false;
+    wifi_channel_survey_cleanup_polled = false;
+    if (!wifi_channel_survey_claimed) {
+        wifi_channel_survey_attempted = false;
+        wifi_channel_survey_last_poll = 0U;
+    }
+    wifi_channel_survey_start_ui();
+}
+
 static void wifi_channel_survey_refresh(uint32_t now_ms)
 {
+    if (wifi_channel_survey_cleanup_requested) {
+        wifi_channel_survey_cleanup_ui(now_ms);
+        return;
+    }
     if (!wifi_channel_survey_attempted) {
         if (wifi_channel_survey_last_poll &&
             now_ms - wifi_channel_survey_last_poll < 700U) return;
@@ -2192,13 +2292,17 @@ static void wifi_channel_survey_refresh(uint32_t now_ms)
         if (!wifi_channel_survey_attempted) return;
     }
     if (now_ms - wifi_channel_survey_last_poll < 700U ||
-        (wifi_channel_survey_error != ESP_OK &&
-         wifi_channel_survey_status.state != CERBERUS_WIFI_CHANNEL_SURVEY_RUNNING)) return;
+        !wifi_channel_survey_claimed) return;
     wifi_channel_survey_last_poll = now_ms;
-    wifi_channel_survey_error = c5_spi_link_wifi_channel_survey_status(
-        &wifi_channel_survey_status);
-    if (wifi_channel_survey_error != ESP_OK ||
-        wifi_channel_survey_status.generation == 0U) return;
+    cerberus_wifi_channel_survey_status_payload_t current;
+    wifi_channel_survey_error = c5_spi_link_wifi_channel_survey_status(&current);
+    if (wifi_channel_survey_error != ESP_OK) return;
+    if (!wifi_channel_survey_matches_claim(&current)) {
+        wifi_channel_survey_claimed = false;
+        wifi_channel_survey_error = ESP_ERR_INVALID_STATE;
+        return;
+    }
+    wifi_channel_survey_status = current;
     memset(wifi_channel_survey_rows, 0, sizeof(wifi_channel_survey_rows));
     for (uint8_t row = 0U; row < UI_WIFI_VISIBLE_ROWS; ++row) {
         uint8_t index = (uint8_t)(wifi_channel_survey_page * UI_WIFI_VISIBLE_ROWS + row);
@@ -2307,12 +2411,23 @@ static esp_err_t draw_wifi_channel_survey_live(void)
     uint8_t pages = (uint8_t)((wifi_channel_survey_status.result_count +
         UI_WIFI_VISIBLE_ROWS - 1U) / UI_WIFI_VISIBLE_ROWS);
     if (pages == 0U) pages = 1U;
-    snprintf(line, sizeof(line), "%s  LIVE  PAGE %u/%u",
+    const char *phase = wifi_channel_survey_cleanup_requested && wifi_channel_survey_claimed
+        ? "STOPPING" : wifi_channel_survey_error != ESP_OK ||
+        wifi_channel_survey_status.state == CERBERUS_WIFI_CHANNEL_SURVEY_ERROR ? "ERROR" :
+        wifi_channel_survey_claimed && wifi_channel_survey_status.state == CERBERUS_WIFI_CHANNEL_SURVEY_RUNNING
+            ? "LIVE" : "PAUSED";
+    snprintf(line, sizeof(line), "%s  %s  PAGE %u/%u",
         wifi_mode == UI_WIFI_MODE_CHANNELS_24 ? "2.4 GHZ" : "5 GHZ",
+        phase,
         (unsigned)(wifi_channel_survey_page + 1U), (unsigned)pages);
     ESP_RETURN_ON_ERROR(draw_centered(51, line, UI_GOOD, 1), TAG,
         "Wi-Fi live channel heading failed");
-    if (!wifi_channel_survey_attempted &&
+    if (c5_status.firmware_version < CERBERUS_WIFI_CHANNEL_SURVEY_CLEANUP_MIN_FIRMWARE) {
+        snprintf(line, sizeof(line), "C5 FIRMWARE %u REQUIRED",
+            (unsigned)CERBERUS_WIFI_CHANNEL_SURVEY_CLEANUP_MIN_FIRMWARE);
+        ESP_RETURN_ON_ERROR(draw_centered(65, line, UI_BAD, 1), TAG,
+            "Wi-Fi survey firmware requirement failed");
+    } else if (!wifi_channel_survey_attempted &&
         wifi_channel_survey_error == ESP_ERR_INVALID_STATE) {
         ESP_RETURN_ON_ERROR(draw_centered(65, "WAITING FOR C5 RADIO",
             UI_MUTED, 1), TAG, "Wi-Fi live channel wait failed");
@@ -2369,12 +2484,15 @@ static esp_err_t draw_wifi_channel_survey_live(void)
         "5 GHZ"), TAG, "Wi-Fi 5 button failed");
     ESP_RETURN_ON_ERROR(draw_small_button(160, UI_WIFI_CONTROLS_Y, 68, 42,
         "NEXT"), TAG, "Wi-Fi channel next failed");
-    return draw_small_button(236, UI_WIFI_CONTROLS_Y, 76, 42, "AP LIST");
+    return draw_small_button(236, UI_WIFI_CONTROLS_Y, 76, 42,
+        wifi_channel_survey_claimed ?
+            (wifi_channel_survey_cleanup_requested ? "RETRY STOP" : "STOP") : "AP LIST");
 }
 
 static esp_err_t draw_wifi_channel_occupancy(void)
 {
-    if (c5_status.firmware_version >= CERBERUS_WIFI_CHANNEL_SURVEY_MIN_FIRMWARE)
+    if (c5_status.firmware_version >= CERBERUS_WIFI_CHANNEL_SURVEY_CLEANUP_MIN_FIRMWARE ||
+        wifi_channel_survey_error == ESP_ERR_NOT_SUPPORTED)
         return draw_wifi_channel_survey_live();
     char line[64];
     /* Channel history belongs to completed sweeps. A new C5 generation must
@@ -9035,7 +9153,7 @@ static void handle_wifi_tap(uint16_t x, uint16_t y)
             (void)refresh_wifi_defense_survey();
         } else if (x >= 84U && x < 152U) {
             wifi_mode = UI_WIFI_MODE_CHANNELS_24;
-            wifi_channel_survey_start_ui();
+            wifi_channel_survey_begin_ui();
         } else if (x >= 160U && x < 228U) {
             (void)export_wifi_radio_stats();
         } else if (x >= 236U && x < 312U) {
@@ -9087,7 +9205,7 @@ static void handle_wifi_tap(uint16_t x, uint16_t y)
             if (was_running) {
                 wifi_mode = packet_monitor_channel <= 14U ?
                     UI_WIFI_MODE_CHANNELS_24 : UI_WIFI_MODE_CHANNELS_5;
-                wifi_channel_survey_start_ui();
+                wifi_channel_survey_begin_ui();
             } else {
                 packet_monitor_last_poll = 0U;
                 packet_monitor_start_ui();
@@ -9110,7 +9228,7 @@ static void handle_wifi_tap(uint16_t x, uint16_t y)
             } else if (wifi_channel_survey_status.state != CERBERUS_WIFI_CHANNEL_SURVEY_RUNNING) {
                 wifi_channel_survey_attempted = false;
             }
-            wifi_channel_survey_start_ui();
+            wifi_channel_survey_begin_ui();
         } else if (x >= 84U && x < 152U) {
             if (wifi_mode != UI_WIFI_MODE_CHANNELS_5) {
                 if (!wifi_channel_survey_stop_ui()) return;
@@ -9118,9 +9236,9 @@ static void handle_wifi_tap(uint16_t x, uint16_t y)
             } else if (wifi_channel_survey_status.state != CERBERUS_WIFI_CHANNEL_SURVEY_RUNNING) {
                 wifi_channel_survey_attempted = false;
             }
-            wifi_channel_survey_start_ui();
+            wifi_channel_survey_begin_ui();
         } else if (x >= 160U && x < 228U) {
-            if (c5_status.firmware_version >= CERBERUS_WIFI_CHANNEL_SURVEY_MIN_FIRMWARE) {
+            if (c5_status.firmware_version >= CERBERUS_WIFI_CHANNEL_SURVEY_CLEANUP_MIN_FIRMWARE) {
                 uint8_t pages = (uint8_t)((wifi_channel_survey_status.result_count +
                     UI_WIFI_VISIBLE_ROWS - 1U) / UI_WIFI_VISIBLE_ROWS);
                 if (pages > 0U) wifi_channel_survey_page =
@@ -11760,7 +11878,7 @@ static void handle_tap(uint16_t x, uint16_t y)
                     wifi_mode = action == SENTINEL_GUIDE_OPEN_WIFI_CHANNELS ?
                         UI_WIFI_MODE_CHANNELS_24 : UI_WIFI_MODE_BASELINE;
                     wifi_baseline.checked = false;
-                    if (wifi_mode == UI_WIFI_MODE_CHANNELS_24) wifi_channel_survey_start_ui();
+                    if (wifi_mode == UI_WIFI_MODE_CHANNELS_24) wifi_channel_survey_begin_ui();
                     else (void)refresh_wifi_scan_status();
                 }
             }
@@ -12267,14 +12385,14 @@ void cerberus_ui_run(const cerberus_ui_config_t *config)
         bool channels_visible = current_page == UI_PAGE_WIFI &&
             (wifi_mode == UI_WIFI_MODE_CHANNELS_24 ||
              wifi_mode == UI_WIFI_MODE_CHANNELS_5) && !screen_asleep &&
-            c5_status.firmware_version >= CERBERUS_WIFI_CHANNEL_SURVEY_MIN_FIRMWARE;
+            c5_status.firmware_version >= CERBERUS_WIFI_CHANNEL_SURVEY_CLEANUP_MIN_FIRMWARE;
         if (channels_visible) {
             uint32_t previous_poll = wifi_channel_survey_last_poll;
             wifi_channel_survey_refresh((uint32_t)now_ms);
             if (previous_poll != wifi_channel_survey_last_poll)
                 ESP_ERROR_CHECK(draw_detail_page());
-        } else if (wifi_channel_survey_attempted) {
-            (void)wifi_channel_survey_stop_ui();
+        } else if (wifi_channel_survey_attempted || wifi_channel_survey_claimed) {
+            wifi_channel_survey_cleanup_ui((uint32_t)now_ms);
         }
         if(station_visible||station_busy()){
             uint32_t previous=station_last_poll;station_poll((uint32_t)now_ms,station_visible);

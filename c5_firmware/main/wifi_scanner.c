@@ -1441,8 +1441,12 @@ void cerberus_wifi_scanner_get_status(cerberus_wifi_scan_status_payload_t *statu
     xSemaphoreTake(scanner_mutex, portMAX_DELAY);
     *status = scan_status;
     /* Existing BLE/802.15.4 guards use scanner status to arbitrate Wi-Fi.
-     * The dedicated capture status distinguishes capture from AP inventory. */
-    if(atomic_load_explicit(&mac_radio_reserved,memory_order_acquire) || atomic_load_explicit(&csi_radio_reserved,memory_order_acquire) ||
+     * A queued survey and a failed survey disable both retain this exclusion.
+     * Do not add the survey to its own worker's competing-radio predicate:
+     * checked preempt is the explicit background-observer handoff. */
+    if(channel_survey_status.state == CERBERUS_WIFI_CHANNEL_SURVEY_RUNNING ||
+       atomic_load_explicit(&channel_survey_radio_reserved,memory_order_acquire) ||
+       atomic_load_explicit(&mac_radio_reserved,memory_order_acquire) || atomic_load_explicit(&csi_radio_reserved,memory_order_acquire) ||
        atomic_load_explicit(&remote_id_radio_reserved,memory_order_acquire) ||
        atomic_load_explicit(&capture_radio_reserved,memory_order_acquire) ||
        atomic_load_explicit(&packet_monitor_radio_reserved,memory_order_acquire))

@@ -3,9 +3,9 @@ static uint32_t dual_now_ms(void) { return (uint32_t)(esp_timer_get_time() / 100
 
 static void dual_expire_locked(void)
 {
-    /* A disconnected host cannot retain a completed bank indefinitely. RF is
-     * separately bounded by the existing eight-second scan callout. */
-    if (dual_attached && !dual_radio_active && scan_status.state != CERBERUS_BLE_SCAN_RUNNING &&
+    /* Expire only a quiescent bank. Failed SDK cancellation or pending controls
+     * must retain the exact owner until cleanup actually finishes. */
+    if (dual_attached && !scan_radio_owned_locked() &&
         (uint32_t)(dual_now_ms() - dual_last_contact_ms) >= CERBERUS_DUAL_BLE_ORPHAN_MS) {
         dual_attached = false;
         dual_track_seen = false;
@@ -38,7 +38,7 @@ static void dual_status_locked(uint32_t requested, int32_t error, cerberus_dual_
         out->state = scan_status.state;
         out->error_code = dual_error ? dual_error : scan_status.error_code;
         out->flags = CERBERUS_DUAL_BLE_ATTACHED |
-            ((scan_status.state == CERBERUS_BLE_SCAN_RUNNING || dual_radio_active) ? CERBERUS_DUAL_BLE_OWNED : 0U) |
+            (scan_radio_owned_locked() ? CERBERUS_DUAL_BLE_OWNED : 0U) |
             (MYNEWT_VAL(BLE_EXT_ADV) ? CERBERUS_DUAL_BLE_EXTENDED : 0U) |
             (dual_version >= 2U ? CERBERUS_DUAL_BLE_SNAPSHOTS : 0U);
     }
@@ -63,7 +63,7 @@ static void dual_start(const cerberus_dual_ble_start_t *r, cerberus_dual_ble_sta
         xSemaphoreGive(scanner_mutex);
         return; /* Lost START replies can be retried without another scan. */
     }
-    if (!error && (scan_status.state == CERBERUS_BLE_SCAN_RUNNING || dual_radio_active ||
+    if (!error && (scan_radio_owned_locked() ||
         dual_epoch_counter == UINT64_MAX)) error = ESP_ERR_INVALID_STATE;
     if (!error && (dual_job_highwater == UINT32_MAX || r->job_id != dual_job_highwater + 1U))
         error = ESP_ERR_INVALID_STATE;
@@ -221,7 +221,7 @@ static bool dual_snapshot_command(uint8_t command, const void *request,
                     dual_snapshot.replaced = scan_inventory.replaced;
                     dual_snapshot.dropped = scan_inventory.dropped;
                     dual_snapshot.inventory_enabled = scan_inventory.enabled;
-                    dual_snapshot.flags = (scan_status.state == CERBERUS_BLE_SCAN_RUNNING || dual_radio_active ?
+                    dual_snapshot.flags = (scan_radio_owned_locked() ?
                         CERBERUS_DUAL_BLE_SNAPSHOT_RUNNING : CERBERUS_DUAL_BLE_SNAPSHOT_COMPLETE) |
                         (MYNEWT_VAL(BLE_EXT_ADV) ? CERBERUS_DUAL_BLE_SNAPSHOT_EXTENDED : 0U);
                     dual_snapshot.valid = true;
@@ -394,7 +394,7 @@ bool cerberus_ble_dual_command(uint8_t command, const void *request,
         cerberus_dual_ble_row_request_t r; memcpy(&r, request, sizeof(r));
         cerberus_dual_ble_row_time_t out = {.job_id = binding.job_id, .age_ms = UINT32_MAX};
         if (valid && !r.reserved && scan_status.state == CERBERUS_BLE_SCAN_COMPLETE &&
-            !dual_radio_active && r.index < scan_status.stored_count) {
+            !scan_radio_owned_locked() && r.index < scan_status.stored_count) {
             const cerberus_ble_record_t *row = &scan_results[r.index];
             out.epoch = dual_epoch; out.index = r.index; out.generation = dual_generation;
             out.latest_rssi = row->latest_rssi; out.reports = row->reports_seen;
@@ -424,13 +424,13 @@ bool cerberus_ble_dual_command(uint8_t command, const void *request,
         command != CERBERUS_SPI_COMMAND_DUAL_BLE_STOP && command != CERBERUS_SPI_COMMAND_DUAL_BLE_RELEASE) {
         xSemaphoreGive(scanner_mutex); return false;
     }
-    bool owned = scan_status.state == CERBERUS_BLE_SCAN_RUNNING || dual_radio_active;
+    bool owned = scan_radio_owned_locked();
     if (valid && command == CERBERUS_SPI_COMMAND_DUAL_BLE_STOP && owned) {
         xSemaphoreGive(scanner_mutex);
         esp_err_t stop_error = stop_scan(true);
         xSemaphoreTake(scanner_mutex, portMAX_DELAY);
         valid = dual_matches_locked(&binding);
-        owned = scan_status.state == CERBERUS_BLE_SCAN_RUNNING || dual_radio_active;
+        owned = scan_radio_owned_locked();
         if (valid && stop_error == ESP_OK) dual_snapshot.valid = false;
     }
     cerberus_dual_ble_status_t out;

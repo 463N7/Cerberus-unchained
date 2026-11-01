@@ -18,6 +18,7 @@ static unsigned checks;
 #define BLE_HS_FOREVER 0
 #define BLE_NPL_OK 0
 #define BLE_HS_EOS 3
+#define BLE_HS_EALREADY 2
 #define ESP_LOGI(...) ((void)0)
 #define ESP_LOGW(tag,format,...) do { if(false) printf(format,__VA_ARGS__); } while(0)
 enum { ESP_OK, ESP_ERR_INVALID_ARG, ESP_ERR_INVALID_STATE, ESP_ERR_NOT_FINISHED };
@@ -69,7 +70,7 @@ static uint32_t dual_track_ms,dual_track_reports;
 static int8_t dual_track_rssi;
 static int32_t dual_error;
 static cerberus_ble_analyzer_counter_t dual_analyzer;
-static bool analyzer_callback_exhausted;
+#include "c5_ble_control_state.h"
 static void dual_expire_locked(void){CHECK(locked);}
 static uint8_t diagnostic_phase;
 static int64_t clock_us,parse_delay;
@@ -92,10 +93,12 @@ static void *nimble_port_get_dflt_eventq(void){return &mutex;}
 static void ble_npl_eventq_put(void *q,struct ble_npl_event *e){CHECK(q==&mutex&&e==&start_event);++queued;}
 static int ble_hs_id_infer_auto(int privacy,uint8_t *type){CHECK(!privacy);*type=0;return infer_error;}
 static int ble_gap_disc_cancel(void){return 0;}
+static int ble_gap_disc_active(void){return dual_radio_active;}
 static unsigned ble_npl_time_ms_to_ticks32(unsigned ms){return ms;}
 static int ble_npl_callout_reset(struct ble_npl_callout *c,unsigned ticks){CHECK(c==&scan_timeout_callout&&ticks==8000);return callout_error;}
 static bool cerberus_c5_test_running(void){return false;}
 static bool another_radio_operation_is_active(void){return false;}
+static esp_err_t cerberus_wifi_channel_survey_preempt(void){return ESP_OK;}
 #if TEST_EXTENDED
 static int ble_gap_ext_disc(uint8_t type,unsigned a,unsigned b,unsigned c,unsigned d,unsigned e,
     const struct ble_gap_ext_disc_params *one,const struct ble_gap_ext_disc_params *coded,
@@ -157,7 +160,7 @@ static void stale_delivery_and_saturation(void)
     CHECK(gap_event(&done,NULL)==0&&scan_status.state==CERBERUS_BLE_SCAN_RUNNING);
     struct ble_npl_event stale={.arg=old};unsigned runs=rf_starts;start_scan_event(&stale);CHECK(rf_starts==runs);
     parse_epoch_change=1;receive();CHECK(!watch_capture.status.reports);--scan_callback_epoch;
-    receive();CHECK(watch_capture.status.stored_count==1);scan_cancelled=true;finish_scan(0);
+    receive();CHECK(watch_capture.status.stored_count==1);scan_cancelled=true;finish_scan_for_epoch(0,scan_callback_epoch);
     CHECK(!watch_capture.qualifying_valid&&scan_status.state==CERBERUS_BLE_SCAN_IDLE);
     watch_capture_epoch=UINT64_MAX-1;start();receive();complete();CHECK(query().capture_epoch==UINT64_MAX);
     start();CHECK(!watch_capture.capture_epoch&&watch_capture_epoch==UINT64_MAX);receive();complete();
@@ -287,7 +290,7 @@ static void analyzer_actual_lifecycle(void)
     clock_us=10000000;CHECK(start_scan(true)==ESP_OK);struct ble_npl_event stale={.arg=old};
     start_scan_event(&stale);CHECK(!dual_analyzer.armed);
     CHECK(gap_event(&report,old)==0&&!dual_analyzer.reports);start_scan_event(&start_event);
-    clock_us+=1000;receive();CHECK(dual_analyzer.reports==1);scan_cancelled=true;finish_scan(0);
+    clock_us+=1000;receive();CHECK(dual_analyzer.reports==1);scan_cancelled=true;finish_scan_for_epoch(0,scan_callback_epoch);
     CHECK(dual_analyzer.finished&&scan_status.state==CERBERUS_BLE_SCAN_IDLE);
     for(unsigned fault=0;fault<3;++fault){
         dual_radio_active=false;dual_error=0;clock_us+=100000;
@@ -302,10 +305,9 @@ static void analyzer_actual_lifecycle(void)
     dual_radio_active=false;dual_error=0;scan_status.state=CERBERUS_BLE_SCAN_IDLE;
     scan_callback_epoch=UINT32_MAX;unsigned queued_before=queued;
     CHECK(start_scan(true)==ESP_ERR_INVALID_STATE&&queued==queued_before);
-    /* Ordinary semantics stay unchanged at wrap, but latch permanently stops
-     * Analyzer admission using callback tokens already used during this boot. */
-    dual_attached=false;CHECK(cerberus_ble_scanner_start()==ESP_OK);
-    CHECK(scan_callback_epoch==1&&analyzer_callback_exhausted);start_scan_event(&start_event);complete();
+    /* All receive modes fail closed before a callback token is reused. */
+    dual_attached=false;CHECK(cerberus_ble_scanner_start()==ESP_ERR_INVALID_STATE);
+    CHECK(scan_callback_epoch==UINT32_MAX&&queued==queued_before);
     dual_attached=true;CHECK(start_scan(true)==ESP_ERR_INVALID_STATE);
     dual_attached=false;dual_radio_active=false;
 }
@@ -313,7 +315,7 @@ static void analyzer_actual_lifecycle(void)
 static void family_actual_lifecycle(void)
 {
     dual_attached=true;dual_mode=CERBERUS_DUAL_BLE_FAMILY;dual_family=6;dual_version=2;
-    analyzer_callback_exhausted=false;scan_callback_epoch=100;
+    scan_callback_epoch=100;
     dual_radio_active=false;dual_error=0;scan_status.state=CERBERUS_BLE_SCAN_IDLE;
     memset(scan_family,0xa5,sizeof(scan_family));clock_us=10000000;
     CHECK(start_scan(true)==ESP_OK&&scan_inventory.enabled);
@@ -328,10 +330,10 @@ static void family_actual_lifecycle(void)
     }
     scan_status.state=CERBERUS_BLE_SCAN_IDLE;dual_error=0;unsigned queued_before=queued;
     for(unsigned exhausted=0;exhausted<2;++exhausted){
-        scan_callback_epoch=exhausted?100:UINT32_MAX;analyzer_callback_exhausted=exhausted!=0;
+        scan_callback_epoch=UINT32_MAX;
         CHECK(start_scan(true)==ESP_ERR_INVALID_STATE&&queued==queued_before&&!dual_radio_active);
     }
-    dual_attached=false;analyzer_callback_exhausted=false;
+    dual_attached=false;
 }
 static void ordinary_dispatch_once(void)
 {
@@ -361,7 +363,7 @@ static void response_actual_lifecycle(void)
 {
     for(unsigned mode=4;mode<=5;++mode){
         dual_attached=true;dual_mode=(uint8_t)mode;dual_family=mode==5?6:0;dual_version=2;
-        analyzer_callback_exhausted=false;scan_callback_epoch=100;dual_radio_active=false;dual_error=0;
+        scan_callback_epoch=100;dual_radio_active=false;dual_error=0;
         scan_status.state=CERBERUS_BLE_SCAN_IDLE;
         CHECK(start_scan(true)==ESP_ERR_INVALID_STATE); /* No allocation, no active RF. */
         dual_response=calloc(1,sizeof(*dual_response));CHECK(dual_response);clock_us=20000000;

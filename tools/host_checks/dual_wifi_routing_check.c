@@ -41,7 +41,7 @@ static int export_wifi_radio_stats(void) { return 0; }
 static int load_wifi_results(void) { ++legacy_loads; return -23; }
 static int c5_spi_link_get_wifi_connection_status(void *status) { (void)status;return 0; }
 static void packet_monitor_start_ui(void) {}
-static void wifi_channel_survey_start_ui(void) { assert(!pending_start);++surveys; }
+static void wifi_channel_survey_begin_ui(void) { assert(!pending_start);++surveys; }
 static int draw_detail_page(void) { return 0; }
 #include "dual_wifi_root_routes.h"
 

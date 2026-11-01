@@ -1,6 +1,6 @@
 # Cerberus Unchained
 
-Experimental Cerberus firmware for the expanded rev118 feature set: integrated
+Experimental Cerberus firmware with integrated
 wardriving, C5 Wi-Fi capture and analysis, S3 BLE discovery and tools, Remote ID
 receive workflows, AP/client navigation, and optional expansion radios.
 
@@ -9,8 +9,8 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev120`, paired with onboard
-C5 protocol firmware revision 68. No Unchained binary release is selected yet.**
+**Current source version: `0.1.0-dev.rev121`, paired with onboard
+C5 protocol firmware revision 69. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
 
@@ -40,6 +40,14 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev121 implements C5 receive cleanup and Channel Survey handoffs. Independent
+review, all 128 host suites, five native builds, resource measurements and
+matched package verification pass on the retained final inputs.
+The current Channel Survey workflow requires C5 firmware 69, although its
+unchanged wire commands originated in firmware 46. Rev113 remains the last
+verified installed build. See [rev121](docs/DUAL_RADIO_REV121.md) for evidence
+and limits.
 
 Rev120 is a local shared BLE host candidate replacing owner-only release with
 an atomically checked claim token. Existing scanner, central, advertiser,
@@ -289,7 +297,7 @@ Dual Fox Hunt, comparative
 speed, coverage and sustained lifecycle acceptance remain pending. See
 [dual-radio scanning and validation](docs/DUAL_RADIO_SCANNING.md).
 
-The rev82–rev93 contribution adds bounded Wi-Fi result transfer and recovery,
+The rev82-rev93 contribution adds bounded Wi-Fi result transfer and recovery,
 scan-list controls and passive SSID/trust review, BLE analysis and SD snapshots,
 Recon inventory and session recording, SD copy error handling, and a live
 Recent Networks viewer in the integrated Wardriving tab. C5 Wi-Fi and S3 BLE

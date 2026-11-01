@@ -49,6 +49,21 @@ source check, not proof of complete porting or physical acceptance.
   operation with host reset; broader SDK command serialization and physical
   concurrent-reset acceptance remain open. This does not establish that every
   host client or C5 ownership path is race-free.
+- **C5 receive control and Channel Survey:** a subsequent rev120 source audit
+  reproduced stale queued Stop/timeout publication into replacement scans,
+  false retained ownership after successful timer-failure cancellation, and
+  legacy failed-cancel admission of Wi-Fi while discovery remained active.
+  Channel Survey pending/running and retained cleanup was invisible to BLE
+  admission, with no UI retry after ERROR. Local rev121 implements these
+  corrections, with focused production-bound regressions and independent
+  source review complete. All 128 host suites, five native builds and matched
+  package verification pass; see [the milestone](DUAL_RADIO_REV121.md). The current Survey UI
+  requires C5 firmware 69's checked cleanup acknowledgement, while its wire
+  commands retain their original firmware 46 layout.
+  Existing survey generation8/band and unbound Stop do not prove full
+  cross-reboot or generation-reuse safety. Whole-device and physical acceptance
+  remain open; a single SPI command task is not proof of serialization with
+  asynchronous NimBLE callbacks or the survey worker.
 - **MAC Monitor:** its context/job/epoch guards already protect callback,
   start, stop and release paths. This audit found no equivalent reachable
   takeover defect; that is not a claim of complete physical acceptance.
@@ -88,7 +103,7 @@ or six-C5 backboard has been physically accepted.
 
 ## BLE persistence and external analysis
 
-Pinned `WiFiScan.cpp:4028–4131` saves/loads an AirTag JSON array with `mac`,
+Pinned `WiFiScan.cpp:4028-4131` saves/loads an AirTag JSON array with `mac`,
 hexadecimal `payload` and `payload_size`. The file omits address type,
 receiver, source epoch/time and ADV/RSP provenance. An importer must not invent
 those fields. Existing-MAC sightings update upstream RSSI/time without replacing

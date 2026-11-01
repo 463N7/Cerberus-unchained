@@ -11,10 +11,12 @@ env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(out / "zig-cache"))
 source = (root / "c5_firmware/main/ble_scanner.c").read_text()
 record_start = source.index("typedef struct {")
 (out / "c5_ble_watch_record_type.h").write_text(source[record_start:source.index("} cerberus_ble_record_t;", record_start) + len("} cerberus_ble_record_t;")])
+control_start = source.index("static uint32_t scan_start_pending_epoch,")
+(out / "c5_ble_control_state.h").write_text(source[control_start:source.index("static cerberus_ble_inventory_admission_t", control_start)])
 pieces = []
 for first, after in (
     ("static bool analyzer_observe(", "static int gap_event("),
-    ("static void set_control_error(", "static void stop_scan_event("),
+    ("static void set_control_error_for_epoch(", "static void stop_scan_event("),
     ("static esp_err_t start_scan(", "esp_err_t cerberus_ble_watch_get_status("),
     ("esp_err_t cerberus_ble_watch_get_timing(", "esp_err_t cerberus_ble_watch_get_activity("),
 ):

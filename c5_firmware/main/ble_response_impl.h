@@ -3,7 +3,7 @@
  * into this optional allocation. Stop/Release may free it during parsing. */
 static inline void response_free_locked(void)
 {
-    if (!dual_attached && !dual_radio_active && scan_status.state != CERBERUS_BLE_SCAN_RUNNING) {
+    if (!dual_attached && !scan_radio_owned_locked()) {
         free(dual_response); dual_response=NULL;
     }
 }
@@ -12,7 +12,7 @@ static inline void response_error_locked(void)
 {
     /* Keep the bound error/status lease for its caller, but no RF or callback
      * can use this context after a confirmed quiescent ERROR boundary. */
-    if (!dual_radio_active && scan_status.state==CERBERUS_BLE_SCAN_ERROR) {
+    if (!scan_radio_owned_locked() && scan_status.state==CERBERUS_BLE_SCAN_ERROR) {
         free(dual_response);dual_response=NULL;dual_snapshot.valid=false;
     }
 }
@@ -49,7 +49,7 @@ static bool __attribute__((noinline)) response_receive_event(const struct ble_ga
     uint8_t family_code=0U;
     xSemaphoreTake(scanner_mutex,portMAX_DELAY);
     const bool active=dual_attached && cerberus_dual_ble_response_mode(dual_mode);
-    if (!active || !dual_response || !epoch || epoch!=scan_callback_epoch ||
+    if (!active || !dual_response || !scan_epoch_current_locked(epoch) ||
         scan_status.state!=CERBERUS_BLE_SCAN_RUNNING) { xSemaphoreGive(scanner_mutex); return active; }
     session=dual_epoch; family_code=dual_family;
     if (!response) {
@@ -95,7 +95,7 @@ static bool __attribute__((noinline)) response_receive_event(const struct ble_ga
     cerberus_ble_ad_hints_t parsed;
     bool parsed_ok=valid && cerberus_ble_ad_hints_parse(d->data,d->length_data,&parsed);
     xSemaphoreTake(scanner_mutex,portMAX_DELAY);
-    if (!dual_response || !dual_attached || dual_epoch!=session || epoch!=scan_callback_epoch ||
+    if (!dual_response || !dual_attached || dual_epoch!=session || !scan_epoch_current_locked(epoch) ||
         scan_status.state!=CERBERUS_BLE_SCAN_RUNNING || dual_response->sequence!=sequence) {
         xSemaphoreGive(scanner_mutex); return true;
     }

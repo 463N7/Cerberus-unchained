@@ -70,8 +70,7 @@ static void response_test_free(void *p){if(p)++response_frees;free(p);}
 static esp_err_t start_scan(bool companion)
 {
     assert(companion && dual_attached && !held);
-    if(other_radio_busy||((dual_mode==CERBERUS_DUAL_BLE_ANALYZER||cerberus_dual_ble_family_mode(dual_mode)||cerberus_dual_ble_response_mode(dual_mode))&&
-        (analyzer_callback_exhausted||scan_callback_epoch==UINT32_MAX)))return ESP_ERR_INVALID_STATE;
+    if(other_radio_busy||scan_callback_epoch==UINT32_MAX)return ESP_ERR_INVALID_STATE;
     ++starts;++scan_status.generation;dual_generation=scan_status.generation;
     ++scan_callback_epoch;scan_status.state=CERBERUS_BLE_SCAN_RUNNING;
     scan_status.stored_count=0;scan_status.error_code=0;dual_radio_active=true;
@@ -492,7 +491,7 @@ static cerberus_dual_ble_analyzer_sample_t analyzer_sample(cerberus_dual_ble_bin
 static void analyzer_checks(void)
 {
     dual_attached=dual_radio_active=false;scan_status.state=CERBERUS_BLE_SCAN_IDLE;
-    dual_error=0;now_ms=300000;analyzer_callback_exhausted=false;
+    dual_error=0;now_ms=300000;
     cerberus_dual_ble_start_t start={.boot_id=dual_boot_id,.job_id=dual_job_highwater+1U,
         .version=2,.mode=CERBERUS_DUAL_BLE_ANALYZER};
     cerberus_dual_ble_status_t owner;
@@ -588,11 +587,11 @@ static void analyzer_checks(void)
     uint32_t saved_callback=scan_callback_epoch;
     for(unsigned exhausted=0;exhausted<2;++exhausted){
         start.job_id=dual_job_highwater+1U;
-        scan_callback_epoch=exhausted?saved_callback:UINT32_MAX;analyzer_callback_exhausted=exhausted!=0;
+        scan_callback_epoch=UINT32_MAX;
         command(CERBERUS_SPI_COMMAND_DUAL_BLE_START,&start,sizeof(start),&owner,sizeof(owner));
         assert(owner.error_code==ESP_ERR_INVALID_STATE&&!dual_attached&&!dual_radio_active);
     }
-    scan_callback_epoch=saved_callback;analyzer_callback_exhausted=false;
+    scan_callback_epoch=saved_callback;
     puts("C5 Analyzer actual service/GAP: typed original+partial counts, no parsing/inventory, full binding, BUSY, saturation, frozen finish, clock fault, Stop and orphan passed");
 }
 
@@ -732,12 +731,12 @@ static void family_checks(void)
     uint32_t old_callback=scan_callback_epoch;
     for(unsigned exhausted=0;exhausted<2;++exhausted){
         start.job_id=dual_job_highwater+1;start.reserved=6;
-        scan_callback_epoch=exhausted?old_callback:UINT32_MAX;analyzer_callback_exhausted=exhausted!=0;
+        scan_callback_epoch=UINT32_MAX;
         unsigned before=starts;
         command(CERBERUS_SPI_COMMAND_DUAL_BLE_START,&start,sizeof(start),&owner,sizeof(owner));
         assert(owner.error_code==ESP_ERR_INVALID_STATE&&!dual_attached&&!dual_radio_active&&starts==before);
     }
-    scan_callback_epoch=old_callback;analyzer_callback_exhausted=false;
+    scan_callback_epoch=old_callback;
     printf("C5 FAMILY actual callback/service: full255 all6, focused capacity, dequalification/rank0, immutable102/110/158, epoch/clock/exclusions/lifecycle passed; live=%zu frozen=%zu bytes\n",sizeof(scan_family),sizeof(dual_snapshot.family));
 }
 

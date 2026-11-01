@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the 124 host suites through the saved full-report BLE family checkpoint.
+"""Run the 128 registered host suites through the C5 ownership checkpoint.
 
 The checked-in synthetic fixtures need no board, radio, or private captures.
 Generated fixtures, native executables, previews, logs, and the result receipt
@@ -27,6 +27,10 @@ CHECKS = (
     'check_ui_directory_memory.py',
     'check_s3_wifi_scanner.py',
     'check_s3_ble_host_memory.py',
+    'check_radio.py',
+    'check_s3_ble_attack.py',
+    'check_c5_ble_lifecycle.py',
+    'check_channel_survey_lifecycle.py',
     'check_wifi_scan_band.py',
     'check_dual_wifi_scan.py',
     'check_dual_wifi_diagnostics.py',
@@ -185,8 +189,8 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=3, help="Parallel compiler jobs (default: 3)")
     args = parser.parse_args()
     names = (*CHECKS, *SERIAL_CHECKS)
-    if len(names) != 124 or len(set(names)) != 124:
-        parser.error("Expected 124 unique suites; do not silently skip a suite")
+    if len(names) != 128 or len(set(names)) != 128:
+        parser.error("Expected 128 unique suites; do not silently skip a suite")
     if args.list:
         for name in names:
             print(name)
@@ -213,7 +217,7 @@ def main() -> int:
     changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
     receipt = {
         "format": 1,
-        "suite_set": "rev120",
+        "suite_set": "rev121",
         "recorded_utc": datetime.now(timezone.utc).isoformat(),
         "status": "passed" if not changed and all(r["exit_code"] == 0 for r in results) else "failed",
         "hardware_validated": False,
