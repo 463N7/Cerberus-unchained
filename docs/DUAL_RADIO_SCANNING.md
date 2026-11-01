@@ -156,6 +156,87 @@ checks. Visual host previews verified the C5 list/details, and the Fox Hunt
 render test confirms that pending target changes show neither receiver's
 previous target sample under the new identity.
 
-No device was flashed, no over-the-air performance test was run, and no
-hardware acceptance is claimed. This checkpoint is a separate local follow-up
-to the submitted rev93 contribution.
+At that build checkpoint no device had been flashed and no hardware acceptance
+was claimed. The subsequent installation below is a separate evidence record.
+This development branch remains a local follow-up to the submitted rev93 contribution.
+
+## Installation and initial device checks — 2026-11-01 UTC
+
+The matched rev94 S3 application and C5 firmware 61 were installed on the
+connected Cerberus board. All three images for each programmed target passed
+the loader's hash verification. The running application identifies as Cerberus
+Unchained rev94, the C5 reports firmware 61 online, and the SD card is mounted.
+The previous S3 flash and all declared C5 partitions were backed up and their
+digests checked before programming. Private backups and serial logs remain
+local under `artifacts/device-rev94/`; they are not contribution assets.
+
+The shared esptool installation disappeared between the S3 backup read and its
+verification subprocess. No firmware had been overwritten at that point.
+An isolated esptool 4.11.0 environment completed verification and the paired
+installation. A subsequent local log-wording assertion was corrected after
+the tool had already returned success with a matching digest. Both earlier
+failure logs were preserved. This tool interruption was not a device failure.
+
+The owner reported that two ordinary Wi-Fi scans finished with results and the
+`S3: 2.4 GHz + C5: 5 GHz` assignment, then confirmed Wi-Fi Stop, restart and
+Back, followed by activity in the C5 BLE companion alongside S3 discovery.
+The subsequent console snapshot records three completed C5 Wi-Fi sweeps with
+no recorded scan failures. The two sampled completed banks contained only
+5 GHz records (nine and fourteen), with C5 durations of 3,402 and 3,403 ms.
+These confirm the C5's band assignment and repeat completion; they are not
+measured end-to-end UI latencies or a comparison against the previous firmware.
+
+| S3 diagnostic | Cold boot | First post-Wi-Fi snapshot | Active dual BLE |
+| --- | ---: | ---: | ---: |
+| Free internal bytes | 113,832 | 104,804 | 46,588 |
+| Minimum free internal bytes | 113,064 | 68,256 | 45,852 |
+| Largest free internal block | 69,632 | 31,744 | 31,744 |
+| Free PSRAM bytes | 1,428,324 | 1,410,108 | 1,382,068 |
+| Task count | 10 | 12 | 14 |
+
+The first scan initializes shared network/event infrastructure which survives
+driver cleanup; the cold and warm baselines are therefore distinct. These
+snapshots alone do not prove the absence of a leak. The exercised USB console
+stack low-water mark was 512 bytes; further native and runtime stack checks
+remain necessary when adding diagnostics. The valid crash record was already
+present before installation, while the new application reported no previous
+reset fault.
+
+During the BLE sample, S3 discovery retained 26 rows with no scanner error;
+the C5 independently reported its BLE-active radio state. The existing console
+does not expose the new companion's detailed bank and sweep state, so its
+visible activity is owner-reported. The SPI mutex-timeout counter increased
+from zero to one during these interactive checks; no driver error was recorded.
+The snapshot does not identify which request contended for that mutex.
+
+The owner then stopped BLE, left Bluetooth, and reported `S3 unavailable` in
+the subsequent Wi-Fi scan. Diagnostics confirmed that both S3 BLE discovery
+ownership and the host owner were released, while the host remained initialized
+and synchronized. Internal free memory remained 46,588 bytes: 18,948 below the
+scanner's 65,536-byte admission floor. This is a confirmed retained-memory
+limitation of rev94, so the intended split is not yet maintained after BLE use.
+The C5 fallback remains available; lowering the admission floor or assuming all
+BLE memory can move to PSRAM is not an established fix. This transition is the
+priority for the next candidate.
+
+Dual Fox Hunt, repaired post-Bluetooth split admission, mixed-mode transitions,
+sustained operation, and comparative timing remain separate acceptance checks.
+Earlier active Wi-Fi errors and full Marauder parity are not resolved by this
+scan-only evidence.
+
+## Full host matrix follow-up
+
+The first full run completed all 115 suites on stable inputs: 114 passed and
+the older relationship-navigation fixture failed to compile because it lacked
+the new retained-dual-view return flag. The fixture was updated without any
+firmware change. Its existing seven Back-state cases and seven explicit-only
+scan starts remain, with an added client detail -> clients -> AP -> retained
+dual-view case that rejects an implicit scan, extra relation read, or changed
+selection on return.
+
+The complete repeat run passed **115 of 115 suites** with no input changes,
+using Python 3.14.2 and Zig 0.14.1. The first failed run and the final logs and
+receipts are retained locally. These host results do not override the hardware
+memory limitation recorded above. No additional native build was needed for
+the fixture/documentation changes; the installed firmware inputs remain
+identical to the already-built matched rev94 package.

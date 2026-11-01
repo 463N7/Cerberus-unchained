@@ -35,7 +35,8 @@ static const cerberus_ui_widget_theme_t theme={0x0042,0x08A4,0x3F1B,0xE77F,0x7CB
 static ui_wifi_mode_t wifi_mode;
 static ui_page_t current_page=UI_PAGE_WIFI,tool_parent_page=UI_PAGE_MAIN;
 static unsigned allocations, frees, starts, steps, cancels, station_entries, writes;
-static unsigned launches, scan_starts, body_back_labels;
+static unsigned launches, scan_starts, body_back_labels, dual_reopens, dual_draws;
+static bool dual_wifi_return_to_view;
 static char footer_text[32];
 static uint8_t footer_scale;
 static uint16_t footer_x,footer_width;
@@ -80,6 +81,15 @@ static esp_err_t draw_small_button(uint16_t x,uint16_t y,uint16_t w,uint16_t h,c
 static esp_err_t draw_detail_page(void);
 static esp_err_t draw_current_page(void){return draw_detail_page();}
 static void return_to_launcher(void){++launches;current_page=tool_parent_page;}
+/* The real parent dispatcher owns the Back route. The dual-view module is
+ * checked separately; this boundary rejects any implicit rescan on return. */
+static void dual_wifi_live_open(bool start_scan)
+{
+    assert(!start_scan && current_page==UI_PAGE_WIFI && wifi_mode==UI_WIFI_MODE_TARGET);
+    ++dual_reopens;dual_wifi_return_to_view=false;wifi_mode=UI_WIFI_MODE_DUAL;
+}
+static esp_err_t dual_wifi_ui_draw(void)
+{assert(current_page==UI_PAGE_WIFI && wifi_mode==UI_WIFI_MODE_DUAL);++dual_draws;return ESP_OK;}
 static int unexpected_call(void){assert(!"Unrelated route called");return 0;}
 /* This fixture exercises Wi-Fi relationship navigation. The unrelated Recent
  * viewer is closed; retain the real parent dispatcher's guard and ordering. */
@@ -226,12 +236,45 @@ static void check_composite_navigation(const char *prefix)
         assert(steps==before_steps&&starts==before_starts); /* No old relation-reader work. */
         allocation_fail=false;
     }
-    assert(scan_starts==7U);
+    assert(scan_starts==7U && !dual_reopens && !dual_draws);
     /* A fresh AP publication after the explicit scan opens fresh client rows. */
     fixture(1,40);rows[0].station[5]=99;publish(40);wifi_relation_bind_selection(true);
     wifi_mode=UI_WIFI_MODE_TARGET;handle_tap(160,277);assert(wifi_mode==UI_WIFI_MODE_OBSERVED_CLIENTS);
     finish();assert(wifi_relation_ui->selected.count==1&&wifi_relation_ui->selected.bank.rows[0].station[5]==99);
     snapshot(prefix,"rescan-return-clients");
+}
+static void check_retained_dual_return(void)
+{
+    /* A selected AP opened from the retained dual bank must return there through
+     * the same real detail -> clients -> AP Back controls without starting RF. */
+    assert(wifi_mode==UI_WIFI_MODE_OBSERVED_CLIENTS && wifi_relation_ui &&
+        wifi_relation_ui->selected.valid && wifi_relation_ui->selected.count==1U);
+    cerberus_s3_wifi_relation_selection_t frozen=wifi_relation_ui->selected;
+    cerberus_c5_wifi_result_t frozen_ap=wifi_selected_result;
+    unsigned before_starts=starts,before_steps=steps,before_scans=scan_starts;
+    unsigned before_allocations=allocations,before_launches=launches;
+    uint64_t before_publication=wifi_relation_publication;
+    dual_wifi_return_to_view=true;
+    handle_tap(160,160);assert(wifi_relation_ui->detail);
+    handle_tap(160,442);
+    assert(wifi_mode==UI_WIFI_MODE_OBSERVED_CLIENTS && !wifi_relation_ui->detail &&
+        dual_wifi_return_to_view && !dual_reopens);
+    handle_tap(160,442);
+    assert(wifi_mode==UI_WIFI_MODE_TARGET && dual_wifi_return_to_view && !dual_reopens &&
+        !wifi_relation_queued && !wifi_relation_ui->reading);
+    handle_tap(160,442);
+    assert(wifi_mode==UI_WIFI_MODE_DUAL && !dual_wifi_return_to_view &&
+        dual_reopens==1U && dual_draws==1U);
+    actual_scan_page_selection();
+    assert(live_session.desired==SENTINEL_SCAN_NONE);
+    sentinel_scan_command_t command=sentinel_scan_session_step(&live_session,3000U,
+        (sentinel_scan_observation_t){.valid=true,.tool=SENTINEL_SCAN_NONE,.state=SENTINEL_SCAN_COMPLETE});
+    assert(command.kind==SENTINEL_SCAN_COMMAND_NONE);
+    assert(starts==before_starts && steps==before_steps && scan_starts==before_scans &&
+        allocations==before_allocations && launches==before_launches &&
+        wifi_relation_publication==before_publication);
+    assert(!memcmp(&frozen,&wifi_relation_ui->selected,sizeof(frozen)) &&
+        !memcmp(&frozen_ap,&wifi_selected_result,sizeof(frozen_ap)));
 }
 int main(int argc,char **argv)
 {
@@ -292,7 +335,8 @@ int main(int argc,char **argv)
     old_starts=starts;wifi_relation_retry();wifi_relation_tick((uint32_t)(clock_us/1000),true,true);
     assert(starts==old_starts&&!wifi_relation_queued); /* Failed capture proof forbids generation-only retry. */
     check_composite_navigation(argv[1]);
+    check_retained_dual_return();
     wifi_relation_publication=UINT64_MAX;wifi_relation_publish(2,NULL,ESP_ERR_TIMEOUT);assert(wifi_relation_exhausted&&!wifi_relation_publication&&!wifi_relation_queued);
     wifi_relation_publish(3,NULL,ESP_ERR_TIMEOUT);assert(!wifi_relation_publication);
-    free(wifi_relation_ui);puts("Actual passive relationship UI: composite parent header/body/footer and dispatch; seven pending/loading/ready/detail/empty/error/OOM Back paths, 2x full-width labels, body Back removed, cached list return and seven explicit-only scan starts; one-step reads, immutable AP selection, generation wrap, cancellation, allocation recovery, per-direction signal, privacy and bounded CSV passed.");
+    free(wifi_relation_ui);puts("Actual passive relationship UI: composite parent header/body/footer and dispatch; seven pending/loading/ready/detail/empty/error/OOM Back paths, 2x full-width labels, body Back removed, cached list return and seven explicit-only scan starts, retained dual-view Back return without scan/read/selection changes; one-step reads, immutable AP selection, generation wrap, cancellation, allocation recovery, per-direction signal, privacy and bounded CSV passed.");
 }

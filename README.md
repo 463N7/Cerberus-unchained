@@ -45,8 +45,14 @@ Rev94 adds adaptive dual-radio scanning: Wi-Fi-only scans use S3 for 2.4 GHz
 and C5 for 5 GHz when both are available; ordinary BLE discovery and fox hunting
 gain a separate C5 receiver alongside S3. Mixed Recon and Wardriving keep C5
 Wi-Fi plus S3 BLE. Receiver provenance, bounded memory, Stop/Back recovery and
-fresh AP selection checks are part of the implementation. On-device speed,
-coverage and lifecycle acceptance remain pending. See
+fresh AP selection checks are part of the implementation. The paired rev94
+build is installed on the development board; the owner confirmed completed
+split Wi-Fi scans, Wi-Fi Stop/restart/Back and activity on both BLE receivers.
+Diagnostics confirm repeated C5 5 GHz sweeps and active S3 BLE discovery.
+A confirmed limitation remains: after BLE use, the initialized S3 Bluetooth
+host retains enough internal memory to force Wi-Fi onto the C5 fallback.
+Repairing that transition is the next priority. Dual Fox Hunt, comparative
+speed, coverage and sustained lifecycle acceptance remain pending. See
 [dual-radio scanning and validation](docs/DUAL_RADIO_SCANNING.md).
 
 The rev82–rev93 contribution adds bounded Wi-Fi result transfer and recovery,
@@ -58,8 +64,8 @@ observations without another radio scan or worker task.
 
 The local rev93 checkpoint recorded 107 passing host suites and five firmware
 targets. Its installed-board evidence belongs to that original development
-checkpoint; the Unchained-branded contribution has separate build/test results
-and has not been flashed for new hardware acceptance. See the
+checkpoint; the Unchained-branded rev93 contribution was unflashed at submission.
+The later rev94 installation has the limited acceptance described above. See the
 [rev93 contribution and validation summary](docs/CONTRIBUTION_REV93.md).
 
 Reported Wi-Fi **NO MEM**, **Association Sleep**, and **Bad Message** failures
