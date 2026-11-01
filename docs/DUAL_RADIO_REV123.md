@@ -1,13 +1,15 @@
 # Rev123: retained Find My JSON interchange
 
-This local candidate adds Marauder-compatible retained-list import, offline
+Rev123 adds Marauder-compatible retained-list import, offline
 inspection, copy save and export from Cerberus BLE snapshots. The source
-version is `0.1.0-dev.rev123`; C5 capability revision remains 69. Rev113 is
-the last verified installed build. Source implementation, focused codec and
-worker/storage and UI checks, and independent reviews are complete. The first
+version is `0.1.0-dev.rev123`; C5 capability revision remains 69. The matched
+rev123 update is now installed, with paired boot, display buffering and SD mount
+verified. Source implementation, focused codec, worker/storage and UI checks,
+and independent reviews are complete. The first
 complete 132-suite host run passed on 1,096 unchanged inputs. All five native
 builds, the linked resource audit and matched package verification pass. Rev123
-remains a local, unflashed candidate; these are software/package checks.
+has separate software/package and installation evidence; physical feature
+acceptance remains pending.
 
 ## Reference and scope
 
@@ -199,3 +201,57 @@ Full live-list persistence parity, complete received payload retention beyond
 existing previews, continuous callback history, AP/SSID list persistence and
 broader backup/restore remain separate work. The ledger keeps its existing
 partial/hardware/review statuses until the relevant outcomes are proven.
+
+## Verified installation and read-only SD check
+
+The matched package above was installed on 2026-11-01. The built source commit
+is `d86210fe92f1c7ee7169b262bf992f1059cd15ea`; later installation wording is an
+editorial change, not a rebuild. Fresh first-two-MiB backups of both chips were
+read back and verified against the installed rev113 images before their
+replacement. That backup range covers every erase-rounded write; higher flash
+was not erased. The temporary bridge, C5 and final S3 each have three verified
+image writes and a separate receipt. Recovery was not needed.
+
+`artifacts/device-rev123/installation-receipt.json` records the accepted outcome;
+its SHA-256 is
+`3fa21b9eb60f5d52e218594cc9582c7a644fdc27e2035c8b5e10a1c05f53baa1`.
+The earlier local-milestone receipt retains `installed: false` because it records
+the state at packaging; it is not rewritten to imply installation was already
+part of the build evidence.
+
+Accepted boot and settled captures were 42.55 seconds apart. Both report S3
+rev123, C5 firmware 69, display buffering enabled, mounted SD, no previous reset
+fault and no active radio/recording/archive operation. C5 uptime and SPI
+exchanges advanced without a restart or growth in checked error counters.
+The four initial READY timeouts and four legacy fallbacks were present at
+startup and stayed unchanged; mutex, READY-fall, READY-high and driver errors
+were zero. This is sampled idle evidence, not a sustained-load test.
+
+The first capture arrived at 3,395 ms, while the console was available but the
+main UI had not allocated its framebuffers after the splash interval. It failed
+the buffering acceptance gate and is preserved under
+`artifacts/device-rev123/early-boot`. Subsequent captures passed without another
+reset or firmware change. The failed early sample is not used as accepted boot
+evidence.
+
+Two read-only `resources` checks read the same 6,333,004-byte SD recon database,
+returned `ESP_OK`, and resolved the known `00:00:0C` prefix to Cisco Systems,
+Inc. Both reads returned SHA-256
+`bb6a366efd96e1f562a3ce235ce84b115d1c4c295be09e92844dacd6c8cc2357`.
+This verifies accessibility, repeated hashing and one known-prefix lookup; it
+does not validate every database row or the new JSON save/reopen workflow.
+
+After the first resource check, the settled and final idle samples were
+identical: 132,576 bytes of internal free memory, a 90,112-byte largest internal
+block, 1,423,452 bytes of free PSRAM, ten tasks and 572 bytes of observed console
+stack low-water. The initial 4,100-byte PSRAM decrease is consistent with the
+existing lazily retained 4,096-byte vendor scratch allocation plus overhead;
+the initial 236-byte internal decrease is unattributed. These samples do not
+prove long-term leak freedom or worst-case stack margin. The supplemental
+capture bindings and limits are in
+`artifacts/device-rev123/postboot-resources.json`.
+
+No touchscreen or radio feature was exercised during this installation.
+Cold first-use Bluetooth admission, concurrent receive behavior, Stop/Back/retry,
+real-card native/JSON save and reopen, GPS input, the six-C5 backboard and
+sustained-load behavior remain acceptance work. No PR or release was published.

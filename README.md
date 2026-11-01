@@ -53,9 +53,17 @@ and the linked resource audit pass. S3 fixed data/BSS increases by 32 bytes,
 C5 is unchanged, and optional JSON viewer/worker allocations total 68,200 bytes
 before allocator overhead and other retained stores. Matched package build
 and verify-only checks pass for three targets and nine images. See
-[rev123](docs/DUAL_RADIO_REV123.md) for the exact local package and evidence. Rev113
-remains the last verified installed build. This offline interchange does not
-restore imported records into live discovery or establish full Marauder parity.
+[rev123](docs/DUAL_RADIO_REV123.md) for the exact local package and evidence.
+The matched rev123/C5 firmware69 update is installed with verified image writes,
+paired application boot, display buffering and mounted SD. A second idle capture
+more than 42 seconds later confirms the settled boot state. Physical RF,
+touchscreen, save/reopen, GPS and sustained-load acceptance remain pending.
+This offline interchange does not restore imported records into live discovery
+or establish full Marauder parity.
+
+The rev114–122 source milestones below are included in installed rev123. Their
+individual checkpoint documents preserve the evidence and installation status
+recorded when each milestone was completed.
 
 Rev122 implements integrated GPS DATA and received-NMEA views, independent GGA
 metadata freshness and retained UART cleanup. GPS remains optional and OFF
@@ -65,60 +73,55 @@ cleanup. All 130 host suites, five native builds, the linked resource audit and
 matched package verification pass. Measured S3 fixed data/BSS grows by 128 bytes;
 the optional trace and display copy use 2,624 bytes of PSRAM, excluding allocator
 overhead. C5 fixed data/BSS is unchanged. See
-[rev122](docs/DUAL_RADIO_REV122.md). No GPS module is attached, and rev113 remains
-the last verified installed build. This is not a full-parity or physical
-acceptance claim.
+[rev122](docs/DUAL_RADIO_REV122.md). No GPS module is attached. This is not a
+full-parity or physical acceptance claim.
 
 Rev121 implements C5 receive cleanup and Channel Survey handoffs. Independent
 review, all 128 host suites, five native builds, resource measurements and
 matched package verification pass on the retained final inputs.
 The current Channel Survey workflow requires C5 firmware 69, although its
-unchanged wire commands originated in firmware 46. Rev113 remains the last
-verified installed build. See [rev121](docs/DUAL_RADIO_REV121.md) for evidence
-and limits.
+unchanged wire commands originated in firmware 46. See
+[rev121](docs/DUAL_RADIO_REV121.md) for evidence and limits.
 
-Rev120 is a local shared BLE host candidate replacing owner-only release with
+Rev120 replaces owner-only shared BLE host release with
 an atomically checked claim token. Existing scanner, central, advertiser,
 Radio Lab and Wardriving callers use the exact lease. See
 [rev120](docs/DUAL_RADIO_REV120.md) for validation and acceptance limits.
 
-Rev119 is a local Wardriving candidate binding S3 BLE acquisition, completed
+Rev119 binds Wardriving S3 BLE acquisition, completed
 evidence and cleanup to an exact passive scan. Unresolved cleanup stays in
-STOPPING. See [rev119](docs/DUAL_RADIO_REV119.md) for validation and limits;
-rev113 remains the last verified installed baseline.
+STOPPING. See [rev119](docs/DUAL_RADIO_REV119.md) for validation and limits.
 
-Rev118 is a local Recon candidate binding S3 acquisition, completed evidence
+Rev118 binds Recon S3 acquisition, completed evidence
 and cleanup to an accepted passive scan, while retaining independent C5 Wi-Fi
-scheduling. Rev113 remains installed. See [rev118](docs/DUAL_RADIO_REV118.md)
-for the candidate's validation status and acceptance limits.
+scheduling. See [rev118](docs/DUAL_RADIO_REV118.md)
+for validation status and acceptance limits.
 
 Rev117 binds S3 Fox Hunt callbacks and cleanup to its exact tracking scan,
-retaining independent C5 tracking and source-selective retry. It is a local
-candidate; rev113 remains installed. See [rev117](docs/DUAL_RADIO_REV117.md).
+retaining independent C5 tracking and source-selective retry. See
+[rev117](docs/DUAL_RADIO_REV117.md).
 The [coverage ledger](docs/MARAUDER_COVERAGE_LEDGER.md) now distinguishes these
-local receive milestones from installed and physically accepted behavior;
+receive milestones from installation and physical acceptance;
 [remaining-work notes](docs/RECEIVE_REMAINING_GAPS.md) record the broader audit.
 
 Rev116 gives BLE Analyzer independent receiver intent and retry, and binds S3
-Analyzer callbacks and cleanup to its exact scan. It is a local candidate;
-rev113 remains installed. See [rev116](docs/DUAL_RADIO_REV116.md) for validation
-and acceptance limits.
+Analyzer callbacks and cleanup to its exact scan. See
+[rev116](docs/DUAL_RADIO_REV116.md) for validation and acceptance limits.
 
 Rev115 makes ordinary Bluetooth discovery intent independent of either
 receiver's failure, adds source-specific retries and preserves Stop/navigation
-through release. It is a local candidate; rev113 remains installed. See
+through release. See
 [rev115](docs/DUAL_RADIO_REV115.md) for validation and acceptance limits.
 
 Rev114 moves the dedicated Find My Monitor onto the existing S3 and C5
 discovery owners, with separate receiver status, frozen row selection and
-retained SD evidence. It is a local candidate; rev113 remains installed.
-See [rev114](docs/DUAL_RADIO_REV114.md) for the candidate's validation and
-physical acceptance limits.
+retained SD evidence. See [rev114](docs/DUAL_RADIO_REV114.md) for validation
+and physical acceptance limits.
 
 Rev113 adds optional compact C5 Bluetooth response-result transfer, preserving
 the existing frozen evidence and full-format compatibility. See
 [rev113](docs/DUAL_RADIO_REV113.md) for validation and limits. The matched
-rev113/C5 firmware68 update is installed with verified writes, paired boot and
+rev113/C5 firmware68 update was installed with verified writes, paired boot and
 mounted SD. Physical feature and performance acceptance remain pending.
 
 Rev112 addresses independent S3/C5 Bluetooth Fox Hunt startup, source-specific
@@ -148,7 +151,7 @@ offline HINTS. Older v1-v4 reports remain readable with missing evidence
 explicit. Source identity, original previews, S3 responses and historical
 ages keep their separate meanings. Implementation, validation and resource
 costs are tracked in [the rev109 checkpoint](docs/DUAL_RADIO_REV109.md).
-The matched rev109/C5 firmware66 update is installed with verified writes,
+The matched rev109/C5 firmware66 update was installed with verified writes,
 paired boot and mounted SD. Physical scan/saved-report acceptance remains
 pending; boot confirmation is not complete feature validation.
 

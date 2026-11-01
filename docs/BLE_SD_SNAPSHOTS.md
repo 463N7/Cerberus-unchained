@@ -1,11 +1,12 @@
 # BLE SD snapshots and offline analysis
 
-The last verified installed checkpoint is [rev113](DUAL_RADIO_REV113.md), including
-the v6 workflow below. Paired boot and SD mount are verified; physical
-save/reopen acceptance is still pending. Earlier sections retain their own
+The verified installed checkpoint is [rev123](DUAL_RADIO_REV123.md), including
+the v6 workflow and separate JSON interchange below. Paired application boot,
+display buffering and SD mount are verified; physical save/reopen and
+touchscreen acceptance are still pending. Earlier sections retain their own
 revision-specific evidence and installation history.
 
-## Rev123 source checkpoint: separate JSON interchange
+## Rev123: separate JSON interchange
 
 [Rev123](DUAL_RADIO_REV123.md) implements a separate offline viewer for Marauder
 AirTag JSON lists, canonical copy saves and compatibility export of complete
@@ -52,9 +53,10 @@ resource audit pass; S3 fixed data/BSS grows by 32 bytes and C5 is unchanged.
 The worker entry frame is 64 bytes (previously 48), with its existing 6,144-byte
 stack allocation unchanged; selected frames do not establish full-chain stack
 margin. The matched three-target, nine-image package and verify-only checks
-pass. Rev123 is not installed, and real-card save/reopen, cancellation, failure
-recovery and touchscreen acceptance remain
-unproven. The earlier revision-specific sections below retain their own scope.
+pass. The matched rev123/C5 firmware69 package is installed with paired boot,
+display buffering and SD mount verified. Real-card save/reopen, cancellation,
+failure recovery and touchscreen acceptance remain unproven. The earlier
+revision-specific sections below retain their own scope.
 
 ## Rev110 source checkpoint
 

@@ -1,6 +1,6 @@
 # Adaptive two-radio scanning
 
-## Current local checkpoint
+## Current installed checkpoint
 
 [Rev123](DUAL_RADIO_REV123.md) implements offline Find My JSON interchange
 over the existing serialized archive worker. Complete saved originals and
@@ -16,22 +16,26 @@ data/BSS grows by 32 bytes and C5 is unchanged. The optional JSON viewer and
 worker total 68,200 bytes before allocator overhead and other stores; keeping
 the native viewer during export brings those allocations to 129,312 bytes.
 These are allocation sizes, not runtime headroom. Matched package build and
-verify-only checks pass for the three-target, nine-image local package. The
-completed rev122 local checkpoint follows; rev113 remains the last verified
-installed build. Offline import is not load-to-live-list or complete raw-history parity.
+verify-only checks pass for the three-target, nine-image local package.
+The matched rev123/C5 firmware69 update is installed with verified image writes,
+paired application boot, display buffering and mounted SD. Two accepted idle
+captures more than 42 seconds apart confirm the settled boot state; they do not
+establish physical RF, touchscreen, storage-workflow, GPS or sustained-load
+acceptance. Offline import is not load-to-live-list or complete raw-history parity.
+The rev114–122 source milestones below are included in rev123; their checkpoint
+documents retain their original validation and installation history.
 
 [Rev122](DUAL_RADIO_REV122.md) implements integrated GPS DATA/received-NMEA
 observation through S3's existing UART owner while C5 remains available for
 Wardriving Wi-Fi. Independent GGA freshness, optional bounded trace storage
-and retained UART cleanup are part of this candidate. Implementation, focused
-checks and independent reviews are complete, including frozen paging with
+and retained UART cleanup are part of this source milestone. Implementation,
+focused checks and independent reviews are complete, including frozen paging with
 ages at copy and entire raw-line masking. All 130 host suites, five native
 builds, the linked resource audit and matched package verification pass.
 Measured S3 fixed data/BSS grows by 128 bytes; the optional trace/display copies
 total 2,624 bytes of PSRAM before allocator overhead. C5 fixed data/BSS is
 unchanged. Entry-frame measurements remain separate from runtime stack margin.
-Rev113 remains the last verified installed build; no new physical GPS or
-concurrent-radio performance acceptance is claimed.
+No physical GPS or concurrent-radio performance acceptance is claimed.
 
 [Rev121](DUAL_RADIO_REV121.md) implements C5 receive cleanup bound to private
 scan epochs, retained SDK ownership and Channel Survey admission/retry. Focused
@@ -39,47 +43,44 @@ regressions, independent review, all 128 host suites, five native builds and
 matched package verification pass. The current Survey workflow requires C5
 firmware 69 for checked cleanup acknowledgement; the original firmware 46 wire
 layout is unchanged. Survey's generation-byte/band checks remain limited
-fencing, not a full job token. Rev113 remains installed, and physical acceptance
-is separate.
+fencing, not a full job token. Physical acceptance remains separate.
 
 [Rev120](DUAL_RADIO_REV120.md) binds shared S3 BLE host release to an exact
 claim and preserves pending initialization reservations across reset. Existing
-host clients are migrated together. This is a local candidate; rev113 remains
-the last verified installed baseline.
+host clients are migrated together.
 
 [Rev119](DUAL_RADIO_REV119.md) extends exact S3 passive ownership to Wardriving
 acquisition, completed BLE evidence and cleanup. Its existing terminal source
-error policy remains explicit. This is a local candidate, not an installation.
+error policy remains explicit.
 
 [Rev118](DUAL_RADIO_REV118.md) develops exact S3 passive scan ownership for
 Recon acquisition, evidence and cleanup. C5 Wi-Fi retains its independent
-scheduler. This is a local candidate; rev113 remains installed.
+scheduler.
 
 [Rev117](DUAL_RADIO_REV117.md) adds exact S3 Fox Hunt scan ownership while
 preserving independent C5 tracking. The coverage ledger has been reconciled
-through these local candidates; [the remaining-work audit](RECEIVE_REMAINING_GAPS.md)
-records unresolved receiver, GPS, storage and device-info scope. Installed
-rev113 and pending physical acceptance remain separate.
+through these source milestones; [the remaining-work audit](RECEIVE_REMAINING_GAPS.md)
+records unresolved receiver, GPS, storage and device-info scope. Installation
+and physical feature acceptance remain separate.
 
 [Rev116](DUAL_RADIO_REV116.md) separates Analyzer receiver intent and retries,
-with exact S3 scan ownership for callback accounting and cleanup. It is a local
-candidate; the installed baseline remains rev113 and physical acceptance is
-pending.
+with exact S3 scan ownership for callback accounting and cleanup. Physical
+acceptance is pending.
 
 [Rev115](DUAL_RADIO_REV115.md) makes ordinary BLE discovery survive either
 receiver's failure, including an unavailable S3 store, with independent retries
-and shared release barriers for Stop, selection, navigation and saving. It is
-a local candidate; rev113 remains installed and physical acceptance is pending.
+and shared release barriers for Stop, selection, navigation and saving.
+Physical acceptance is pending.
 
-[Rev114](DUAL_RADIO_REV114.md) is the local dedicated Find My Monitor candidate.
+[Rev114](DUAL_RADIO_REV114.md) integrates the dedicated Find My Monitor.
 It reuses the shared discovery owners, retains separate S3/C5 evidence and
 keeps Stop/Back/sleep and saved-result navigation on the existing release paths.
-It has not replaced the installed rev113 baseline; physical acceptance is pending.
+Physical acceptance is pending.
 
 [Rev113](DUAL_RADIO_REV113.md) adds compact C5 response-result transfer with
-full-format fallback for older peers. The matched update is installed with
+full-format fallback for older peers. That matched update was installed with
 verified writes, paired boot and mounted SD; physical feature and performance
-acceptance remain pending. Rev112 below is the preceding installed baseline.
+acceptance remain pending. Rev112 below records its preceding installed baseline.
 
 [Rev112](DUAL_RADIO_REV112.md) addresses independent dual-receiver Fox Hunt
 startup, retry, signal/status display and retained cleanup. Its matched update

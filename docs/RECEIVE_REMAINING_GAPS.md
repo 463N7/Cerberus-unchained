@@ -8,18 +8,24 @@ behind or intervening commits. The response is retained at
 `artifacts/device-rev117/marauder-develop-check.json`. This is a point-in-time
 source check, not proof of complete porting or physical acceptance.
 
+The source milestones described below are now included in installed
+[rev123/C5 firmware69](DUAL_RADIO_REV123.md). Verified image writes, paired
+application boot, display buffering and SD mount establish the installed
+baseline; physical feature acceptance remains separate. The earlier milestone
+documents retain their original source and installation history.
+
 ## Receiver ownership
 
 - **Fox Hunt:** the rev116 tracker accepted matching-target callbacks from any
   current generic scanner epoch. Generic Start was permitted while the tracker
   remained enabled, and UI Stop checked host epoch plus the public generation
-  byte. The local rev117 candidate implements exact TRACK
+  byte. Rev117 implements exact TRACK
   attachment/start/state/stop/release binding. Physical acceptance remains
   pending. See [the milestone](DUAL_RADIO_REV117.md).
 - **Recon:** `sentinel_scan_session.c` has a remote-command ambiguity path that
   can accept a later RUNNING observation after a failed START. The S3 local
   call has a definite admission result: `ESP_ERR_INVALID_STATE` must not grant
-  ownership of an already-running foreign scanner. The local rev118 candidate
+  ownership of an already-running foreign scanner. Rev118
   adds an explicit local-rejection acknowledgement and exact passive lease
   binding across S3 acquisition, completed row/Watch evidence and cleanup.
   It retains C5's separate transport scheduler. See
@@ -27,7 +33,7 @@ source check, not proof of complete porting or physical acceptance.
   physical acceptance; the pure parallel scheduler fixture alone does not
   prove the native boundary. Whole-device/C5 ownership parity remains a
   separate audit, not a claim made by this S3 change.
-- **Wardriving:** the local rev119 candidate replaces generation-byte S3
+- **Wardriving:** rev119 replaces generation-byte S3
   ownership with the exact passive attachment, whole-bank capture and retained
   cleanup. See [the milestone](DUAL_RADIO_REV119.md) for validation and physical
   acceptance limits. Its worker still deliberately ends both receivers on a
@@ -39,7 +45,7 @@ source check, not proof of complete porting or physical acceptance.
   distinguish a returned status/copy timeout from an accepted scan's reported
   controller error and from an SD append timeout; rev119 still treats those
   returned S3 call failures as terminal for the recording session.
-- **Shared BLE host:** local rev120 replaces owner-only release with a nonreused
+- **Shared BLE host:** rev120 replaces owner-only release with a nonreused
   token, epoch and owner checked together under a short critical lock. The
   scanner, central, advertiser, Radio Lab and first-use Wardriving initializer
   use the new lease. Pending initialization remains reserved across reset, and
@@ -54,7 +60,7 @@ source check, not proof of complete porting or physical acceptance.
   false retained ownership after successful timer-failure cancellation, and
   legacy failed-cancel admission of Wi-Fi while discovery remained active.
   Channel Survey pending/running and retained cleanup was invisible to BLE
-  admission, with no UI retry after ERROR. Local rev121 implements these
+  admission, with no UI retry after ERROR. Rev121 implements these
   corrections, with focused production-bound regressions and independent
   source review complete. All 128 host suites, five native builds and matched
   package verification pass; see [the milestone](DUAL_RADIO_REV121.md). The current Survey UI
@@ -75,7 +81,7 @@ Pinned Marauder exposes GPS Data and NMEA Stream in `MenuFunctions.cpp` and
 The latter combines queued receiver sentences with generated GGA/RMC lines;
 it is not uniformly a raw UART stream.
 
-Local rev122 implements GPS DATA and received-NMEA subviews through the existing
+Rev122 implements GPS DATA and received-NMEA subviews through the existing
 optional `wardrive_gps_uart.c` owner. Its source work adds independent GGA
 metadata freshness, strict decimal parsing, bounded optional raw-line retention
 and retained cleanup after UART failures. Opening these views does not start
@@ -109,9 +115,9 @@ released; no new UART owner is introduced.
 
 Standalone acquisition, upstream generated-sentence/serial behavior, richer
 receiver metadata, PPS, POI, geofencing and tracker controls remain open. No GPS
-module or six-C5 backboard has been physically accepted. Rev122 is a local
-candidate, not evidence of live receiver or geotagged-file acceptance. Rev113
-remains the last verified installed build, and GPS/NMEA parity remains partial.
+module or six-C5 backboard has been physically accepted. The rev122 source work
+is included in installed rev123; paired boot is not evidence of live receiver
+or geotagged-file acceptance. GPS/NMEA parity remains partial.
 
 ## BLE persistence and external analysis
 
@@ -126,7 +132,7 @@ The read-only comparison at 2026-11-01 19:45:27 UTC again reported develop
 identical to `79cc6bcba1db6679baee1dab2b0c1ad5010e6363`; its response is retained
 in `artifacts/device-rev123/marauder-develop-check.json`.
 
-Local [rev123](DUAL_RADIO_REV123.md) implements this schema as a separate offline
+[Rev123](DUAL_RADIO_REV123.md) implements this schema as a separate offline
 import/view/save-copy model and exports qualifying complete packets from
 validated native `.BLE` documents. It preserves duplicate MAC records, order,
 empty payloads and opaque bytes without inventing absent provenance or inserting
@@ -146,7 +152,7 @@ data/BSS grows by 32 bytes, C5 is unchanged, and the optional JSON viewer plus w
 overhead and other stores. Retaining the native viewer during export raises
 that allocation sum to 129,312 bytes; no runtime headroom or SD-latency claim
 follows from these sizes. SD save/reopen, interrupted-write recovery and physical
-UI acceptance remain open; rev113 is still the last verified installed build.
+UI acceptance remain open despite verified paired boot and SD mount on rev123.
 
 The inspected ordinary upstream `RunBluetoothScan()` path does not open PCAP
 or a log. The shared CLI serial option and `Buffer.cpp` logging support alone
