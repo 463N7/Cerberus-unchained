@@ -43,12 +43,13 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 
 Rev113 adds optional compact C5 Bluetooth response-result transfer, preserving
 the existing frozen evidence and full-format compatibility. See
-[rev113](docs/DUAL_RADIO_REV113.md) for validation and limits. Rev112 remains
-the verified installed baseline; rev113 is built and package-verified, not flashed.
+[rev113](docs/DUAL_RADIO_REV113.md) for validation and limits. The matched
+rev113/C5 firmware68 update is installed with verified writes, paired boot and
+mounted SD. Physical feature and performance acceptance remain pending.
 
 Rev112 addresses independent S3/C5 Bluetooth Fox Hunt startup, source-specific
 retry, separate signal/status presentation and retained Stop/Back cleanup.
-The matched rev112/C5 firmware67 update is installed with verified writes,
+The preceding rev112/C5 firmware67 update was installed with verified writes,
 paired boot and mounted SD. See [rev112](docs/DUAL_RADIO_REV112.md) for its
 validation and remaining physical acceptance. Paired boot does not establish
 full feature acceptance or complete Marauder parity.

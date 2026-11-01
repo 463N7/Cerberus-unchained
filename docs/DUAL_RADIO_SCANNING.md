@@ -3,14 +3,15 @@
 ## Current local checkpoint
 
 [Rev113](DUAL_RADIO_REV113.md) adds compact C5 response-result transfer with
-full-format fallback for older peers. It is a local source checkpoint; the
-installed baseline and its physical acceptance limits remain rev112 below.
+full-format fallback for older peers. The matched update is installed with
+verified writes, paired boot and mounted SD; physical feature and performance
+acceptance remain pending. Rev112 below is the preceding installed baseline.
 
 [Rev112](DUAL_RADIO_REV112.md) addresses independent dual-receiver Fox Hunt
-startup, retry, signal/status display and retained cleanup. The matched update
-is installed with verified writes, paired boot and mounted SD; dual-receiver
-physical acceptance remains pending. Rev111 below is the preceding installed
-baseline, not evidence that rev112 Fox Hunt has been physically accepted.
+startup, retry, signal/status display and retained cleanup. Its matched update
+was installed with verified writes, paired boot and mounted SD; dual-receiver
+physical acceptance remains pending. Rev111 below records earlier work; its
+results do not establish rev112 or rev113 physical acceptance.
 
 [Rev111](DUAL_RADIO_REV111.md) was installed with paired boot and SD mount verified before rev112. It includes [rev110's](DUAL_RADIO_REV110.md) optional C5 BLE response collection and source-separated live/saved analysis, plus the callback cleanup. Passive remains the default, and S3 operates independently. Physical response and UI acceptance remain pending. The rev97 description below is historical; its physical results do not establish rev111 acceptance.
 
