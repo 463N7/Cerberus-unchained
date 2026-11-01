@@ -16,6 +16,10 @@ static void dual_ble_publish_diagnostics(uint64_t now, bool asleep)
     out.stopping = view.stopping; out.released = dual_ble_ui_released();
     out.extended_configured = view.extended;
     out.c5_error = view.error; out.c5_sweeps = view.sweeps; out.c5_rows = view.count;
+    /* Publication count/latency describe this discovery reader, never the
+     * number, freshness or arrival time of over-the-air advertisements. */
+    out.c5_snapshots = view.snapshots; out.c5_live_updates = view.live_updates;
+    out.c5_first_result_ms = view.first_result_ms; out.c5_has_first_result = view.has_first_result;
     if (dual_ble_ui_store) {
         out.c5_phase = dual_ble_ui_store->phase;
         out.c5_state = dual_ble_ui_store->remote.state;

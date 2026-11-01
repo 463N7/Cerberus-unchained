@@ -153,6 +153,42 @@ static void check_list_controls(const char *prefix)
     assert(!memcmp(&s3_before,&ble_selected_result,sizeof(s3_before)));
 }
 
+static void check_reader_metrics(const char *prefix)
+{
+    unsigned calls=companion_exchanges,radio_starts=starts,radio_stops=stops;
+    dual_ble_ui_detail=false;dual_ble_ui_offset=0;dual_ble_ui_recent_only=false;
+    dual_ble_ui_store->count=1;dual_ble_ui_store->error=0;
+    dual_ble_ui_store->live_updates=true;dual_ble_ui_store->snapshots=7;
+    dual_ble_ui_store->sweeps=0;dual_ble_ui_store->has_first_result=true;
+    dual_ble_ui_store->first_result_ms=627;dual_ble_ui_store->enabled=true;
+    strcpy(dual_ble_ui_store->rows[0].name,"Snapshot test peer");
+    dual_ble_ui_store->rows[0].callback_age_ms=0;
+    dual_ble_ui_store->rows[0].request_started_ms=(uint64_t)clock_ms;
+    dual_ble_ui_store->remote.flags=CERBERUS_DUAL_BLE_ATTACHED|CERBERUS_DUAL_BLE_OWNED;
+    dual_ble_ui_store->phase=5; /* Existing NAME-reading phase: rendering accepts overlapping flags. */
+    paint_list();
+    assert(strstr(drawn,"C5 LIVE / 1 OF 1 / 7 UPDATES"));
+    assert(strstr(drawn,"RECEIVING + READING / 0 RF SWEEPS"));
+    assert(strstr(drawn,"FIRST RESULTS IN 627 ms"));save(prefix,"live-reading");
+    dual_ble_ui_store->first_result_ms=0;paint_list();
+    assert(strstr(drawn,"FIRST RESULTS IN 0 ms")); /* Zero is valid only with the explicit flag. */
+    dual_ble_ui_store->has_first_result=false;paint_list();
+    assert(strstr(drawn,"NO NEW RESULTS THIS RUN")&&!strstr(drawn,"FIRST RESULTS IN"));
+    dual_ble_ui_store->count=0;paint_list();
+    assert(strstr(drawn,"WAITING FOR C5 DISCOVERIES")&&!strstr(drawn,"COMPLETED C5 SWEEP"));
+    dual_ble_ui_store->live_updates=false;dual_ble_ui_store->remote.flags=CERBERUS_DUAL_BLE_ATTACHED;
+    dual_ble_ui_store->sweeps=1;paint_list();
+    assert(strstr(drawn,"C5 WHOLE SWEEP")&&strstr(drawn,"READING / 1 RF SWEEPS"));
+    assert(strstr(drawn,"WAITING FOR A COMPLETED C5 SWEEP")&&!strstr(drawn,"UPDATES"));
+    save(prefix,"whole-sweep");
+    dual_ble_ui_store->live_updates=true;dual_ble_ui_store->snapshots=UINT32_MAX;
+    dual_ble_ui_store->sweeps=UINT32_MAX;dual_ble_ui_store->has_first_result=true;
+    dual_ble_ui_store->first_result_ms=UINT32_MAX;paint_list();
+    assert(strstr(drawn,"4294967295 UPDATES")&&strstr(drawn,"4294967295 RF SWEEPS"));
+    assert(strstr(drawn,"FIRST RESULTS IN 4294967295 ms"));save(prefix,"reader-metric-bounds");
+    assert(companion_exchanges==calls&&starts==radio_starts&&stops==radio_stops);
+}
+
 int main(int argc,char **argv)
 {
     check_list_order();
@@ -177,7 +213,7 @@ int main(int argc,char **argv)
     /* The production draw_detail_page clears the canvas before this helper. */
     assert(cerberus_display_fill_rect(0,0,320,480,UI_BACKGROUND)==ESP_OK);
     assert(dual_ble_ui_draw(true)==ESP_OK);
-    assert(strstr(drawn,"C5 PASSIVE")&&strstr(drawn,"C5 -70 dBm"));
+    assert(strstr(drawn,"C5 WHOLE SWEEP")&&strstr(drawn,"C5 -70 dBm"));
     assert(strstr(drawn,"STOP BOTH RECEIVERS")&&!strstr(drawn,"BEEP"));save(argv[1],"list");
     dual_ble_ui_store->rows[0].address[0]=99;
     assert(dual_ble_ui_tap(20,160)==DUAL_BLE_UI_REDRAW);
@@ -226,7 +262,8 @@ int main(int argc,char **argv)
     assert(screen[204*320+20]==UI_GOOD&&screen[204*320+160]==UI_PANEL);
     save(argv[1],"fox-bound-new-target");
     check_list_controls(argv[1]);
+    check_reader_metrics(argv[1]);
     heap_caps_free(dual_ble_ui_store);dual_ble_ui_store=NULL;
-    puts("Dual BLE UI: optional PSRAM/error isolation, bounded stable signal/name/scan ordering, conservative age filtering, expiry/pagination, frozen typed rows, no radio calls on controls, source-only raw preview, and no old-target S3/C5 samples while draining passed");
+    puts("Dual BLE UI: stable ordering/age controls, frozen typed rows, no RF calls on controls, live/whole-sweep reader metrics, concurrent receiving/reading, and old-target sample isolation passed");
     return 0;
 }

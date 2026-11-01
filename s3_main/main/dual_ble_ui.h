@@ -133,12 +133,14 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
         uint8_t order[CERBERUS_DUAL_BLE_CAPACITY];
         dual_ble_ui_visible_count = cerberus_dual_ble_list_order(dual_ble_ui_store ? dual_ble_ui_store->rows : NULL,
             view.count, dual_ble_ui_sort, dual_ble_ui_recent_only, now, order);
-        snprintf(line, sizeof(line), "C5 PASSIVE / %u OF %u STORED", dual_ble_ui_visible_count, view.count);
+        if (view.live_updates) snprintf(line, sizeof(line), "C5 LIVE / %u OF %u / %lu UPDATES",
+            dual_ble_ui_visible_count, view.count, (unsigned long)view.snapshots);
+        else snprintf(line, sizeof(line), "C5 WHOLE SWEEP / %u OF %u", dual_ble_ui_visible_count, view.count);
         ESP_RETURN_ON_ERROR(draw_centered(84, line, UI_TEXT, 1), TAG, "C5 BLE source");
         if (view.error) snprintf(line, sizeof(line), "C5 ERROR %ld / S3 VIEW AVAILABLE", (long)view.error);
-        else snprintf(line, sizeof(line), "%s / %lu SWEEPS%s", view.stopping ? "STOPPING" :
-            view.reading ? "READING" : view.enabled ? "SCANNING" : "STOPPED",
-            (unsigned long)view.sweeps, view.extended ? " / EXT ENABLED" : "");
+        else snprintf(line, sizeof(line), "%s / %lu RF SWEEPS", view.stopping ? "STOPPING" :
+            view.reading && view.receiving ? "RECEIVING + READING" : view.reading ? "READING" :
+            view.receiving ? "RECEIVING" : view.enabled ? "WAITING" : "STOPPED", (unsigned long)view.sweeps);
         ESP_RETURN_ON_ERROR(draw_centered(99, line, view.error ? UI_BAD : UI_MUTED, 1), TAG, "C5 BLE status");
         const char *sort_label = dual_ble_ui_sort == CERBERUS_DUAL_BLE_SORT_SIGNAL ? "SIGNAL >" :
             dual_ble_ui_sort == CERBERUS_DUAL_BLE_SORT_NAME ? "NAME A-Z >" : "SCAN ORDER >";
@@ -172,9 +174,13 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
             ++dual_ble_ui_painted_count;
         }
         if (!dual_ble_ui_visible_count) ESP_RETURN_ON_ERROR(draw_centered(208, view.count ?
-            "NO CONFIRMED RECENT C5 RESULTS" : "WAITING FOR A COMPLETED C5 SWEEP", UI_MUTED, 1), TAG, "C5 BLE empty");
+            "NO CONFIRMED RECENT C5 RESULTS" : view.live_updates ? "WAITING FOR C5 DISCOVERIES" :
+            "WAITING FOR A COMPLETED C5 SWEEP", UI_MUTED, 1), TAG, "C5 BLE empty");
         ESP_RETURN_ON_ERROR(draw_small_button(8, 326, 148, 32, "PREVIOUS"), TAG, "C5 BLE previous");
         ESP_RETURN_ON_ERROR(draw_small_button(164, 326, 148, 32, "NEXT"), TAG, "C5 BLE next");
+        if (view.has_first_result) snprintf(line, sizeof(line), "FIRST RESULTS IN %lu ms", (unsigned long)view.first_result_ms);
+        else snprintf(line, sizeof(line), "NO NEW RESULTS THIS RUN");
+        ESP_RETURN_ON_ERROR(draw_centered(360, line, UI_MUTED, 1), TAG, "C5 BLE reader latency");
     }
     return draw_button(20, 370, 280, 40, s3_enabled ? "STOP BOTH RECEIVERS" : "START BOTH RECEIVERS");
 }

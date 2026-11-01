@@ -44,6 +44,7 @@ typedef struct {
     bool rebind_ready;
     bool rebinding;
     bool rebind_cached; /* Validating an existing completed bank; no new RF. */
+    uint8_t rebind_source; /* Selected row's receiver; zero for an ordinary scan. */
 } cerberus_dual_wifi_status_t;
 
 typedef struct {

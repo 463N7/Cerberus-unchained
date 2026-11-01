@@ -17,7 +17,8 @@ static const cerberus_ui_widget_theme_t theme={0x0042,0x08A4,0x3F1B,0xE77F,0x7CB
 #define UI_WIDGET_THEME (&theme)
 enum {UI_WIFI_MODE_LIST,UI_WIFI_MODE_TARGET,UI_WIFI_MODE_CONNECTION,UI_WIFI_MODE_PASSWORD,
     UI_WIFI_MODE_NETWORK_SCAN,UI_WIFI_MODE_STATIONS,UI_WIFI_MODE_DETAIL,UI_WIFI_MODE_CAPTURE,
-    UI_WIFI_MODE_PACKET_MONITOR,UI_WIFI_MODE_CSI,UI_WIFI_MODE_OBSERVED_CLIENTS,UI_PAGE_FIELD_MENU};
+    UI_WIFI_MODE_PACKET_MONITOR,UI_WIFI_MODE_CSI,UI_WIFI_MODE_OBSERVED_CLIENTS,UI_PAGE_FIELD_MENU,
+    UI_WIFI_MODE_DUAL};
 static uint8_t wifi_selected_index;
 static unsigned wifi_mode=UI_WIFI_MODE_TARGET,current_page;
 static cerberus_c5_wifi_result_t wifi_selected_result,wifi_connection_target;
@@ -36,6 +37,13 @@ static uint32_t packet_monitor_last_poll;
 static unsigned monitor_entries;
 static unsigned csi_entries;
 static unsigned relation_entries;
+static bool dual_wifi_return_to_view;
+static unsigned dual_reopens;
+static void dual_wifi_live_open(bool start_scan)
+{
+    assert(!start_scan); /* Returning to the retained list never starts RF. */
+    ++dual_reopens;dual_wifi_return_to_view=false;wifi_mode=UI_WIFI_MODE_DUAL;
+}
 static esp_err_t csi_open_error;
 static const char *esp_err_to_name(esp_err_t error){return error==ESP_ERR_NO_MEM?"ESP_ERR_NO_MEM":"ERROR";}
 static esp_err_t csi_open_selected(void)
@@ -137,7 +145,18 @@ int main(int argc,char **argv)
     }
     wifi_selected_result.channel=36;
     save(argv[1],"csi-ready");
-    wifi_target_handle_tap(30,365);assert(wifi_mode==UI_WIFI_MODE_LIST);
+    wifi_target_handle_tap(30,365);assert(wifi_mode==UI_WIFI_MODE_LIST&&!dual_reopens);
+    /* Exercise the complete private action handler, not only the widget's
+     * action enum. Combined-list origin must survive through this control. */
+    wifi_mode=UI_WIFI_MODE_TARGET;dual_wifi_return_to_view=true;
+    strcpy(wifi_target_message,"PRIOR TARGET MESSAGE");
+    wifi_target_handle_tap(30,365);
+    assert(wifi_mode==UI_WIFI_MODE_DUAL&&dual_reopens==1&&!dual_wifi_return_to_view&&
+        !wifi_target_message[0]);
+    wifi_mode=UI_WIFI_MODE_TARGET;wifi_attack_selecting=true;
+    wifi_target_handle_tap(30,365);
+    assert(wifi_mode==UI_WIFI_MODE_LIST&&dual_reopens==1&&wifi_attack_selecting);
+    wifi_attack_selecting=false;
     strcpy(wifi_selected_result.ssid,"01234567890123456789012345678901");save(argv[1],"long-name");
     wifi_connection_status.state=CERBERUS_WIFI_CONNECTION_IDLE;
     wifi_selected_result.ssid[0]=0;v=wifi_target_view(id,metadata);assert(!v.can_connect);save(argv[1],"hidden");

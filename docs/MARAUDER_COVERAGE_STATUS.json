@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "checkpoint": "rev97-source-milestone",
-  "scope": "Editorial source/workflow status at rev97. Source review and host checks are not native-build, installation or RF acceptance. See DUAL_RADIO_SCANNING.md for current development and CONTRIBUTION_REV93.md for historical contribution scope.",
+  "checkpoint": "rev98-source-preparation",
+  "scope": "Editorial source/workflow status for rev98. Focused source/host evidence is not native-build, installation or RF acceptance. See DUAL_BLE_LIVE_SNAPSHOTS.md for the new C5 firmware 62 snapshot path and subsequent validation/installation evidence, DUAL_RADIO_SCANNING.md for current development, and CONTRIBUTION_REV93.md for historical contribution scope.",
   "status_definitions": {
     "partial": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open.",
     "pending": "The distinct upstream workflow has no verified implementation at this checkpoint.",
@@ -218,10 +218,10 @@
       "symbol": "BT_SCAN_ALL",
       "family": "ble_general_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/BLE_RECEIVE_LIST_PARITY.md",
-      "next_gap": "Ordinary BLE discovery has separate simultaneous S3 and C5 banks. Rev97 adds C5 signal/name/scan-order controls and conservative <=30s filtering with frozen typed selection; source and focused host checks are complete, physical controls acceptance is pending. Validate varied peers and prolonged sessions. C5 family/archive integration, upstream suboptions, S3 native extended reception and controlled C5 extended/coded receive acceptance remain open.",
-      "s3_role": "S3 owns live legacy BLE discovery, family evidence, presentation and storage; it also renders the isolated C5 companion bank and controls both session lifecycles.",
-      "c5_role": "C5 provides passive BLE observations in BLE-only mode, retaining independent typed identity, latest original-ADV RSSI and timing; mixed Recon/Wardriving retain C5 Wi-Fi plus S3 BLE.",
+      "cerberus_evidence": "docs/DUAL_BLE_LIVE_SNAPSHOTS.md",
+      "next_gap": "Ordinary BLE discovery has separate simultaneous S3 and C5 banks; installed rev97 adds C5 sort/recent controls with copied typed selection, whose physical acceptance remains pending. Rev98 source adds immutable C5 publications during the existing eight-second sweep, conservative lost-BEGIN timing, final-bank fencing and separate update/sweep/first-result counters. Focused coordinator, C5 owner and production-to-production host checks pass; native build, installed live updates, actual latency, repeated Stop-to-Wi-Fi transitions and prolonged-load acceptance remain open. C5 family/archive integration, upstream suboptions, S3 native extended reception and controlled C5 extended/coded receive acceptance remain incomplete or unverified.",
+      "s3_role": "S3 owns live legacy BLE discovery, family evidence, presentation and storage; it stages and validates the isolated C5 frozen bank, preserves original timing, reports current-run counters and controls both session lifecycles.",
+      "c5_role": "C5 provides passive BLE observations in BLE-only mode and firmware 62 freezes bounded immutable banks while its eight-second receiver continues. Typed identities, latest original-ADV bytes/RSSI and timing remain distinct from aggregate peer hints; mixed Recon/Wardriving retain C5 Wi-Fi plus S3 BLE.",
       "related_menu_entries": [],
       "related_cli_commands": [],
       "cerberus_code": [
@@ -242,11 +242,15 @@
         "s3_main/main/s3_ble_discovery_live_ui.h",
         "shared/dual_ble_protocol.h",
         "c5_firmware/main/ble_scanner.c",
+        "c5_firmware/main/dual_ble_service_impl.h",
         "s3_main/main/dual_ble_scan.c",
         "s3_main/main/dual_ble_scan.h",
         "s3_main/main/dual_ble_ui.h",
         "s3_main/main/dual_ble_live_ui.h",
-        "s3_main/main/dual_ble_list.h"
+        "s3_main/main/dual_ble_list.h",
+        "s3_main/main/dual_ble_diagnostics.h",
+        "tools/check_dual_ble.py",
+        "tools/host_checks/dual_ble_integration_check.c"
       ],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open."
     },

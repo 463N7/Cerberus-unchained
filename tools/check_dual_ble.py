@@ -7,13 +7,24 @@ import sys
 root = Path(__file__).resolve().parents[1]
 out = root / "artifacts/dual-ble-checks"
 out.mkdir(parents=True, exist_ok=True)
-env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(out / "zig-cache"))
+env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(out / "zig-cache"),
+           ZIG_LOCAL_CACHE_DIR=str(out / "zig-local"))
 source = (root / "c5_firmware/main/ble_scanner.c").read_text()
+record_end = source.index("} cerberus_ble_record_t;") + len("} cerberus_ble_record_t;")
+record_begin = source.rindex("typedef struct {", 0, record_end)
+(out / "c5_ble_record_type.h").write_text(source[record_begin:record_end])
+state_begin = source.index("static uint64_t dual_boot_id,")
+state_end = source.index("static void dual_expire_locked(void);", state_begin)
+(out / "c5_ble_dual_state.h").write_text(source[state_begin:state_end])
+legacy_begin = source.index("esp_err_t cerberus_ble_scanner_get_result(")
+legacy_end = source.index('#include "dual_ble_service_impl.h"', legacy_begin)
+(out / "c5_ble_legacy_getters.h").write_text(source[legacy_begin:legacy_end])
 begin = source.index("static void record_advertisement(")
 end = source.index("static void finish_scan_for_epoch(", begin)
 (out / "c5_ble_callback_impl.h").write_text(source[begin:end])
 for fixture, extra in (("dual_ble_check", [root / "s3_main/main/dual_ble_scan.c"]),
-                       ("dual_ble_owner_check", [])):
+                       ("dual_ble_owner_check", []),
+                       ("dual_ble_integration_check", [root / "s3_main/main/dual_ble_scan.c"])):
     exe = out / f"{fixture}.exe"
     subprocess.run([
         sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-UNDEBUG",

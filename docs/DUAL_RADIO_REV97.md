@@ -99,9 +99,16 @@ C5 scans in retained generation 1, no failures, `rebind_cached=0`, and a fresh
 all-band handoff (14 2.4 GHz plus 15 5 GHz rows) taking 7,079 ms. All owners
 were released; internal free RAM was 125,856 bytes and SPI mutex/driver errors
 were zero. This confirms navigation and fresh reacquisition, not cached reuse.
-The selected row's source label is being checked separately. Opening an S3
-row or any other fresh rebind replaces the C5 bank and makes the original
-retained list ineligible for reuse until Scan Again completes.
+The owner subsequently confirmed that 5 GHz rows show C5 and 2.4 GHz rows
+show S3, and again reported both C5 opens working. The second capture
+(`artifacts/device-rev97/accepted-c5-reuse.txt`) still shows retained generation
+1 and S3 job 1, with six successful C5 scans, no failures and no cached reuse.
+The latest fresh handoff took 7,220 ms and retained 18 2.4 GHz plus 13 5 GHz
+rows. This does not establish that an ordinary replacement split scan ran
+between the two checks. The navigation and cache-selection route remains under
+investigation; cached reuse is not hardware accepted. Opening an S3 row or
+any other fresh rebind replaces the C5 bank and makes the original retained
+list ineligible for reuse until an ordinary Scan Again completes.
 
 - C5/5 GHz AP tools and Back: same selected AP, original observation age,
   no additional C5 scan, followed by a successful normal split scan.

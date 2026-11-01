@@ -66,6 +66,7 @@ static esp_err_t dual_begin(bool rebinding)
     store->bank_received_us = -1;
     store->status.rebind_ready = false;
     store->status.rebind_cached = false;
+    store->status.rebind_source = 0U;
     if (!rebinding && store->status.generation == UINT32_MAX) return ESP_ERR_INVALID_STATE;
     cerberus_wifi_scan_band_response_t info;
     esp_err_t error = c5_spi_link_wifi_scan_band_info(&info);
@@ -132,6 +133,7 @@ esp_err_t cerberus_dual_wifi_scan_begin_rebind(const cerberus_dual_wifi_row_t *t
         store->matched_index = index;
         store->status.rebind_ready = false;
         store->status.rebinding = store->status.rebind_cached = true;
+        store->status.rebind_source = copy.source;
         store->status.state = CERBERUS_DUAL_WIFI_READING;
         store->status.error = store->status.c5_error = ESP_OK;
         store->status.elapsed_ms = 0U;
@@ -144,7 +146,10 @@ esp_err_t cerberus_dual_wifi_scan_begin_rebind(const cerberus_dual_wifi_row_t *t
         return ESP_OK;
     }
     esp_err_t error = dual_begin(true);
-    if (error == ESP_OK) store->target = copy;
+    if (error == ESP_OK) {
+        store->target = copy;
+        store->status.rebind_source = copy.source;
+    }
     return error;
 }
 
@@ -509,6 +514,7 @@ void cerberus_dual_wifi_scan_publish_diagnostics(int32_t ui_error)
         .cleanup_pending = status.cleanup_pending,
         .rebinding = status.rebinding, .rebind_ready = status.rebind_ready,
         .rebind_cached = status.rebind_cached,
+        .rebind_source = status.rebind_source,
         .s3_status_valid = local_valid,
         .s3_wifi_owner = (uint8_t)cerberus_s3_wifi_owner(),
     };

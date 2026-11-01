@@ -68,16 +68,19 @@ int main(void)
     cerberus_dual_ble_diagnostics_get(&out);assert(!memcmp(&out,&zero,sizeof(out)));
     unsigned locks=enters;cerberus_dual_ble_diagnostics_get(NULL);assert(enters==locks);
     dual_ble_publish_diagnostics(100,false);cerberus_dual_ble_diagnostics_get(&out);
-    assert(out.available&&out.sequence==1&&out.published_ms==100&&out.clock_valid);
+    assert(out.available&&out.sequence==1&&out.published_ms==100&&out.clock_valid&&out.version==2U);
     assert(!out.allocated&&out.released&&out.requested_mode==-1&&!scanner_reads);
     unsigned reads=scanner_reads+host_reads;print_dual_ble();
     assert(scanner_reads+host_reads==reads&&!held); /* Console only copies cached data. */
     assert(strstr(printed,"dual_ble_released=1")&&!strstr(printed,"address="));
+    assert(strstr(printed,"dual_ble_c5_live_updates=0")&&strstr(printed,"dual_ble_c5_has_first_result=0"));
 
     dual_ble_ui_store=&storage;storage.start.mode=CERBERUS_DUAL_BLE_TRACK;
     storage.start.job_id=1;storage.start.address_type=1;memcpy(storage.start.address,"ABCDEF",6);
     storage.remote.flags=CERBERUS_DUAL_BLE_ATTACHED|CERBERUS_DUAL_BLE_OWNED;
     storage.remote.state=CERBERUS_BLE_SCAN_RUNNING;storage.count=3;storage.sweeps=4;
+    storage.phase=5; /* Local reading and C5 reception may overlap. */
+    storage.live_updates=true;storage.snapshots=17;storage.first_result_ms=638;storage.has_first_result=true;
     storage.has_track=true;storage.track_request_ms=100;
     storage.track=(cerberus_dual_ble_track_t){.age_ms=20,.reports=5,.rssi=-71,.flags=3};
     current_page=UI_PAGE_BLE;ble_mode=UI_BLE_MODE_FOX_HUNT;dual_ble_ui_mode=1;
@@ -95,10 +98,18 @@ int main(void)
     source_sample.address_type=1;dual_ble_publish_diagnostics(130,false);cerberus_dual_ble_diagnostics_get(&out);
     assert(out.s3.target_matches&&out.s3.rssi==-44&&out.s3.reports==77);
     assert(out.c5.rssi==-71&&out.c5.reports==5&&out.c5.age_ms==50);
+    assert(out.c5_live_updates&&out.c5_snapshots==17&&out.c5_sweeps==4);
+    assert(out.receiving&&out.reading);
+    assert(out.c5_has_first_result&&out.c5_first_result_ms==638); /* Reader latency is not sample age. */
+    printed[0]=0;reads=scanner_reads+host_reads;print_dual_ble();
+    assert(scanner_reads+host_reads==reads);
+    assert(strstr(printed,"dual_ble_c5_snapshots=17")&&strstr(printed,"dual_ble_c5_sweeps=4"));
+    assert(strstr(printed,"dual_ble_c5_first_result_ms=638")&&strstr(printed,"first_new_nonempty_bank_not_RF_time"));
     unsigned long long prior_sequence=out.sequence;
     dual_ble_publish_diagnostics(90,false);cerberus_dual_ble_diagnostics_get(&out);
     assert(out.sequence==prior_sequence+1&&!out.clock_valid&&out.published_ms==130);
     assert(!out.s3.fresh&&!out.c5.fresh&&out.s3.age_ms==UINT32_MAX);
+    assert(out.c5_has_first_result&&out.c5_first_result_ms==638); /* Historical latency remains separate. */
     dual_ble_publish_diagnostics(140,false);cerberus_dual_ble_diagnostics_get(&out);assert(out.clock_valid);
     ++ble_fox_hunt_target.address[0];dual_ble_publish_diagnostics(150,false);cerberus_dual_ble_diagnostics_get(&out);
     assert(!out.s3.target_matches&&!out.c5.target_matches&&!out.s3.seen&&!out.c5.seen);
@@ -119,8 +130,12 @@ int main(void)
     printed[0]=0;reads=scanner_reads+host_reads;print_dual_ble();assert(scanner_reads+host_reads==reads);
     assert(strstr(printed,"dual_ble_s3_rssi=-44")&&strstr(printed,"independent_received_reports"));
     cerberus_dual_ble_diagnostics_t input=out;input.c5_sweeps=123;
+    input.c5_snapshots=UINT32_MAX;input.c5_first_result_ms=UINT32_MAX;input.c5_has_first_result=true;
     cerberus_dual_ble_diagnostics_publish(&input,200);input.c5_sweeps=999;
     cerberus_dual_ble_diagnostics_get(&out);assert(out.c5_sweeps==123);
+    assert(out.c5_snapshots==UINT32_MAX&&out.c5_first_result_ms==UINT32_MAX);
+    printed[0]=0;reads=scanner_reads+host_reads;print_dual_ble();assert(scanner_reads+host_reads==reads);
+    assert(strstr(printed,"dual_ble_c5_snapshots=4294967295")&&strstr(printed,"dual_ble_c5_first_result_ms=4294967295"));
     published.sequence=UINT64_MAX-1;cerberus_dual_ble_diagnostics_publish(&input,201);
     cerberus_dual_ble_diagnostics_get(&out);assert(out.sequence==UINT64_MAX&&!out.sequence_saturated);
     cerberus_dual_ble_diagnostics_publish(NULL,-1);cerberus_dual_ble_diagnostics_get(&out);

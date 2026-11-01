@@ -1,6 +1,6 @@
 # Cerberus Unchained
 
-Experimental Cerberus firmware for the expanded rev97 feature set: integrated
+Experimental Cerberus firmware for the expanded rev98 feature set: integrated
 wardriving, C5 Wi-Fi capture and analysis, S3 BLE discovery and tools, Remote ID
 receive workflows, AP/client navigation, and optional expansion radios.
 
@@ -9,8 +9,8 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev97` (candidate), paired with onboard
-C5 protocol firmware revision 61. No Unchained binary release is selected yet.**
+**Current source version: `0.1.0-dev.rev98` (in development), paired with onboard
+C5 protocol firmware revision 62. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
 
@@ -40,6 +40,15 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev98 adds coherent C5 Bluetooth snapshots during the existing
+eight-second listening sweep. S3 transfers and publishes a frozen bank while
+C5 continues receiving, with separate update/sweep counters and first-result
+reader timing. The existing completed-sweep path remains for older C5 peers.
+It also fixes CHANGE AP / SCAN returning a dual-origin AP to the legacy C5-only
+list. All 120 host suites and five native targets pass on matching unchanged
+inputs; installation is in progress. See [the rev98 checkpoint](docs/DUAL_RADIO_REV98.md)
+and [live BLE snapshot scope](docs/DUAL_BLE_LIVE_SNAPSHOTS.md).
 
 Rev97 adds a verified reuse path for a selected C5 Wi-Fi result: its completed
 scan session, full relationship proof and exact AP identity must still match

@@ -544,6 +544,12 @@ static void print_dual_ble(void)
         d.requested_mode, d.awake, d.allocated, d.enabled, d.attached, d.receiving,
         d.reading, d.stopping, d.released, d.c5_phase, d.c5_state, d.c5_generation,
         d.c5_sweeps, d.c5_rows, d.c5_read_index, d.extended_configured, d.c5_error);
+    console_printf("dual_ble_c5_live_updates=%u\r\ndual_ble_c5_snapshots=%" PRIu32
+        "\r\ndual_ble_c5_has_first_result=%u\r\ndual_ble_c5_first_result_ms=%" PRIu32 "\r\n"
+        "dual_ble_snapshot_scope=coherent_bank_publications_in_current_discovery_not_RF_sweeps\r\n"
+        "dual_ble_sweeps_scope=completed_RF_sweeps_in_current_public_receiver_run\r\n"
+        "dual_ble_first_result_scope=reader_latency_to_first_new_nonempty_bank_not_RF_time\r\n",
+        (unsigned)d.c5_live_updates, d.c5_snapshots, (unsigned)d.c5_has_first_result, d.c5_first_result_ms);
     console_printf("dual_ble_s3_initialized=%u\r\ndual_ble_s3_synced=%u\r\ndual_ble_s3_owner=%u\r\n"
         "dual_ble_s3_scan_cached=%u\r\ndual_ble_s3_state=%u\r\n"
         "dual_ble_s3_scan_error=%" PRId32 "\r\ndual_ble_s3_discovery_enabled=%u\r\n"
@@ -716,6 +722,7 @@ static void print_wifi_dual(void)
         v->split ? 1U : 0U, v->fallback ? 1U : 0U, v->elapsed_ms,
         v->cleanup_pending ? 1U : 0U, v->rebinding ? 1U : 0U, v->rebind_ready ? 1U : 0U);
     console_printf("wifi_dual_rebind_cached=%u\r\n", v->rebind_cached ? 1U : 0U);
+    console_printf("wifi_dual_rebind_source=%u\r\n", (unsigned)v->rebind_source);
     console_printf("wifi_dual_s3_count=%u\r\nwifi_dual_s3_total=%u\r\n"
         "wifi_dual_c5_count=%u\r\nwifi_dual_c5_total=%u\r\n"
         "wifi_dual_error=%" PRId32 "\r\nwifi_dual_ui_error=%" PRId32 "\r\n"

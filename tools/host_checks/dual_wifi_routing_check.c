@@ -3,17 +3,21 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
+#include "wifi_target_view.h"
 
 enum { UI_PAGE_WIFI=1, UI_WIFI_MODE_MENU=2, UI_WIFI_MODE_DUAL, UI_WIFI_MODE_MULTISSID,
     UI_WIFI_MODE_PINESCAN, UI_WIFI_MODE_FIELD_SURVEY, UI_WIFI_MODE_STATS, UI_WIFI_MODE_PACKET_MONITOR,
     UI_WIFI_MODE_BASELINE, UI_WIFI_MODE_DEFENSE, UI_WIFI_MODE_CONNECTION, UI_WIFI_MODE_CHANNELS_24,
-    UI_WIFI_MODE_LIST };
+    UI_WIFI_MODE_LIST, UI_WIFI_MODE_TARGET };
 enum { SENTINEL_GUIDE_OPEN_WIFI=1, SENTINEL_GUIDE_OPEN_WIFI_CHANNELS, SENTINEL_GUIDE_OPEN_WIFI_BASELINE };
 enum { CERBERUS_WIFI_CONNECTION_STAGING=1, CERBERUS_WIFI_CONNECTION_CONNECTED, CERBERUS_WIFI_CONNECTION_CONNECTING };
 #define SENTINEL_HUB_WIFI 1
 #define ESP_ERROR_CHECK(value) assert((value)==0)
 static unsigned current_page, wifi_mode, menu_item, dual_opens, dual_leaves, tap_count, scan_refreshes, surveys;
 static bool ui_capability_blocked, wifi_attack_selecting, pending_start, wifi_selection_valid;
+static bool dual_wifi_return_to_view;
+static char wifi_target_message[49];
 static struct { bool checked; } wifi_baseline;
 static struct { bool valid; } wifi_channel_current_identity;
 static struct { unsigned state; } wifi_connection_status;
@@ -23,7 +27,8 @@ static char wifi_export_message[10];
 static int wifi_connection_error, wifi_scan_error;
 static unsigned legacy_loads;
 static void dual_wifi_live_open(bool start)
-{ ++dual_opens; current_page=UI_PAGE_WIFI; wifi_mode=UI_WIFI_MODE_DUAL; pending_start=start; }
+{ ++dual_opens; current_page=UI_PAGE_WIFI; wifi_mode=UI_WIFI_MODE_DUAL;
+    pending_start=start; dual_wifi_return_to_view=false; }
 static void dual_wifi_live_tap(uint16_t x,uint16_t y) { (void)x;(void)y;++tap_count; }
 static void dual_wifi_ui_leave(void) { ++dual_leaves; pending_start=false; }
 static int sentinel_hub_hit_test(int hub,uint16_t x,uint16_t y) { (void)x;(void)y;assert(hub==SENTINEL_HUB_WIFI);return (int)menu_item; }
@@ -47,6 +52,7 @@ static void reset(void)
     ui_capability_blocked=wifi_attack_selecting=pending_start=wifi_selection_valid=false;
     wifi_connection_status.state=0;
     wifi_channel_current_identity.valid=false;legacy_loads=0;wifi_scan_error=0;
+    dual_wifi_return_to_view=false;wifi_target_message[0]=0;
 }
 int main(void)
 {
@@ -82,6 +88,33 @@ int main(void)
     assert(wifi_mode==UI_WIFI_MODE_DUAL&&dual_opens==1&&!pending_start&&!legacy_loads&&wifi_scan_error==-17);
     reset();wifi_mode=UI_WIFI_MODE_STATS;root_wifi_tap(260,380);
     assert(wifi_mode==UI_WIFI_MODE_LIST&&!dual_opens&&legacy_loads==1&&wifi_scan_error==-23);
-    puts("Dual Wi-Fi root routes: launcher/menu/guide use split view; special/connected/blocked routes preserve their behavior.");
+    /* The actual CHANGE AP / SCAN widget is at y364..393. Both this body
+       control and the separate global Back footer must return to the dual
+       list after a proved handoff, retaining rows without starting RF. */
+    for(unsigned footer=0;footer<2;++footer){
+        reset();wifi_mode=UI_WIFI_MODE_TARGET;dual_wifi_return_to_view=true;
+        strcpy(wifi_target_message,"PRIOR AP MESSAGE");
+        if(footer)root_target_back();else root_target_tap(150,378);
+        assert(wifi_mode==UI_WIFI_MODE_DUAL&&dual_opens==1&&!pending_start&&
+            !dual_wifi_return_to_view&&!legacy_loads&&!scan_refreshes);
+        if(!footer)assert(!wifi_target_message[0]);
+        /* A subsequent Scan Again is dispatched to the combined list's own
+           control, rather than the legacy C5-only scan handler. */
+        root_wifi_tap(240,445);assert(tap_count==1&&!legacy_loads&&!scan_refreshes);
+    }
+    /* Legacy and explicit AP-select origins keep their legacy list route. */
+    for(unsigned selecting=0;selecting<2;++selecting){
+        reset();wifi_mode=UI_WIFI_MODE_TARGET;wifi_attack_selecting=selecting!=0;
+        strcpy(wifi_target_message,"PRIOR AP MESSAGE");root_target_tap(150,378);
+        assert(wifi_mode==UI_WIFI_MODE_LIST&&!dual_opens&&!pending_start&&
+            !wifi_target_message[0]&&wifi_attack_selecting==(selecting!=0));
+        wifi_mode=UI_WIFI_MODE_TARGET;root_target_back();
+        assert(wifi_mode==UI_WIFI_MODE_LIST&&!dual_opens&&!pending_start);
+    }
+    /* The target row's gap/outer bounds cannot activate a return route. */
+    reset();wifi_mode=UI_WIFI_MODE_TARGET;dual_wifi_return_to_view=true;
+    root_target_tap(150,394);root_target_tap(11,378);root_target_tap(308,378);
+    assert(wifi_mode==UI_WIFI_MODE_TARGET&&dual_wifi_return_to_view&&!dual_opens);
+    puts("Dual Wi-Fi root routes: launcher/menu/guide and both AP return controls use split view; legacy/multiselect origins stay legacy; return never rearms RF.");
     return 0;
 }

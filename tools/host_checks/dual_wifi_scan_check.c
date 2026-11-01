@@ -235,6 +235,7 @@ static void check_cached_handoff(void)
         clock_ms += 10000; /* Reopening cannot freshen the original observation. */
         assert(cerberus_dual_wifi_scan_begin_rebind(&selected) == ESP_OK);
         assert(status().rebind_cached && status().rebinding && !status().cleanup_pending);
+        assert(status().rebind_source == CERBERUS_DUAL_WIFI_SOURCE_C5);
         drain(); no_new_rf();
         assert(status().rebind_ready && info_reads == infos && row_reads == read_count && proof_reads == proofs + 1U);
         assert(export_bank() == ESP_OK && exported_index == 7U && exported_handoff.reused);
@@ -310,6 +311,7 @@ static void check_cached_handoff(void)
         if (failed_info) info_error = ESP_ERR_TIMEOUT;
         esp_err_t error = cerberus_dual_wifi_scan_start();
         assert(error == (failed_info ? ESP_ERR_TIMEOUT : ESP_OK));
+        assert(status().rebind_source == 0U);
         if (!failed_info) cerberus_dual_wifi_scan_stop();
         drain(); assert(!store->bank_eligible); info_error = ESP_OK;
         assert(cerberus_dual_wifi_scan_begin_rebind(&selected) == ESP_OK && !status().rebind_cached);
@@ -357,6 +359,7 @@ int main(void)
     remote_rows[7] = selected.ap; /* Fresh C5 bank has an independently obtained index. */
     assert(cerberus_dual_wifi_scan_begin_rebind(&selected) == ESP_OK); drain();
     assert(status().rebind_ready && !status().rebinding && !status().cleanup_pending);
+    assert(status().rebind_source == CERBERUS_DUAL_WIFI_SOURCE_S3 && !status().rebind_cached);
     assert(local_starts == 1 && requested_band == CERBERUS_WIFI_SCAN_BAND_ALL); verify_retained(1, 64);
     assert(cerberus_dual_wifi_scan_get_row(4, &selected) == ESP_OK && !memcmp(&selected, &retained, sizeof(selected)));
     cerberus_c5_wifi_result_t rows[32]; cerberus_s3_wifi_observation_t observations[32];

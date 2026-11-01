@@ -94,9 +94,17 @@ static RTC_NOINIT_ATTR uint8_t diagnostic_phase;
 static uint64_t dual_boot_id, dual_epoch_counter, dual_epoch;
 static uint32_t dual_job_id, dual_job_highwater, dual_last_contact_ms, dual_track_ms, dual_track_reports;
 static int32_t dual_error;
-static uint8_t dual_mode, dual_generation, dual_address[6], dual_address_type;
+static uint8_t dual_mode, dual_generation, dual_address[6], dual_address_type, dual_version;
 static int8_t dual_track_rssi;
 static bool dual_attached, dual_radio_active, dual_track_seen;
+typedef struct {
+    cerberus_dual_ble_snapshot_row_t rows[CERBERUS_DUAL_BLE_CAPACITY];
+    uint64_t counter, handle, epoch, request_id;
+    uint32_t job_id;
+    uint8_t count, flags;
+    bool valid;
+} dual_snapshot_store_t;
+static dual_snapshot_store_t dual_snapshot;
 static void dual_expire_locked(void);
 
 static size_t bounded_size(size_t value, size_t limit)
@@ -890,6 +898,8 @@ esp_err_t cerberus_ble_scanner_init(void)
 {
     dual_boot_id = ((uint64_t)esp_random() << 32U) | esp_random();
     if (!dual_boot_id) dual_boot_id = 1U;
+    dual_snapshot.counter = dual_boot_id; /* Boot seed, then saturating monotonic handles. */
+    dual_snapshot.valid = false;
     if (diagnostic_magic != BLE_DIAGNOSTIC_MAGIC) {
         diagnostic_magic = BLE_DIAGNOSTIC_MAGIC;
         diagnostic_boot_count = 1;

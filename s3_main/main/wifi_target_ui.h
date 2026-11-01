@@ -161,5 +161,11 @@ static void wifi_target_handle_tap(uint16_t x,uint16_t y)
         if(error!=ESP_OK)snprintf(wifi_target_message,sizeof(wifi_target_message),"CSI: %s",esp_err_to_name(error));
     }
     else if(action==CERBERUS_WIFI_TARGET_DETAILS)wifi_mode=UI_WIFI_MODE_DETAIL;
-    else if(action==CERBERUS_WIFI_TARGET_CHANGE){wifi_target_message[0]=0;wifi_mode=UI_WIFI_MODE_LIST;}
+    else if(action==CERBERUS_WIFI_TARGET_CHANGE){
+        wifi_target_message[0]=0;
+        /* Match the target footer's Back route. A dual-list handoff must return
+         * to that retained list so Scan Again schedules both receivers. */
+        if(dual_wifi_return_to_view)dual_wifi_live_open(false);
+        else wifi_mode=UI_WIFI_MODE_LIST;
+    }
 }

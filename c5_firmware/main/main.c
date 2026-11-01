@@ -203,7 +203,10 @@ static void prepare_v2_response(const cerberus_spi_frame_t *request)
     case CERBERUS_SPI_COMMAND_DUAL_BLE_STOP:
     case CERBERUS_SPI_COMMAND_DUAL_BLE_RELEASE:
     case CERBERUS_SPI_COMMAND_DUAL_BLE_ROW_TIME:
-    case CERBERUS_SPI_COMMAND_DUAL_BLE_TRACK_STATUS: {
+    case CERBERUS_SPI_COMMAND_DUAL_BLE_TRACK_STATUS:
+    case CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_BEGIN:
+    case CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ:
+    case CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_STATUS: {
         uint8_t payload[CERBERUS_SPI_FRAME_PAYLOAD_SIZE] = {0};
         size_t length = 0;
         if (cerberus_ble_dual_command((uint8_t)request->command, request->payload,
