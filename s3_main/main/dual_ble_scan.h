@@ -1,6 +1,7 @@
 #pragma once
 #include "cerberus_protocol.h"
 #include "dual_ble_protocol.h"
+#include "dual_ble_analyzer_history.h"
 #include "esp_err.h"
 
 /* UI-owned optional PSRAM store. No allocation/task/RF occurs in getters.
@@ -64,6 +65,7 @@ typedef struct {
     bool has_first_result, live_updates, discovery_clock_valid, snapshot_anchor_valid, snapshots_capable;
     bool inventory_known, inventory_replacement_enabled, pending_inventory_known, inventory_query_enabled;
     bool metadata_read_enabled;
+    cerberus_dual_ble_analyzer_history_t analyzer;
 } cerberus_dual_ble_scan_t;
 typedef struct {
     bool enabled, attached, receiving, reading, stopping, extended;
@@ -80,6 +82,15 @@ typedef struct {
     int8_t rssi;
     uint32_t age_upper_ms, reports;
 } cerberus_dual_ble_track_view_t;
+typedef struct {
+    cerberus_dual_ble_analyzer_interval_t history[CERBERUS_DUAL_BLE_ANALYZER_HISTORY];
+    uint64_t epoch;
+    uint32_t sweeps, samples, reports, elapsed_ms;
+    esp_err_t error;
+    uint8_t history_count;
+    bool enabled, attached, receiving, stopping, extended;
+    bool sample_valid, saturated, final;
+} cerberus_dual_ble_analyzer_view_t;
 
 void cerberus_dual_ble_init(cerberus_dual_ble_scan_t *, const cerberus_dual_ble_ops_t *);
 esp_err_t cerberus_dual_ble_begin(cerberus_dual_ble_scan_t *, uint8_t mode,
@@ -100,3 +111,7 @@ bool cerberus_dual_ble_copy_row(const cerberus_dual_ble_scan_t *, uint8_t index,
 void cerberus_dual_ble_track_view(const cerberus_dual_ble_scan_t *, uint64_t now_ms,
     cerberus_dual_ble_track_view_t *out);
 bool cerberus_dual_ble_released(const cerberus_dual_ble_scan_t *);
+/* Cached C5-only measurements in source-clock order; no clock/transport/RF.
+ * RSSI, peer identity and freshness cannot be inferred from this telemetry. */
+void cerberus_dual_ble_analyzer_view(const cerberus_dual_ble_scan_t *,
+    cerberus_dual_ble_analyzer_view_t *out);

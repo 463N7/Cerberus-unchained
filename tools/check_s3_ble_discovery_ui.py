@@ -43,7 +43,7 @@ def function(source, name):
 # counted boundary, while committed row/provenance getters are linked below.
 companion_parts = between(companion, "enum {", "static uint64_t dual_ble_ui_clock(")
 companion_parts += "\n".join(function(companion, name) for name in (
-    "dual_ble_ui_get_view", "dual_ble_ui_open", "dual_ble_ui_select_frozen",
+    "dual_ble_ui_get_view", "dual_ble_ui_get_analyzer_view", "dual_ble_ui_open", "dual_ble_ui_select_frozen",
     "dual_ble_ui_selected_peer", "dual_ble_ui_tap"))
 (out / "discovery_companion_impl.h").write_text(companion_parts)
 
@@ -66,6 +66,8 @@ parts += between(ui, "static void handle_ble_tap(", "    if (ble_mode == UI_BLE_
 start = ui.index("    if (ble_mode == UI_BLE_MODE_DETAIL) {", ui.index("static void handle_ble_tap("))
 end = ui.index("            bool selected_connected =", start)
 parts += ui[start:end] + "        }\n    }\n}\n"
+entry = ui.index("} else if (item == 4) {", ui.index("    if (ble_mode == UI_BLE_MODE_MENU)", ui.index("static void handle_ble_tap(")))
+parts += "static void actual_open_analyzer(void) " + block(ui, ui.index("{", entry)) + "\n"
 parts += between(ui, "static void ble_fox_hunt_finish_exit(", "static void ble_analyzer_finish_exit(")
 parts += between(ui, "static void ble_analyzer_finish_exit(", "static bool ble_sound_terminal(")
 parts += between(ui, "static esp_err_t draw_ble_analyzer(", "static esp_err_t draw_ble_feature_menu(")
@@ -90,6 +92,7 @@ parts += "static esp_err_t actual_analyzer_footer(void) { const char *back_label
 parts += re.search(r"    return draw_button\(64, UI_BACK_Y, 192, UI_BACK_HEIGHT, back_label\);", ui).group(0) + "\n}\n"
 dual_live = (root / "s3_main/main/dual_ble_live_ui.h").read_text()
 parts += between(dual_live, "static bool dual_ble_live_discovery_released(", "static void dual_ble_live_tick(")
+parts += function(dual_live, "dual_ble_live_tick")
 footer_start = ui.index("if (!ui_capability_blocked && current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5 &&")
 parts += "\nstatic void actual_c5_footer_tap(uint16_t x,uint16_t y) {\n" + block(ui, footer_start) + "\n}\n"
 footer_start = ui.index("if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5) {")

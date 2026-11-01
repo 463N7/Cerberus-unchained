@@ -1,6 +1,6 @@
 # Cerberus Unchained
 
-Experimental Cerberus firmware for the expanded rev105 feature set: integrated
+Experimental Cerberus firmware for the expanded rev106 feature set: integrated
 wardriving, C5 Wi-Fi capture and analysis, S3 BLE discovery and tools, Remote ID
 receive workflows, AP/client navigation, and optional expansion radios.
 
@@ -9,8 +9,8 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev105`, paired with onboard
-C5 protocol firmware revision 64. No Unchained binary release is selected yet.**
+**Current source version: `0.1.0-dev.rev106`, paired with onboard
+C5 protocol firmware revision 65. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
 
@@ -40,6 +40,14 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev106 adds a dedicated passive C5 activity path beside the S3 BLE Analyzer.
+The compact source-clock samples avoid inventory downloads and keep the two
+receivers' rates, counter scopes and gaps separate. All 123 host suites and five
+native targets pass. The companion state grows by 424 PSRAM bytes; fixed
+data/BSS grows by 16 bytes on S3 and 48 bytes on C5. Local validation and limits
+are tracked in [the rev106 checkpoint](docs/DUAL_RADIO_REV106.md).
+Rev103 remains installed; no new physical acceptance is implied.
 
 Rev105 adds receiver filtering and file/name/signal ordering to saved BLE
 reports. Browsing uses a bounded index over the loaded document, preserves

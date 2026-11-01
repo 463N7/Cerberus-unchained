@@ -100,6 +100,38 @@ int main(void)
     expected_command=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA;
     assert(c5_spi_link_dual_ble_exchange(expected_command,&metadata_request,sizeof(metadata_request),
         &metadata,sizeof(metadata))==ESP_ERR_INVALID_RESPONSE&&!probes&&commands==1&&zero(&metadata,sizeof(metadata)));
-    puts("Production firmware-cache recovery passed: known/unknown/old firmware, transient timeout recovery, shared deadline, invalid reply and no unintended command");
+    /* Analyzer START is gated before RF, not merely its later sample read. */
+    cerberus_dual_ble_start_t analyzer_start={.boot_id=123,.job_id=1,.version=2,.mode=CERBERUS_DUAL_BLE_ANALYZER};
+    cerberus_dual_ble_binding_t analyzer_binding={123,1};
+    for(unsigned start=0;start<2;++start){
+        uint8_t command=start?CERBERUS_SPI_COMMAND_DUAL_BLE_START:CERBERUS_SPI_COMMAND_DUAL_BLE_ANALYZER_SAMPLE;
+        const void *request=start?(const void*)&analyzer_start:(const void*)&analyzer_binding;
+        size_t length=start?sizeof(analyzer_start):sizeof(analyzer_binding);
+        reset();peer_firmware_version=64;expected_command=command;
+        assert(c5_spi_link_dual_ble_exchange(command,request,length,&out,sizeof(out))==ESP_ERR_NOT_SUPPORTED);
+        assert(!probes&&!commands&&zero(&out,sizeof(out)));
+        reset();reported_version=64;expected_command=command;
+        assert(c5_spi_link_dual_ble_exchange(command,request,length,&out,sizeof(out))==ESP_ERR_NOT_SUPPORTED);
+        assert(probes==1&&!commands&&peer_firmware_version==64);
+        reset();reported_version=65;expected_command=command;
+        assert(c5_spi_link_dual_ble_exchange(command,request,length,&out,sizeof(out))==ESP_OK);
+        assert(probes==1&&commands==1&&peer_firmware_version==65);
+        reset();reported_version=65;probe_error=ESP_ERR_TIMEOUT;expected_command=command;
+        assert(c5_spi_link_dual_ble_exchange(command,request,length,&out,sizeof(out))==ESP_ERR_TIMEOUT);
+        assert(probes==1&&!commands&&zero(&out,sizeof(out)));
+        reset();reported_version=65;probe_us=10000;request_us=10001;expected_command=command;
+        assert(c5_spi_link_dual_ble_exchange(command,request,length,&out,sizeof(out))==ESP_ERR_TIMEOUT);
+        assert(probes==1&&commands==1&&zero(&out,sizeof(out)));
+    }
+    reset();peer_firmware_version=65;expected_command=CERBERUS_SPI_COMMAND_DUAL_BLE_START;
+    uint8_t unaligned[sizeof(analyzer_start)+1];memcpy(unaligned+1,&analyzer_start,sizeof(analyzer_start));
+    assert(c5_spi_link_dual_ble_exchange(expected_command,unaligned+1,sizeof(analyzer_start),&out,sizeof(out))==ESP_OK&&commands==1);
+    reset();peer_firmware_version=64;expected_command=CERBERUS_SPI_COMMAND_DUAL_BLE_START;
+    assert(c5_spi_link_dual_ble_exchange(expected_command,&analyzer_start,sizeof(analyzer_start)-1,&out,sizeof(out))==ESP_ERR_INVALID_ARG&&!commands);
+    analyzer_start.version=1;
+    assert(c5_spi_link_dual_ble_exchange(expected_command,&analyzer_start,sizeof(analyzer_start),&out,sizeof(out))==ESP_ERR_INVALID_ARG&&!commands);
+    analyzer_start.mode=CERBERUS_DUAL_BLE_DISCOVERY;
+    assert(c5_spi_link_dual_ble_exchange(expected_command,&analyzer_start,sizeof(analyzer_start),&out,sizeof(out))==ESP_OK&&commands==1);
+    puts("Production firmware-cache recovery passed: firmware65 Analyzer START admission, known/unknown/old firmware, transient recovery, shared deadline and no unintended command");
     return 0;
 }

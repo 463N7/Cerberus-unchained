@@ -13,8 +13,8 @@ record_start = source.index("typedef struct {")
 (out / "c5_ble_watch_record_type.h").write_text(source[record_start:source.index("} cerberus_ble_record_t;", record_start) + len("} cerberus_ble_record_t;")])
 pieces = []
 for first, after in (
-    ("static void record_advertisement_with_metadata(", "static int gap_event("),
-    ("static void start_scan_event(", "static void stop_scan_event("),
+    ("static bool analyzer_observe(", "static int gap_event("),
+    ("static void set_control_error(", "static void stop_scan_event("),
     ("static esp_err_t start_scan(", "esp_err_t cerberus_ble_watch_get_status("),
     ("esp_err_t cerberus_ble_watch_get_timing(", "esp_err_t cerberus_ble_watch_get_activity("),
 ):

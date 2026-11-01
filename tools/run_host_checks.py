@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the 123 host suites through the saved BLE browsing checkpoint.
+"""Run the 123 host suites through the dual-receiver BLE Analyzer checkpoint.
 
 The checked-in synthetic fixtures need no board, radio, or private captures.
 Generated fixtures, native executables, previews, logs, and the result receipt
@@ -212,7 +212,7 @@ def main() -> int:
     changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
     receipt = {
         "format": 1,
-        "suite_set": "rev105",
+        "suite_set": "rev106",
         "recorded_utc": datetime.now(timezone.utc).isoformat(),
         "status": "passed" if not changed and all(r["exit_code"] == 0 for r in results) else "failed",
         "hardware_validated": False,

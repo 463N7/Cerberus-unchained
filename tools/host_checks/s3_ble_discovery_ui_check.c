@@ -135,7 +135,7 @@ static bool ble_connection_is_active(void){return central_active;}
 static esp_err_t draw_current_page(void){return ESP_OK;}
 static void return_to_launcher(void){current_page=UI_PAGE_OTHER;}
 static bool ble_analyzer_exit_pending,ble_analyzer_retry_requested,ble_analyzer_start_pending;
-static bool ble_analyzer_started;
+static bool ble_analyzer_started,ble_analyzer_s3_details=true;
 static esp_err_t ble_analyzer_error;
 static uint32_t ble_analyzer_start_requested_ms,ble_analyzer_exit_started_ms,ble_analyzer_last_tick_ms,ble_analyzer_last_draw_ms;
 static bool ble_fox_hunt_exit_pending,ble_fox_hunt_retry_requested;
@@ -145,13 +145,21 @@ static cerberus_c5_ble_result_t ble_fox_hunt_target;
 static bool companion_released=true;
 static cerberus_dual_ble_scan_t companion_store;
 static unsigned companion_syncs,companion_retries,companion_exchanges;
+static int companion_requested_mode;
 #include "discovery_companion_impl.h"
 static void dual_ble_ui_retry(void){++companion_retries;}
 static bool dual_ble_ui_released(void){return companion_released;}
 static void dual_ble_ui_sync(int mode,const uint8_t *address,uint8_t type,uint64_t now)
-{assert(mode==-1);(void)address;(void)type;(void)now;++companion_syncs;
+{assert(mode>=-1&&mode<=CERBERUS_DUAL_BLE_ANALYZER);companion_requested_mode=mode;(void)address;(void)type;(void)now;++companion_syncs;
  (void)dual_ble_ui_target;(void)dual_ble_ui_type;(void)dual_ble_ui_mode;(void)dual_ble_ui_attempted;}
 static bool dual_ble_live_enabled(void);
+static bool dual_ble_live_discovery_released(void);
+typedef struct { bool busy; } cerberus_dual_wifi_status_t;
+static bool analyzer_wifi_busy;
+static void cerberus_dual_wifi_scan_get_status(cerberus_dual_wifi_status_t *s){s->busy=analyzer_wifi_busy;}
+static bool dual_wifi_ui_busy(const cerberus_dual_wifi_status_t *s){return s->busy;}
+static unsigned analyzer_diagnostic_publishes;
+static void dual_ble_publish_diagnostics(uint64_t now,bool asleep){(void)now;(void)asleep;++analyzer_diagnostic_publishes;}
 static void dual_ble_live_tap(uint16_t x,uint16_t y);
 static unsigned archive_save_calls;
 static bool archive_save_selected;
@@ -252,11 +260,14 @@ static bool dual_ble_live_enabled(void)
 static const char *view_error_name(esp_err_t error)
 {return error==ESP_ERR_TIMEOUT?"ESP_ERR_TIMEOUT":esp_err_to_name(error);}
 #define esp_err_to_name view_error_name
+#include "ble_analyzer_dual_ui.h"
 #include "discovery_routes_impl.h"
 #undef esp_err_to_name
 
 static void seed_list(void)
 {
+    (void)dual_ble_live_tick;
+    ble_analyzer_s3_details=true;analyzer_wifi_busy=false;
     (void)draw_live_scan; /* Also compiled for the separate ordinary-live entry fixture. */
     (void)actual_c5_footer_tap;(void)actual_c5_footer_draw;
     (void)dual_ble_ui_select_frozen;
@@ -1474,6 +1485,142 @@ static void check_analyzer_controls(const char *prefix)
     printf("BLE Analyzer native body/footer, independent facts and Stop/Back: %u checks passed.\n",analyzer_ui_checks);
 }
 
+/* Exercise actual cached getter, both renderer, tap dispatch, S3 lifecycle and
+ * companion desired-mode scheduler. No wire callback is installed: a draw or
+ * presentation toggle attempting transport would fail instead of being hidden. */
+static void analyzer_dual_seed(void)
+{
+    seed_list();reset();ble_mode=UI_BLE_MODE_ANALYZER;
+    ble_analyzer_s3_details=false;ble_analyzer_started=true;
+    ble_analyzer_start_pending=ble_analyzer_exit_pending=ble_analyzer_retry_requested=false;
+    ble_analyzer_error=ESP_OK;ble_analyzer_last_tick_ms=ble_analyzer_last_draw_ms=0U;
+    ble_analyzer_start_requested_ms=ble_analyzer_exit_started_ms=0U;
+    ble_session_exit_page=UI_PAGE_BLE;learning_tool_active=false;
+    analyzer_begins=analyzer_ends=passive_starts=0U;
+    companion_store.start.mode=CERBERUS_DUAL_BLE_ANALYZER;
+    companion_store.start.job_id=7U;companion_store.enabled=true;
+    companion_store.remote.flags=CERBERUS_DUAL_BLE_OWNED;
+    memset(&analyzer_view,0,sizeof(analyzer_view));analyzer_view.active=true;
+}
+
+static void check_analyzer_dual_ui(const char *prefix)
+{
+    analyzer_dual_seed();ble_mode=UI_BLE_MODE_MENU;ble_analyzer_s3_details=true;clock_ms=900U;
+    actual_open_analyzer();
+    ANALYZER_CHECK(ble_mode==UI_BLE_MODE_ANALYZER&&!ble_analyzer_s3_details&&
+        ble_analyzer_start_pending&&!ble_analyzer_started&&companion_retries==1U&&
+        ble_analyzer_start_requested_ms==900U);
+    analyzer_dual_seed();
+    analyzer_view.total_events=73U;analyzer_view.current_events=7U;
+    analyzer_view.history_count=3U;analyzer_view.history[0]=2U;
+    analyzer_view.history[1]=0U;analyzer_view.history[2]=10U;
+    cerberus_dual_ble_analyzer_history_t *h=&companion_store.analyzer;
+    ANALYZER_CHECK(cerberus_dual_ble_analyzer_accept(h,11U,7U,40U,500U,false,false));
+    ANALYZER_CHECK(cerberus_dual_ble_analyzer_accept(h,11U,7U,52U,1000U,false,false));
+    cerberus_dual_ble_analyzer_gap(h);
+    ANALYZER_CHECK(cerberus_dual_ble_analyzer_accept(h,11U,7U,60U,1500U,false,false));
+    ANALYZER_CHECK(cerberus_dual_ble_analyzer_accept(h,11U,7U,60U,2250U,false,false));
+    ANALYZER_CHECK(cerberus_dual_ble_analyzer_accept(h,11U,7U,72U,2750U,false,false));
+    cerberus_dual_ble_scan_t frozen=companion_store;
+    drawn[0]='\0';cerberus_display_fill_rect(0,0,320,480,UI_BACKGROUND);
+    ANALYZER_CHECK(draw_ble_analyzer()==ESP_OK);
+    ANALYZER_CHECK(strstr(drawn,"S3 CALLBACKS 73 / OPEN BUCKET 7")&&
+        strstr(drawn,"3 COMPLETE 200ms BUCKETS / ADV+RSP")&&
+        strstr(drawn,"C5 COUNT 72 / SWEEP 2750 ms")&&
+        strstr(drawn,"C5 24 CALLBACKS/s OVER 500 ms")&&
+        strstr(drawn,"SEPARATE CLOCKS / NOT UNIQUE DEVICES")&&
+        strstr(drawn,"C5 ORIGINALS + PARTIAL / NO RESPONSES"));
+    ANALYZER_CHECK(screen[331U*320U+(32U+29U*8U)]==UI_MUTED); /* gap */
+    ANALYZER_CHECK(screen[331U*320U+(32U+30U*8U)]==UI_PANEL); /* measured zero */
+    ANALYZER_CHECK(screen[300U*320U+(32U+31U*8U)]==UI_GOOD);
+    ANALYZER_CHECK(memcmp(&frozen,&companion_store,sizeof(frozen))==0&&companion_exchanges==0);
+    ANALYZER_CHECK(actual_analyzer_footer()==ESP_OK);save(prefix,"analyzer-dual-independent");
+    const uint16_t xs[]={7U,8U,160U,311U,312U},ys[]={53U,54U,79U,80U};
+    for(unsigned x=0U;x<5U;++x)for(unsigned y=0U;y<4U;++y){
+        ble_analyzer_s3_details=false;handle_ble_tap(xs[x],ys[y]);
+        ANALYZER_CHECK(ble_analyzer_s3_details==(xs[x]>=8U&&xs[x]<312U&&ys[y]>=54U&&ys[y]<80U));
+        ANALYZER_CHECK(!passive_starts&&!stops&&!companion_syncs&&!companion_retries&&
+            memcmp(&frozen,&companion_store,sizeof(frozen))==0);
+    }
+    ble_analyzer_s3_details=false;
+    analyzer_view.total_events=UINT32_MAX;analyzer_view.current_events=UINT16_MAX;
+    ANALYZER_CHECK(cerberus_dual_ble_analyzer_accept(h,11U,7U,UINT32_MAX,UINT32_MAX,true,true));
+    drawn[0]='\0';cerberus_display_fill_rect(0,0,320,480,UI_BACKGROUND);
+    ANALYZER_CHECK(draw_ble_analyzer()==ESP_OK);
+    ANALYZER_CHECK(strstr(drawn,"S3 CALLBACKS >=4294967295 / OPEN BUCKET >=65535")&&
+        strstr(drawn,"C5 COUNT >=4294967295 / SWEEP 4294967295 ms")&&
+        strstr(drawn,"C5 RATE UNKNOWN / WAITING OR GAP"));
+    ANALYZER_CHECK(actual_analyzer_footer()==ESP_OK);save(prefix,"analyzer-dual-saturated");
+    companion_store.error=ESP_ERR_NOT_SUPPORTED;
+    drawn[0]='\0';cerberus_display_fill_rect(0,0,320,480,UI_BACKGROUND);analyzer_retry_buttons=0U;
+    ANALYZER_CHECK(draw_ble_analyzer()==ESP_OK&&!analyzer_retry_buttons);
+    ANALYZER_CHECK(strstr(drawn,"C5 UNAVAILABLE / NEEDS FIRMWARE 65")&&strstr(drawn,"S3 LISTENING")&&
+        strstr(drawn,"C5 COUNT UNKNOWN / NO CURRENT SAMPLE")&&!strstr(drawn,"C5 COUNT >=")&&
+        strstr(drawn,"C5 RATE UNKNOWN / WAITING OR GAP"));
+    ANALYZER_CHECK(actual_analyzer_footer()==ESP_OK);save(prefix,"analyzer-dual-unsupported");
+    companion_store.error=ESP_FAIL;drawn[0]='\0';cerberus_display_fill_rect(0,0,320,480,UI_BACKGROUND);analyzer_retry_buttons=0U;
+    ANALYZER_CHECK(draw_ble_analyzer()==ESP_OK&&analyzer_retry_buttons==1U);
+    clock_ms=3000U;handle_ble_tap(160U,400U);
+    ANALYZER_CHECK(ble_analyzer_start_pending&&ble_analyzer_retry_requested&&companion_retries==1U);
+
+    /* S3 begins only after old S3 discovery and the C5 companion release. */
+    analyzer_dual_seed();ble_analyzer_started=false;ble_analyzer_start_pending=true;
+    ble_analyzer_start_requested_ms=1000U;companion_released=false;
+    ble_analyzer_tick(1250U,false);
+    ANALYZER_CHECK(!analyzer_begins&&!passive_starts&&ble_analyzer_start_pending);
+    static ble_discovery_live_store_t old_discovery;
+    memset(&old_discovery,0,sizeof(old_discovery));old_discovery.session.epoch=9U;
+    ble_discovery_live=&old_discovery;companion_released=true;
+    ble_analyzer_tick(1500U,false);
+    ANALYZER_CHECK(!analyzer_begins&&!passive_starts&&ble_analyzer_start_pending);
+    ble_discovery_live=NULL;ble_analyzer_tick(1750U,false);
+    ANALYZER_CHECK(analyzer_begins==1U&&passive_starts==1U&&!ble_analyzer_start_pending);
+    dual_ble_live_tick(1750U,false);ANALYZER_CHECK(companion_requested_mode==CERBERUS_DUAL_BLE_ANALYZER);
+    analyzer_wifi_busy=true;dual_ble_live_tick(2000U,false);ANALYZER_CHECK(companion_requested_mode==-1);
+    analyzer_wifi_busy=false;ble_analyzer_retry_requested=true;
+    dual_ble_live_tick(2250U,false);ANALYZER_CHECK(companion_requested_mode==-1);
+    ble_analyzer_retry_requested=false;ble_analyzer_error=ESP_FAIL;
+    dual_ble_live_tick(2500U,false);ANALYZER_CHECK(companion_requested_mode==-1);
+    ble_analyzer_error=ESP_OK;dual_ble_live_tick(2750U,true);ANALYZER_CHECK(companion_requested_mode==-1);
+
+    /* Ownership timeout keeps cleanup alive; delayed release does not rearm. */
+    analyzer_dual_seed();owner=CERBERUS_S3_BLE_OWNER_SCANNER;
+    scan.state=CERBERUS_BLE_SCAN_RUNNING;hold_stop=true;companion_released=false;
+    clock_ms=1000U;actual_back(UI_BACK_Y);dual_ble_live_tick(1000U,false);
+    ANALYZER_CHECK(companion_requested_mode==-1);
+    /* The counted scheduler boundary above requests Stop. Use the real local
+     * core stop to render its cached state while transport remains held. */
+    cerberus_dual_ble_stop(&companion_store);
+    ble_analyzer_tick(1250U,false);ANALYZER_CHECK(stops==1U&&!analyzer_ends&&ble_analyzer_exit_pending);
+    scan.state=CERBERUS_BLE_SCAN_RUNNING;ble_analyzer_tick(13250U,false);
+    ANALYZER_CHECK(stops==2U&&!analyzer_ends&&ble_analyzer_exit_pending&&ble_analyzer_error==ESP_ERR_TIMEOUT);
+    drawn[0]='\0';cerberus_display_fill_rect(0,0,320,480,UI_BACKGROUND);
+    ANALYZER_CHECK(draw_ble_analyzer()==ESP_OK&&strstr(drawn,"STOPPING BOTH / TIMEOUT")&&strstr(drawn,"C5 STOPPING"));
+    ANALYZER_CHECK(actual_analyzer_footer()==ESP_OK);save(prefix,"analyzer-dual-release-timeout");
+    owner=CERBERUS_S3_BLE_OWNER_NONE;ble_analyzer_tick(13500U,false);
+    ANALYZER_CHECK(!analyzer_ends&&ble_analyzer_exit_pending);
+    companion_released=true;ble_analyzer_tick(13750U,false);
+    ANALYZER_CHECK(analyzer_ends==1U&&ble_mode==UI_BLE_MODE_MENU&&!ble_analyzer_started);
+    dual_ble_live_tick(14000U,false);ANALYZER_CHECK(companion_requested_mode==-1&&!passive_starts);
+
+    /* Waiting for an unrelated scanner never authorizes stopping it. */
+    analyzer_dual_seed();ble_analyzer_started=false;ble_analyzer_start_pending=true;
+    ble_analyzer_start_requested_ms=1000U;owner=CERBERUS_S3_BLE_OWNER_SCANNER;
+    scan.state=CERBERUS_BLE_SCAN_RUNNING;ble_analyzer_tick(1250U,false);
+    ble_analyzer_tick(13250U,false);
+    ANALYZER_CHECK(!stops&&!analyzer_begins&&!passive_starts&&ble_analyzer_error==ESP_ERR_TIMEOUT);
+    owner=CERBERUS_S3_BLE_OWNER_NONE;scan.state=CERBERUS_BLE_SCAN_IDLE;
+    ble_analyzer_tick(13500U,false);ANALYZER_CHECK(!passive_starts);
+    analyzer_dual_seed();owner=CERBERUS_S3_BLE_OWNER_SCANNER;hold_stop=true;
+    scan.state=CERBERUS_BLE_SCAN_RUNNING;companion_released=false;
+    dual_ble_live_tick(1000U,true);ble_analyzer_tick(1000U,true);
+    ANALYZER_CHECK(ble_analyzer_exit_pending&&stops==1U&&companion_requested_mode==-1);
+    owner=CERBERUS_S3_BLE_OWNER_NONE;companion_released=true;ble_analyzer_tick(1250U,true);
+    ANALYZER_CHECK(ble_mode==UI_BLE_MODE_MENU&&!passive_starts);
+    ble_analyzer_s3_details=true;
+    printf("Dual BLE Analyzer cached rendering, clocks, gaps, controls, release barriers and timeout: %u cumulative checks passed.\n",analyzer_ui_checks);
+}
+
 int main(int argc,char **argv)
 {
     assert(existing_monitor_suite(argc,argv)==0);seed_list();
@@ -1537,6 +1684,7 @@ int main(int argc,char **argv)
     check_analyzer_window_ui(argv[1]);
     check_analyzer_family_ui(argv[1]);
     check_analyzer_controls(argv[1]);
+    check_analyzer_dual_ui(argv[1]);
     puts("BLE discovery UI: production filter/sort/age/cards/hit-test, timed completed/paused expiry without RF start, publication ceiling/wrap, frozen typed selection through Fox Hunt/Back, source ages, priorities, privacy, RSSI and unchanged Sound gate passed");
     return 0;
 }

@@ -8,9 +8,9 @@
 #include "c5_ble_legacy_getters.h"
 
 typedef struct {
-    bool legacy, lose_begin, mutated, extended, old_metadata, bad_fence;
+    bool legacy, lose_begin, mutated, extended, old_metadata, bad_fence, bad_analyzer_binding;
     uint64_t rf_started_ms, first_begin_ms, fallback_handle;
-    unsigned begin_calls, reads, releases, frames, metadata_reads, old_reads, unsupported_at;
+    unsigned begin_calls, reads, releases, frames, metadata_reads, old_reads, unsupported_at, analyzer_reads;
 } integration_t;
 
 static uint64_t integration_clock(void *context) { (void)context; return now_ms; }
@@ -37,6 +37,12 @@ static esp_err_t integration_exchange(void *context,uint8_t command_id,const voi
     size_t request_size,void *response,size_t response_size)
 {
     integration_t *i=context;++i->frames;
+    cerberus_dual_ble_binding_t wrong_binding;
+    if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_ANALYZER_SAMPLE){
+        ++i->analyzer_reads;
+        if(i->bad_analyzer_binding){memcpy(&wrong_binding,request,sizeof(wrong_binding));
+            ++wrong_binding.boot_id;request=&wrong_binding;}
+    }
     if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA){
         ++i->metadata_reads;
         if(i->old_metadata&&i->metadata_reads==i->unsupported_at){
@@ -73,9 +79,11 @@ static esp_err_t integration_exchange(void *context,uint8_t command_id,const voi
     if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_START&&starts!=old_starts){
         i->rf_started_ms=now_ms;
         if(i->extended)integration_extended_report(1,1,-30,7);else integration_report(-30,6);
-        memcpy(scan_results[0].name,"REAL",4);scan_results[0].name_length=4;
-        scan_results[0].uuid_length=2;scan_results[0].uuid[0]=0xaa;scan_results[0].uuid[1]=0xfe;
-        scan_results[0].manufacturer_id=0x004c;
+        if(dual_mode!=CERBERUS_DUAL_BLE_ANALYZER){
+            memcpy(scan_results[0].name,"REAL",4);scan_results[0].name_length=4;
+            scan_results[0].uuid_length=2;scan_results[0].uuid[0]=0xaa;scan_results[0].uuid[1]=0xfe;
+            scan_results[0].manufacturer_id=0x004c;
+        }
     }
     if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_BEGIN){
         ++i->begin_calls;if(!i->first_begin_ms)i->first_begin_ms=now_ms;
@@ -119,13 +127,70 @@ static void integration_tick(integration_t *i,cerberus_dual_ble_scan_t *s)
     now_ms+=20;
     if(i->rf_started_ms&&dual_radio_active&&now_ms-i->rf_started_ms>=8000U){
         /* Mock the existing eight-second controller completion only. */
-        dual_radio_active=false;scan_status.state=CERBERUS_BLE_SCAN_COMPLETE;
+        finish_scan_for_epoch(0,scan_callback_epoch);
     }
     unsigned frames=i->frames;cerberus_dual_ble_tick(s,now_ms);
     assert(i->frames-frames<=1U); /* Each mocked transport costs the full8ms tick budget. */
     assert(!s->error&&!held);
 }
 
+static void integration_analyzer(void)
+{
+    integration_t i;cerberus_dual_ble_scan_t s;
+    integration_reset(&i,&s,false);cerberus_dual_ble_stop(&s);
+    assert(cerberus_dual_ble_begin(&s,CERBERUS_DUAL_BLE_ANALYZER,NULL,0)==ESP_OK);
+    parse_calls=0;
+    for(unsigned n=0;n<100&&!s.analyzer.samples;++n)integration_tick(&i,&s);
+    assert(s.analyzer.samples==1&&s.analyzer.reports==1&&!scan_status.stored_count&&!parse_calls);
+    /* Greater than inventory capacity, then partial extended originals. All
+     * count without parsing or inserting rows. Responses/anonymous do not. */
+    uint8_t bytes[]={2,1,6};
+    struct ble_gap_event packet={.type=BLE_GAP_EVENT_DISC,.disc={
+        .addr={{1,2,3,4,5,6},1},.rssi=-55,.event_type=0,.data=bytes,.length_data=3}};
+    for(unsigned n=0;n<64;++n){packet.disc.addr.val[0]=(uint8_t)n;
+        ++now_ms;assert(!gap_event(&packet,(void*)(uintptr_t)scan_callback_epoch));}
+    struct ble_gap_event partial={.type=BLE_GAP_EVENT_EXT_DISC,.ext_disc={
+        .addr={{99,2,3,4,5,6},1},.rssi=-75,.sid=3,.prim_phy=3,.data_status=1,
+        .data=bytes,.length_data=3}};
+    for(unsigned n=0;n<10;++n){++now_ms;assert(!gap_event(&partial,(void*)(uintptr_t)scan_callback_epoch));}
+    partial.ext_disc.props=BLE_HCI_ADV_SCAN_RSP_MASK;
+    assert(!gap_event(&partial,(void*)(uintptr_t)scan_callback_epoch));
+    partial.ext_disc.props=0;partial.ext_disc.addr.type=255;
+    assert(!gap_event(&partial,(void*)(uintptr_t)scan_callback_epoch));
+    packet.disc.event_type=BLE_HCI_ADV_RPT_EVTYPE_SCAN_RSP;
+    assert(!gap_event(&packet,(void*)(uintptr_t)scan_callback_epoch));
+    assert(dual_analyzer.reports==75&&!parse_calls&&!scan_status.stored_count&&!scan_inventory.replaced);
+    for(unsigned n=0;n<100&&s.analyzer.samples<2;++n)integration_tick(&i,&s);
+    cerberus_dual_ble_analyzer_view_t view;cerberus_dual_ble_analyzer_view(&s,&view);
+    assert(view.reports==75&&view.history_count==1&&view.history[0].reports==74&&view.history[0].duration_ms>=500);
+    uint32_t rate;assert(cerberus_dual_ble_analyzer_rate(&view.history[0],&rate));
+    assert(rate==(uint32_t)(UINT64_C(74000)/view.history[0].duration_ms));
+    for(unsigned n=0;n<100&&s.analyzer.samples<3;++n)integration_tick(&i,&s);
+    cerberus_dual_ble_analyzer_view(&s,&view);
+    assert(view.history_count==2&&view.history[1].valid&&!view.history[1].reports&&view.history[1].duration_ms>=500);
+    assert(!i.begin_calls&&!i.reads&&!i.metadata_reads&&!i.old_reads&&!s.snapshots&&!s.count);
+    uint64_t first_epoch=view.epoch;
+    for(unsigned n=0;n<500&&!s.sweeps;++n)integration_tick(&i,&s);
+    assert(s.sweeps==1&&s.analyzer.final&&s.analyzer.reports==75&&s.analyzer.elapsed_ms>=8000);
+    for(unsigned n=0;n<100&&s.analyzer.epoch==first_epoch;++n)integration_tick(&i,&s);
+    cerberus_dual_ble_analyzer_view(&s,&view);
+    assert(starts==2&&view.epoch!=first_epoch&&view.reports==1&&view.sweeps==1);
+    assert(view.history_count&&!view.history[view.history_count-1].valid);
+    unsigned samples=i.analyzer_reads;cerberus_dual_ble_stop(&s);
+    for(unsigned n=0;n<50&&!cerberus_dual_ble_released(&s);++n)integration_tick(&i,&s);
+    assert(cerberus_dual_ble_released(&s)&&!dual_attached&&!dual_radio_active&&i.analyzer_reads==samples);
+
+    integration_reset(&i,&s,false);cerberus_dual_ble_stop(&s);
+    assert(cerberus_dual_ble_begin(&s,2,NULL,0)==ESP_OK);
+    for(unsigned n=0;n<100&&!s.analyzer.samples;++n)integration_tick(&i,&s);
+    i.bad_analyzer_binding=true;
+    for(unsigned n=0;n<100&&!s.error;++n){now_ms+=20;cerberus_dual_ble_tick(&s,now_ms);}
+    assert(s.error==ESP_ERR_INVALID_RESPONSE&&!s.analyzer.sample_valid&&!s.snapshots);
+    i.bad_analyzer_binding=false;cerberus_dual_ble_stop(&s);
+    for(unsigned n=0;n<50&&!cerberus_dual_ble_released(&s);++n){now_ms+=20;cerberus_dual_ble_tick(&s,now_ms);}
+    assert(cerberus_dual_ble_released(&s)&&!dual_attached&&!dual_radio_active);
+    puts("Actual C5 callbacks -> bound Analyzer sample -> S3: >32 identities, partial originals, exclusions, silence, final sweep, restart gap and stale binding passed");
+}
 int main(void)
 {
     integration_t i;cerberus_dual_ble_scan_t s;
@@ -258,6 +323,7 @@ int main(void)
     i.bad_fence=false;cerberus_dual_ble_stop(&s);
     for(unsigned tick=0;tick<50U&&!cerberus_dual_ble_released(&s);++tick){now_ms+=20;cerberus_dual_ble_tick(&s,now_ms);}
     assert(cerberus_dual_ble_released(&s)&&!dual_attached&&!s.snapshots);
+    integration_analyzer();
     puts("Actual C5 service/callback + S3 coordinator: live immutable readout, lost-BEGIN age, final 8s sweep, Stop and v1 completed-bank fallback passed");
     return 0;
 }

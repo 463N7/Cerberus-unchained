@@ -29,6 +29,7 @@ gap = source[begin:source.index("    case BLE_GAP_EVENT_CONNECT:", begin)]
 (out / "c5_ble_gap_receive_impl.h").write_text(gap + "    default: break;\n    }\n    return 0;\n}\n")
 for fixture, extra in (("dual_ble_check", [root / "s3_main/main/dual_ble_scan.c"]),
                        ("dual_ble_owner_check", []),
+                       ("ble_analyzer_counter_check", []),
                        ("dual_ble_integration_check", [root / "s3_main/main/dual_ble_scan.c"])):
     exe = out / f"{fixture}.exe"
     subprocess.run([

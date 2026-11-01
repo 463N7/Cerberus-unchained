@@ -11,11 +11,12 @@
 #define CERBERUS_DUAL_BLE_SNAPSHOT_MIN_FIRMWARE 62U
 #define CERBERUS_DUAL_BLE_INVENTORY_MIN_FIRMWARE 63U
 #define CERBERUS_DUAL_BLE_METADATA_MIN_FIRMWARE 64U
+#define CERBERUS_DUAL_BLE_ANALYZER_MIN_FIRMWARE 65U
 #define CERBERUS_DUAL_BLE_CAPACITY 32U
 #define CERBERUS_DUAL_BLE_RAW_BYTES 31U
 #define CERBERUS_DUAL_BLE_STALE_MS 5000U
 #define CERBERUS_DUAL_BLE_ORPHAN_MS 12000U
-enum { CERBERUS_DUAL_BLE_DISCOVERY, CERBERUS_DUAL_BLE_TRACK };
+enum { CERBERUS_DUAL_BLE_DISCOVERY, CERBERUS_DUAL_BLE_TRACK, CERBERUS_DUAL_BLE_ANALYZER };
 enum { CERBERUS_DUAL_BLE_ATTACHED = 1U, CERBERUS_DUAL_BLE_OWNED = 2U,
        CERBERUS_DUAL_BLE_EXTENDED = 4U, CERBERUS_DUAL_BLE_READY = 8U,
        CERBERUS_DUAL_BLE_SNAPSHOTS = 16U };
@@ -120,6 +121,23 @@ typedef struct __attribute__((packed)) {
     uint8_t flags;
 } cerberus_dual_ble_track_t;
 
+enum { CERBERUS_DUAL_BLE_ANALYZER_VALID = 1U, CERBERUS_DUAL_BLE_ANALYZER_BUSY = 2U,
+       CERBERUS_DUAL_BLE_ANALYZER_SATURATED = 4U, CERBERUS_DUAL_BLE_ANALYZER_FINAL = 8U,
+       CERBERUS_DUAL_BLE_ANALYZER_RSSI_VALID = 16U, CERBERUS_DUAL_BLE_ANALYZER_CLOCK_INVALID = 32U };
+/* Firmware65: request is binding12. Counts typed original callbacks, including
+ * partial EXT reports; not packets, devices, classified ADs or inventory rows.
+ * elapsed_ms is C5 time since the actual scan-start boundary, frozen at finish.
+ * Saturated counts are lower bounds. Rate intervals must not cross full epochs.
+ * Invalid replies have zero counts/time and RSSI127. BUSY/stale have epoch0;
+ * pending-start has bound epoch/flags0; bad clock has only CLOCK_INVALID.
+ * Valid latest-callback RSSI is separate from earlier valid RSSI observations. */
+typedef struct __attribute__((packed)) {
+    uint64_t epoch;
+    uint32_t job_id, reports, elapsed_ms;
+    uint8_t flags;
+    int8_t rssi;
+} cerberus_dual_ble_analyzer_sample_t;
+
 /* v2: a per-job strict request counter makes lost BEGIN replies idempotent.
  * C5-issued handles never repeat during a boot and map to boot/job/full epoch.
  * A successful next BEGIN replaces the sole frozen bank; reads never do. */
@@ -189,6 +207,7 @@ _Static_assert(sizeof(cerberus_dual_ble_start_t) == 22U, "dual BLE start frame")
 _Static_assert(sizeof(cerberus_dual_ble_status_t) == 22U, "dual BLE status frame");
 _Static_assert(sizeof(cerberus_dual_ble_row_time_t) == 22U, "dual BLE row frame");
 _Static_assert(sizeof(cerberus_dual_ble_track_t) == 22U, "dual BLE track frame");
+_Static_assert(sizeof(cerberus_dual_ble_analyzer_sample_t) == 22U, "dual BLE analyzer frame");
 _Static_assert(sizeof(cerberus_dual_ble_snapshot_begin_t) == 20U, "snapshot begin frame");
 _Static_assert(sizeof(cerberus_dual_ble_snapshot_binding_t) == 20U, "snapshot binding frame");
 _Static_assert(sizeof(cerberus_dual_ble_snapshot_read_t) == 22U, "snapshot read frame");
@@ -203,8 +222,9 @@ static inline bool cerberus_dual_ble_start_valid(const cerberus_dual_ble_start_t
 {
     if (!r || !r->boot_id || !r->job_id ||
         (r->version != CERBERUS_DUAL_BLE_VERSION && r->version != CERBERUS_DUAL_BLE_LEGACY_VERSION) ||
-        r->reserved || r->mode > CERBERUS_DUAL_BLE_TRACK || r->address_type > 3U) return false;
-    if (r->mode == CERBERUS_DUAL_BLE_DISCOVERY) {
+        r->reserved || r->mode > CERBERUS_DUAL_BLE_ANALYZER || r->address_type > 3U ||
+        (r->mode == CERBERUS_DUAL_BLE_ANALYZER && r->version != CERBERUS_DUAL_BLE_VERSION)) return false;
+    if (r->mode != CERBERUS_DUAL_BLE_TRACK) {
         if (r->address_type) return false;
         for (size_t i = 0; i < 6U; ++i) if (r->address[i]) return false;
     }

@@ -27,6 +27,9 @@ typedef struct {
     unsigned inventory_queries, inventory_timeouts, inventory_fault;
     uint32_t replacements, dropped;
     cerberus_dual_ble_snapshot_inventory_t frozen_inventory;
+    bool analyzer_supported, analyzer_pending;
+    unsigned analyzer_reads, analyzer_busy, analyzer_timeouts, analyzer_fault;
+    uint32_t analyzer_reports, analyzer_elapsed;
 } peer_t;
 enum {
     BAD_BEGIN_BOOT=1, BAD_BEGIN_ZERO_HANDLE, BAD_BEGIN_COUNT, BAD_BEGIN_FLAGS,
@@ -206,6 +209,7 @@ static esp_err_t exchange(void *ctx, uint8_t cmd, const void *request,
         assert(request_size==22 && reply_size==22);
         const cerberus_dual_ble_start_t *r=request;
         assert(cerberus_dual_ble_start_valid(r)); assert(r->boot_id==p->boot);
+        if(r->mode==CERBERUS_DUAL_BLE_ANALYZER&&!p->analyzer_supported)return ESP_ERR_NOT_SUPPORTED;
         if (!p->attached) { ++p->starts; ++p->epoch; ++p->generation;
             p->attached=true; p->owned=true; p->state=CERBERUS_BLE_SCAN_RUNNING;
             p->job=r->job_id; p->mode=r->mode;p->request_id=0;memset(&p->snapshot,0,sizeof(p->snapshot)); }
@@ -234,6 +238,34 @@ static esp_err_t exchange(void *ctx, uint8_t cmd, const void *request,
     }
     const cerberus_dual_ble_binding_t *b=request;
     assert(request_size>=sizeof(*b));
+    if(cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_ANALYZER_SAMPLE){
+        assert(request_size==12&&reply_size==22&&p->mode==CERBERUS_DUAL_BLE_ANALYZER);
+        ++p->analyzer_reads;
+        if(p->analyzer_timeouts){--p->analyzer_timeouts;return ESP_ERR_TIMEOUT;}
+        cerberus_dual_ble_analyzer_sample_t out={.epoch=p->epoch,.job_id=p->job,
+            .reports=p->analyzer_reports,.elapsed_ms=p->analyzer_elapsed,.rssi=127,
+            .flags=CERBERUS_DUAL_BLE_ANALYZER_VALID|(p->owned?0:CERBERUS_DUAL_BLE_ANALYZER_FINAL)};
+        if(p->analyzer_pending){out.flags=0;out.reports=out.elapsed_ms=0;}
+        if(p->analyzer_busy){--p->analyzer_busy;out=(cerberus_dual_ble_analyzer_sample_t){
+            .job_id=p->job,.flags=CERBERUS_DUAL_BLE_ANALYZER_BUSY,.rssi=127};}
+        switch(p->analyzer_fault){
+        case 1:++out.job_id;break;
+        case 2:++out.epoch;break;
+        case 3:out.flags|=0x80;break;
+        case 4:out.rssi=-40;break;
+        case 5:out.flags|=CERBERUS_DUAL_BLE_ANALYZER_BUSY;break;
+        case 6:out.flags=0;break;
+        case 7:out.flags=CERBERUS_DUAL_BLE_ANALYZER_CLOCK_INVALID;out.reports=out.elapsed_ms=0;break;
+        case 8:out.flags|=CERBERUS_DUAL_BLE_ANALYZER_SATURATED;break;
+        case 9:out.flags|=CERBERUS_DUAL_BLE_ANALYZER_RSSI_VALID;out.rssi=21;break;
+        case 10:out.flags=CERBERUS_DUAL_BLE_ANALYZER_BUSY;out.epoch=0;out.reports=out.elapsed_ms=0;out.rssi=0;break;
+        case 11:out.epoch=0;out.flags=0;out.reports=out.elapsed_ms=0;break;
+        case 12:out.flags|=CERBERUS_DUAL_BLE_ANALYZER_RSSI_VALID;out.rssi=-50;out.reports=0;break;
+        case 13:out.flags|=CERBERUS_DUAL_BLE_ANALYZER_FINAL;break;
+        case 14:out.reports=UINT32_MAX;break;
+        }
+        memcpy(reply,&out,sizeof(out));return ESP_OK;
+    }
     if (p->reset || b->boot_id!=p->boot || b->job_id!=p->job || !p->attached) {
         cerberus_dual_ble_status_t absent={.job_id=b->job_id,.state=CERBERUS_BLE_SCAN_ERROR,
             .error_code=ESP_ERR_NOT_FOUND,.version=p->version};
@@ -265,6 +297,7 @@ static esp_err_t exchange(void *ctx, uint8_t cmd, const void *request,
 static void init(cerberus_dual_ble_scan_t *s, peer_t *p)
 {
     memset(p,0,sizeof(*p));p->boot=123;p->now=100;p->count=2;p->version=1;p->cost_ms=1;
+    p->analyzer_supported=true;
     cerberus_dual_ble_ops_t ops={p,exchange,clock_ms};cerberus_dual_ble_init(s,&ops);
 }
 static void tick(cerberus_dual_ble_scan_t *s, peer_t *p)
@@ -674,6 +707,139 @@ static void check_receive_metadata(void)
     assert(s.snapshots==1);drain(&s,&p);
     puts("dual BLE receive metadata: coherent110-byte banks, exact legacy fallback, original age, validation, retry, frozen copies and Stop passed");
 }
+static void check_analyzer_history(void)
+{
+    cerberus_dual_ble_analyzer_history_t h={0},saved;
+    uint32_t rate=99;
+    assert(!cerberus_dual_ble_analyzer_rate(NULL,&rate)&&!rate);
+    assert(!cerberus_dual_ble_analyzer_accept(NULL,1,1,0,0,false,false));
+    assert(!cerberus_dual_ble_analyzer_accept(&h,0,1,0,0,false,false));
+    assert(!cerberus_dual_ble_analyzer_accept(&h,1,0,0,0,false,false));
+    assert(!cerberus_dual_ble_analyzer_accept(&h,1,1,UINT32_MAX,10,false,false));
+    assert(cerberus_dual_ble_analyzer_accept(&h,1,1,10,100,false,false)&&!h.count);
+    assert(cerberus_dual_ble_analyzer_accept(&h,1,1,12,100,false,false)&&!h.count);
+    assert(cerberus_dual_ble_analyzer_accept(&h,1,1,15,100,false,false)&&!h.count);
+    assert(cerberus_dual_ble_analyzer_accept(&h,1,1,20,200,false,false)&&h.count==1);
+    assert(h.history[0].reports==10&&h.history[0].duration_ms==100);
+    assert(cerberus_dual_ble_analyzer_rate(&h.history[0],&rate)&&rate==100);
+    assert(cerberus_dual_ble_analyzer_accept(&h,1,1,20,200,false,false)&&h.count==1);
+    saved=h;assert(!cerberus_dual_ble_analyzer_accept(&h,1,1,19,300,false,false)&&!memcmp(&h,&saved,sizeof(h)));
+    assert(!cerberus_dual_ble_analyzer_accept(&h,1,1,20,199,false,false)&&!memcmp(&h,&saved,sizeof(h)));
+    assert(cerberus_dual_ble_analyzer_accept(&h,1,1,20,300,false,false));
+    assert(cerberus_dual_ble_analyzer_rate(&h.history[1],&rate)&&rate==0); /* Measured silence. */
+    cerberus_dual_ble_analyzer_gap(&h);assert(h.count==3&&!h.history[2].valid&&!h.sample_valid);
+    cerberus_dual_ble_analyzer_gap(&h);assert(h.count==3); /* Coalesce unknown gap. */
+    assert(cerberus_dual_ble_analyzer_accept(&h,1,1,100,2000,false,false)&&h.count==3);
+    assert(cerberus_dual_ble_analyzer_accept(&h,1,1,120,2500,false,false)&&h.count==4);
+    assert(h.history[3].reports==20&&h.history[3].duration_ms==500);
+    assert(cerberus_dual_ble_analyzer_accept(&h,2,2,0,0,false,false)&&h.count==5);
+    assert(!h.history[4].valid); /* Never derive across source epoch reset. */
+    for(unsigned n=1;n<=80;++n)assert(cerberus_dual_ble_analyzer_accept(&h,2,2,n*3U,n*500U,false,false));
+    assert(h.count==32);
+    for(unsigned n=0;n<32;++n)assert(h.history[n].valid&&h.history[n].reports==3&&h.history[n].duration_ms==500);
+    assert(cerberus_dual_ble_analyzer_accept(&h,2,2,UINT32_MAX,41000,true,false));
+    assert(h.saturated&&!h.baseline&&!h.history[(h.head+31)%32].valid);
+    saved=h;assert(!cerberus_dual_ble_analyzer_accept(&h,2,2,UINT32_MAX,42000,false,false));
+    assert(!memcmp(&h,&saved,sizeof(h)));
+    assert(cerberus_dual_ble_analyzer_accept(&h,2,2,UINT32_MAX,42000,true,true)&&h.final);
+    assert(!cerberus_dual_ble_analyzer_accept(&h,2,2,UINT32_MAX,43000,true,false));
+    cerberus_dual_ble_analyzer_interval_t overflow={UINT32_MAX,1,true};
+    assert(!cerberus_dual_ble_analyzer_rate(&overflow,&rate)&&!rate);
+    overflow.duration_ms=1000;assert(cerberus_dual_ble_analyzer_rate(&overflow,&rate)&&rate==UINT32_MAX);
+    overflow.duration_ms=0;assert(!cerberus_dual_ble_analyzer_rate(&overflow,&rate));
+    puts("C5 interval history: source-time deltas, same-ms callback conservation, gaps, saturation, restart and32-entry bounds passed");
+}
+static void analyzer_start(cerberus_dual_ble_scan_t *s,peer_t *p)
+{
+    init_live(s,p);p->count=0;p->analyzer_elapsed=100;p->analyzer_reports=10;
+    s->count=1;s->rows[0].rssi=-99; /* Ordinary retained bank stays untouched. */
+    assert(cerberus_dual_ble_begin(s,CERBERUS_DUAL_BLE_ANALYZER,NULL,0)==ESP_OK);
+    for(unsigned n=0;n<20&&!s->analyzer.samples&&!s->error;++n)fast_tick(s,p);
+    assert(!s->error&&s->analyzer.samples==1&&!s->analyzer.count);
+}
+static void analyzer_next(cerberus_dual_ble_scan_t *s,peer_t *p)
+{
+    uint32_t target=s->analyzer.samples+1;
+    for(unsigned n=0;n<1000&&s->analyzer.samples<target&&!s->error;++n)fast_tick(s,p);
+    assert(!s->error&&s->analyzer.samples==target);
+}
+static void check_analyzer_controller(void)
+{
+    cerberus_dual_ble_scan_t s;peer_t p;cerberus_dual_ble_analyzer_view_t v;
+    cerberus_dual_ble_analyzer_view(NULL,&v);assert(!v.enabled&&!v.history_count&&!v.sample_valid);
+    analyzer_start(&s,&p);cerberus_dual_ble_row_t retained=s.rows[0];
+    unsigned frames=p.frames;cerberus_dual_ble_analyzer_view(&s,&v);
+    assert(p.frames==frames&&v.enabled&&v.attached&&v.receiving&&v.extended&&v.sample_valid&&v.reports==10);
+    uint64_t due=s.next_poll_ms;while(p.now<due){frames=p.frames;fast_tick(&s,&p);assert(p.frames==frames);}
+    p.analyzer_reports=110;p.analyzer_elapsed=600;analyzer_next(&s,&p);
+    cerberus_dual_ble_analyzer_view(&s,&v);uint32_t rate;
+    assert(v.history_count==1&&v.history[0].reports==100&&v.history[0].duration_ms==500);
+    assert(cerberus_dual_ble_analyzer_rate(&v.history[0],&rate)&&rate==200);
+    p.analyzer_elapsed=1600;analyzer_next(&s,&p); /* Silence has an actual source duration. */
+    assert(s.analyzer.history[1].valid&&!s.analyzer.history[1].reports&&s.analyzer.history[1].duration_ms==1000);
+    p.analyzer_busy=1;
+    unsigned reads=p.analyzer_reads;
+    for(unsigned n=0;n<100&&p.analyzer_reads==reads;++n)fast_tick(&s,&p);
+    assert(!s.error&&!s.analyzer.sample_valid&&!s.analyzer.baseline);
+    uint8_t entries=s.analyzer.count;p.analyzer_reports=210;p.analyzer_elapsed=2100;analyzer_next(&s,&p);
+    assert(s.analyzer.count==entries); /* Re-establish baseline; do not bridge BUSY. */
+    p.analyzer_elapsed=2600;p.analyzer_reports=215;analyzer_next(&s,&p);
+    assert(s.analyzer.history[(s.analyzer.head+31)%32].reports==5);
+    assert(!p.snapshot_begins&&!p.snapshot_reads&&!p.metadata_reads&&!p.inventory_queries&&!s.snapshots);
+    assert(s.count==1&&!memcmp(&retained,&s.rows[0],sizeof(retained)));
+    completed(&p);p.analyzer_elapsed=8000;p.analyzer_reports=300;
+    for(unsigned n=0;n<100&&!s.sweeps&&!s.error;++n)fast_tick(&s,&p);
+    assert(!s.error&&s.sweeps==1&&s.analyzer.final&&s.analyzer.reports==300);
+    uint64_t old_epoch=s.analyzer.epoch;
+    for(unsigned n=0;n<100&&p.starts<2&&!s.error;++n)fast_tick(&s,&p);
+    assert(p.starts==2);p.analyzer_elapsed=0;p.analyzer_reports=0;
+    for(unsigned n=0;n<100&&s.analyzer.epoch==old_epoch&&!s.error;++n)fast_tick(&s,&p);
+    assert(!s.error&&s.analyzer.epoch!=old_epoch&&s.sweeps==1);
+    cerberus_dual_ble_analyzer_view(&s,&v);assert(v.history_count&& !v.history[v.history_count-1].valid);
+    drain(&s,&p);unsigned stopped_reads=p.analyzer_reads;tick(&s,&p);assert(p.analyzer_reads==stopped_reads);
+    assert(cerberus_dual_ble_begin(&s,CERBERUS_DUAL_BLE_ANALYZER,NULL,0)==ESP_OK);
+    assert(!s.analyzer.samples&&!s.analyzer.count&&!s.sweeps&&s.count==1);drain(&s,&p);
+
+    /* Analyzer cannot silently fall back to ordinary discovery on old peers. */
+    init(&s,&p);assert(cerberus_dual_ble_begin(&s,2,NULL,0)==ESP_OK);fast_tick(&s,&p);
+    assert(s.error==ESP_ERR_NOT_SUPPORTED&&!p.starts&&!p.stops&&cerberus_dual_ble_released(&s));
+    init_live(&s,&p);p.analyzer_supported=false;
+    assert(cerberus_dual_ble_begin(&s,2,NULL,0)==ESP_OK);fast_tick(&s,&p);
+    assert(s.error==ESP_ERR_NOT_SUPPORTED&&!p.starts&&!p.stops&&cerberus_dual_ble_released(&s));
+
+    /* Every invalid envelope or invalid final fence suppresses current validity
+       without replacing the independent discovery bank. */
+    for(unsigned fault=1;fault<=14;++fault){
+        analyzer_start(&s,&p);retained=s.rows[0];p.analyzer_fault=fault;
+        for(unsigned n=0;n<200&&!s.error;++n)fast_tick(&s,&p);
+        assert(s.error==ESP_ERR_INVALID_RESPONSE&&!s.analyzer.sample_valid&&!s.sweeps);
+        assert(s.count==1&&!memcmp(&retained,&s.rows[0],sizeof(retained)));drain(&s,&p);
+    }
+    for(unsigned rewind=0;rewind<2;++rewind){
+        analyzer_start(&s,&p);
+        if(rewind)p.analyzer_reports=9;else p.analyzer_elapsed=99;
+        for(unsigned n=0;n<100&&!s.error;++n)fast_tick(&s,&p);
+        assert(s.error==ESP_ERR_INVALID_RESPONSE&&!s.analyzer.sample_valid);drain(&s,&p);
+    }
+    analyzer_start(&s,&p);p.analyzer_timeouts=3;
+    for(unsigned n=0;n<200&&!s.error;++n)fast_tick(&s,&p);
+    assert(s.error==ESP_ERR_TIMEOUT&&!s.analyzer.sample_valid);drain(&s,&p);
+    analyzer_start(&s,&p);p.cost_ms=9;p.analyzer_elapsed=600;p.analyzer_reports=15;
+    for(unsigned n=0;n<100&&s.analyzer.samples<2;++n)assert(fast_tick(&s,&p)<=1);
+    assert(s.analyzer.samples==2);drain(&s,&p);
+    /* Stop wins before INFO/START/POLL/SAMPLE/FENCE/RELEASE; no sample is read
+       after cancellation. Retained history is never an authorization to RF. */
+    init_live(&s,&p);p.count=0;p.cost_ms=8;p.analyzer_elapsed=100;
+    assert(cerberus_dual_ble_begin(&s,2,NULL,0)==ESP_OK);
+    for(unsigned n=0;n<45;++n){
+        cerberus_dual_ble_scan_t copy=s;peer_t other=p;copy.ops.context=&other;
+        unsigned before=other.analyzer_reads;drain(&copy,&other);assert(other.analyzer_reads==before);
+        if(n==25)completed(&p);
+        fast_tick(&s,&p);assert(!s.error);
+    }
+    drain(&s,&p);
+    puts("C5 analyzer controller: bounded cadence, source clocks, gaps, old-peer admission, final fence, no inventory, Stop and retained-bank isolation passed");
+}
 int main(void)
 {
     cerberus_dual_ble_scan_t s;peer_t p;
@@ -728,6 +894,7 @@ int main(void)
     assert(cerberus_dual_ble_age_upper(2,10,12)==4);
     check_live_snapshots();check_snapshot_faults_and_stop();check_published_provenance();check_inventory_metadata();
     check_receive_metadata();
+    check_analyzer_history();check_analyzer_controller();
     printf("dual BLE reader: owner/replay/fence/lost-reply/age/typed-row checks passed; store=%zu bytes\n",sizeof(s));
     return 0;
 }

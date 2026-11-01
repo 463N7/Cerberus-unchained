@@ -39,11 +39,11 @@ static void dual_ble_ui_retry(void)
     if (dual_ble_ui_store) cerberus_dual_ble_stop(dual_ble_ui_store);
 }
 
-/* Desired mode comes only from ordinary BLE discovery or exact-address Fox
- * Hunt. Mixed Recon/Wardriving pass -1 and retain their existing radio roles. */
+/* Desired mode comes only from discovery, exact-address Fox Hunt or passive
+ * Analyzer. Mixed Recon/Wardriving retain their existing radio roles. */
 static void dual_ble_ui_sync(int mode, const uint8_t address[6], uint8_t type, uint64_t now)
 {
-    if (mode < -1 || mode > CERBERUS_DUAL_BLE_TRACK ||
+    if (mode < -1 || mode > CERBERUS_DUAL_BLE_ANALYZER ||
         (mode == CERBERUS_DUAL_BLE_TRACK && (!address || type > 3U))) mode = -1;
     bool changed = mode != dual_ble_ui_mode || (mode == CERBERUS_DUAL_BLE_TRACK &&
         (type != dual_ble_ui_type || memcmp(address, dual_ble_ui_target, 6U)));
@@ -80,6 +80,13 @@ static void dual_ble_ui_get_view(cerberus_dual_ble_view_t *out)
 
 static bool dual_ble_ui_released(void)
 { return cerberus_dual_ble_released(dual_ble_ui_store); }
+
+/* A local cached view only: rendering never advances the owner or does SPI. */
+static inline void dual_ble_ui_get_analyzer_view(cerberus_dual_ble_analyzer_view_t *out)
+{
+    cerberus_dual_ble_analyzer_view(dual_ble_ui_store, out);
+    if (out && dual_ble_ui_error) out->error = dual_ble_ui_error;
+}
 
 static void dual_ble_ui_open(bool reset_detail)
 {

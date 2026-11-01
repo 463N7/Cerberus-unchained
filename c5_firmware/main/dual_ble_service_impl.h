@@ -9,6 +9,7 @@ static void dual_expire_locked(void)
         (uint32_t)(dual_now_ms() - dual_last_contact_ms) >= CERBERUS_DUAL_BLE_ORPHAN_MS) {
         dual_attached = false;
         dual_track_seen = false;
+        cerberus_ble_analyzer_counter_reset(&dual_analyzer);
         dual_snapshot.valid = false;
     }
 }
@@ -272,11 +273,41 @@ static bool dual_snapshot_inventory_command(const void *request, size_t request_
     return true;
 }
 
+/* Independent passive sample: never wait behind a callback, copy an inventory
+ * or mutate radio state. The existing owner protocol handles Stop/release. */
+static bool dual_analyzer_sample_command(const void *request, size_t request_size,
+    void *response, size_t *response_size)
+{
+    cerberus_dual_ble_binding_t binding = {0};
+    cerberus_dual_ble_analyzer_sample_t out = {.rssi = 127};
+    if (request_size == sizeof(binding)) {
+        memcpy(&binding, request, sizeof(binding)); out.job_id = binding.job_id;
+        if (scanner_mutex) {
+            if (xSemaphoreTake(scanner_mutex, 0U) != pdTRUE) out.flags = CERBERUS_DUAL_BLE_ANALYZER_BUSY;
+            else {
+                dual_expire_locked();
+                if (dual_matches_locked(&binding) && dual_version == CERBERUS_DUAL_BLE_VERSION &&
+                    dual_mode == CERBERUS_DUAL_BLE_ANALYZER) {
+                    dual_last_contact_ms = dual_now_ms();
+                    if (!dual_error && !scan_status.error_code)
+                        cerberus_ble_analyzer_counter_sample(&dual_analyzer, esp_timer_get_time(), &out);
+                    out.epoch = dual_epoch; out.job_id = binding.job_id;
+                }
+                xSemaphoreGive(scanner_mutex);
+            }
+        }
+    }
+    memcpy(response, &out, sizeof(out)); *response_size = sizeof(out);
+    return true;
+}
+
 bool cerberus_ble_dual_command(uint8_t command, const void *request,
     size_t request_size, void *response, size_t *response_size)
 {
     if (!response || !response_size || (!request && request_size)) return false;
     *response_size = 0U;
+    if (command == CERBERUS_SPI_COMMAND_DUAL_BLE_ANALYZER_SAMPLE)
+        return dual_analyzer_sample_command(request, request_size, response, response_size);
     if (command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_INVENTORY)
         return dual_snapshot_inventory_command(request, request_size, response, response_size);
     if ((command >= CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_BEGIN &&
@@ -364,6 +395,7 @@ bool cerberus_ble_dual_command(uint8_t command, const void *request,
         if (owned) out.error_code = ESP_ERR_INVALID_STATE;
         else {
             dual_attached = false; dual_track_seen = false;
+            cerberus_ble_analyzer_counter_reset(&dual_analyzer);
             dual_snapshot.valid = false;
             out.state = CERBERUS_BLE_SCAN_IDLE; out.flags = 0U; out.error_code = 0;
         }

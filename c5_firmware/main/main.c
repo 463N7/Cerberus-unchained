@@ -208,7 +208,8 @@ static void prepare_v2_response(const cerberus_spi_frame_t *request)
     case CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ:
     case CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_STATUS:
     case CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_INVENTORY:
-    case CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA: {
+    case CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA:
+    case CERBERUS_SPI_COMMAND_DUAL_BLE_ANALYZER_SAMPLE: {
         uint8_t payload[CERBERUS_SPI_FRAME_PAYLOAD_SIZE] = {0};
         size_t length = 0;
         if (cerberus_ble_dual_command((uint8_t)request->command, request->payload,

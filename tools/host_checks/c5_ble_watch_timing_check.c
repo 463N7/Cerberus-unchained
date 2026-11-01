@@ -1,6 +1,7 @@
 #undef NDEBUG
 #include "cerberus_watch_capture.h"
 #include "dual_ble_protocol.h"
+#include "ble_analyzer_counter.h"
 #include "../../c5_firmware/main/ble_inventory_admission.h"
 #include <assert.h>
 #include <stdio.h>
@@ -15,6 +16,7 @@ static unsigned checks;
 #define BLE_NPL_OK 0
 #define BLE_HS_EOS 3
 #define ESP_LOGI(...) ((void)0)
+#define ESP_LOGW(tag,format,...) do { if(false) printf(format,__VA_ARGS__); } while(0)
 enum { ESP_OK, ESP_ERR_INVALID_ARG, ESP_ERR_INVALID_STATE, ESP_ERR_NOT_FINISHED };
 typedef int esp_err_t;
 typedef struct { uint8_t type,val[6]; } ble_addr_t;
@@ -57,17 +59,21 @@ static uint8_t dual_mode,dual_address[6],dual_address_type,dual_generation,dual_
 static cerberus_ble_inventory_admission_t scan_inventory;
 static uint32_t dual_track_ms,dual_track_reports;
 static int8_t dual_track_rssi;
-static void dual_expire_locked(void){CHECK(locked&&!dual_attached);}
+static int32_t dual_error;
+static cerberus_ble_analyzer_counter_t dual_analyzer;
+static bool analyzer_callback_exhausted;
+static void dual_expire_locked(void){CHECK(locked);}
 static uint8_t diagnostic_phase;
 static int64_t clock_us,parse_delay;
-static unsigned parse_epoch_change,queued,rf_starts,timeout_stops;
+static unsigned parse_epoch_change,queued,rf_starts,timeout_stops,parse_calls;
+static int infer_error,rf_error,callout_error;
 static void *rf_arg;
 static int (*rf_callback)(struct ble_gap_event *,void *);
 static int64_t esp_timer_get_time(void){return clock_us;}
 static void xSemaphoreTake(void *m,unsigned ticks){(void)ticks;CHECK(m==scanner_mutex&&!locked);locked=true;}
 static void xSemaphoreGive(void *m){CHECK(m==scanner_mutex&&locked);locked=false;}
 static int ble_hs_adv_parse_fields(struct ble_hs_adv_fields *f,const uint8_t *p,unsigned n)
-{(void)f;(void)p;(void)n;clock_us+=parse_delay;if(parse_epoch_change){++scan_callback_epoch;parse_epoch_change=0;}return 0;}
+{(void)f;(void)p;(void)n;++parse_calls;clock_us+=parse_delay;if(parse_epoch_change){++scan_callback_epoch;parse_epoch_change=0;}return 0;}
 static int find_record(const ble_addr_t *a){(void)a;return -1;}
 static void copy_advertisement_fields(cerberus_ble_record_t *r,const struct ble_hs_adv_fields *f){(void)r;(void)f;CHECK(false);}
 static void copy_raw_advertisement(cerberus_ble_record_t *r,const struct ble_gap_disc_desc *d,bool p){(void)r;(void)d;(void)p;CHECK(false);}
@@ -76,24 +82,23 @@ static void *ble_npl_event_get_arg(struct ble_npl_event *e){return e->arg;}
 static void ble_npl_event_set_arg(struct ble_npl_event *e,void *arg){e->arg=arg;}
 static void *nimble_port_get_dflt_eventq(void){return &mutex;}
 static void ble_npl_eventq_put(void *q,struct ble_npl_event *e){CHECK(q==&mutex&&e==&start_event);++queued;}
-static int ble_hs_id_infer_auto(int privacy,uint8_t *type){CHECK(!privacy);*type=0;return 0;}
+static int ble_hs_id_infer_auto(int privacy,uint8_t *type){CHECK(!privacy);*type=0;return infer_error;}
 static int ble_gap_disc_cancel(void){return 0;}
 static unsigned ble_npl_time_ms_to_ticks32(unsigned ms){return ms;}
-static int ble_npl_callout_reset(struct ble_npl_callout *c,unsigned ticks){CHECK(c==&scan_timeout_callout&&ticks==8000);return 0;}
+static int ble_npl_callout_reset(struct ble_npl_callout *c,unsigned ticks){CHECK(c==&scan_timeout_callout&&ticks==8000);return callout_error;}
 static bool cerberus_c5_test_running(void){return false;}
 static bool another_radio_operation_is_active(void){return false;}
-static void set_control_error(int rc,const char *what){(void)rc;(void)what;CHECK(false);}
 #if TEST_EXTENDED
 static int ble_gap_ext_disc(uint8_t type,unsigned a,unsigned b,unsigned c,unsigned d,unsigned e,
     const struct ble_gap_ext_disc_params *one,const struct ble_gap_ext_disc_params *coded,
     int (*cb)(struct ble_gap_event *,void *),void *arg)
 {CHECK(!type&&!a&&!b&&!c&&!d&&!e&&one==coded&&one->passive==1&&one->itvl==160&&one->window==80);
- ++rf_starts;rf_callback=cb;rf_arg=arg;return 0;}
+ ++rf_starts;rf_callback=cb;rf_arg=arg;return rf_error;}
 #else
 static int ble_gap_disc(uint8_t type,int forever,const struct ble_gap_disc_params *p,
     int (*cb)(struct ble_gap_event *,void *),void *arg)
 {CHECK(!type&&!forever&&p->passive==1&&!p->filter_duplicates&&!p->itvl&&!p->window);
- ++rf_starts;rf_callback=cb;rf_arg=arg;return 0;}
+ ++rf_starts;rf_callback=cb;rf_arg=arg;return rf_error;}
 #endif
 #include "c5_ble_watch_timing_impl.h"
 
@@ -246,9 +251,58 @@ static void motion_wire(void)
     for(size_t i=0;i<sizeof(data.motion);++i)CHECK(!((uint8_t*)&data.motion)[i]);
     CHECK(cerberus_ble_watch_get_motion_timing(&q,&age)==ESP_OK&&!age.flags&&!age.source_age_ms&&age.capture_epoch==data.capture_epoch);
 }
+static void analyzer_actual_lifecycle(void)
+{
+    dual_attached=true;dual_mode=CERBERUS_DUAL_BLE_ANALYZER;dual_version=2;dual_error=0;
+    dual_radio_active=false;scan_status.state=CERBERUS_BLE_SCAN_IDLE;
+    clock_us=100000;CHECK(start_scan(true)==ESP_OK);
+    cerberus_dual_ble_analyzer_sample_t sample;
+    cerberus_ble_analyzer_counter_sample(&dual_analyzer,clock_us,&sample);CHECK(!sample.flags);
+    clock_us=500000;start_scan_event(&start_event);
+    CHECK(dual_radio_active&&dual_analyzer.started_us==500000&&dual_analyzer.accepted);
+    memset(&report,0,sizeof(report));report.type=BLE_GAP_EVENT_DISC;
+    report.disc=(struct ble_gap_disc_desc){.addr={.type=1,.val={1,2,3,4,5,6}},.rssi=-44,
+        .event_type=3,.length_data=31,.data=advertisement};
+    unsigned parses=parse_calls;
+    clock_us=501000;receive();
+    CHECK(dual_analyzer.reports==1&&parse_calls==parses&&!scan_status.stored_count&&
+        !watch_capture.status.reports&&!activity_capture.status.reports);
+    cerberus_ble_analyzer_counter_sample(&dual_analyzer,clock_us,&sample);
+    CHECK(sample.flags==17&&sample.elapsed_ms==1&&sample.reports==1);
+    void *old=rf_arg;clock_us=8500000;complete();
+    CHECK(dual_analyzer.finished&&!dual_radio_active);
+    cerberus_ble_analyzer_counter_sample(&dual_analyzer,9000000,&sample);
+    CHECK(sample.flags==25&&sample.elapsed_ms==8000);
+    /* Actual admission and SDK-event path reset the new sweep; stale callback
+     * and stale queued start cannot arm or increment the replacement. */
+    clock_us=10000000;CHECK(start_scan(true)==ESP_OK);struct ble_npl_event stale={.arg=old};
+    start_scan_event(&stale);CHECK(!dual_analyzer.armed);
+    CHECK(gap_event(&report,old)==0&&!dual_analyzer.reports);start_scan_event(&start_event);
+    clock_us+=1000;receive();CHECK(dual_analyzer.reports==1);scan_cancelled=true;finish_scan(0);
+    CHECK(dual_analyzer.finished&&scan_status.state==CERBERUS_BLE_SCAN_IDLE);
+    for(unsigned fault=0;fault<3;++fault){
+        dual_radio_active=false;dual_error=0;clock_us+=100000;
+        CHECK(start_scan(true)==ESP_OK);
+        infer_error=fault==0?9:0;rf_error=fault==1?8:0;callout_error=fault==2?7:0;
+        start_scan_event(&start_event);
+        CHECK(scan_status.state==CERBERUS_BLE_SCAN_ERROR&&dual_error&&!dual_analyzer.armed);
+        cerberus_ble_analyzer_counter_sample(&dual_analyzer,clock_us,&sample);
+        CHECK(!sample.flags&&!sample.reports&&!sample.elapsed_ms&&sample.rssi==127);
+        infer_error=rf_error=callout_error=0;
+    }
+    dual_radio_active=false;dual_error=0;scan_status.state=CERBERUS_BLE_SCAN_IDLE;
+    scan_callback_epoch=UINT32_MAX;unsigned queued_before=queued;
+    CHECK(start_scan(true)==ESP_ERR_INVALID_STATE&&queued==queued_before);
+    /* Ordinary semantics stay unchanged at wrap, but latch permanently stops
+     * Analyzer admission using callback tokens already used during this boot. */
+    dual_attached=false;CHECK(cerberus_ble_scanner_start()==ESP_OK);
+    CHECK(scan_callback_epoch==1&&analyzer_callback_exhausted);start_scan_event(&start_event);complete();
+    dual_attached=true;CHECK(start_scan(true)==ESP_ERR_INVALID_STATE);
+    dual_attached=false;dual_radio_active=false;
+}
 int main(void)
 {
-    entry_clock_and_qualification();stale_delivery_and_saturation();extended_admission();motion_wire();
+    entry_clock_and_qualification();stale_delivery_and_saturation();extended_admission();motion_wire();analyzer_actual_lifecycle();
     CHECK(!locked);printf("C5 BLE timing (%s): %u checks; actual passive start/GAP/getters, atomic motion and own Location age, partial/response/malformed exclusion, stale callback/completion, zero/negative/full-width time, replacement and epoch saturation passed.\n",TEST_EXTENDED?"extended":"legacy",checks);
     return 0;
 }

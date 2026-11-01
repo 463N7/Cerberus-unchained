@@ -2,7 +2,8 @@
 #include <string.h>
 
 enum { OFF, INFO, START, POLL, META, NAME, UUID, RAW, TIME, FENCE, TRACK,
-    SNAP_BEGIN, SNAP_READ, SNAP_FENCE, STOP, RELEASE, FAILED, SNAP_INVENTORY };
+    SNAP_BEGIN, SNAP_READ, SNAP_FENCE, STOP, RELEASE, FAILED, SNAP_INVENTORY,
+    ANALYZER, ANALYZER_FENCE };
 
 void cerberus_dual_ble_init(cerberus_dual_ble_scan_t *s, const cerberus_dual_ble_ops_t *ops)
 {
@@ -17,12 +18,13 @@ bool cerberus_dual_ble_released(const cerberus_dual_ble_scan_t *s)
 esp_err_t cerberus_dual_ble_begin(cerberus_dual_ble_scan_t *s, uint8_t mode,
     const uint8_t address[6], uint8_t type)
 {
-    if (!s || !s->ops.exchange || mode > CERBERUS_DUAL_BLE_TRACK ||
+    if (!s || !s->ops.exchange || mode > CERBERUS_DUAL_BLE_ANALYZER ||
         (mode == CERBERUS_DUAL_BLE_TRACK && (!address || type > 3U))) return ESP_ERR_INVALID_ARG;
     if (s->start.job_id || s->enabled) return ESP_ERR_INVALID_STATE;
     memset(&s->start, 0, sizeof(s->start));
     s->start.mode = mode;
     s->start.version = CERBERUS_DUAL_BLE_VERSION;
+    if (mode == CERBERUS_DUAL_BLE_ANALYZER) memset(&s->analyzer, 0, sizeof(s->analyzer));
     if (mode == CERBERUS_DUAL_BLE_TRACK) {
         memcpy(s->start.address, address, 6U);
         s->start.address_type = type;
@@ -45,12 +47,14 @@ void cerberus_dual_ble_stop(cerberus_dual_ble_scan_t *s)
 {
     if (!s) return;
     s->enabled = false; s->stop_requested = true; s->next_poll_ms = 0;
+    if (s->start.mode == CERBERUS_DUAL_BLE_ANALYZER) cerberus_dual_ble_analyzer_gap(&s->analyzer);
     s->phase = s->start.job_id ? STOP : OFF;
 }
 
 static void fail(cerberus_dual_ble_scan_t *s, esp_err_t error)
 {
     s->error = error; s->enabled = false; s->next_poll_ms = 0;
+    if (s->start.mode == CERBERUS_DUAL_BLE_ANALYZER) cerberus_dual_ble_analyzer_gap(&s->analyzer);
     s->phase = s->start.job_id ? STOP : FAILED;
 }
 
@@ -84,6 +88,7 @@ static esp_err_t exchange(cerberus_dual_ble_scan_t *s, uint8_t cmd,
 
 static void no_owner(cerberus_dual_ble_scan_t *s)
 {
+    if (s->start.mode == CERBERUS_DUAL_BLE_ANALYZER) cerberus_dual_ble_analyzer_gap(&s->analyzer);
     s->start.job_id = 0U; memset(&s->remote, 0, sizeof(s->remote));
     s->retries = 0U; s->next_poll_ms = 0U;
     s->phase = s->enabled ? INFO : s->error ? FAILED : OFF;
@@ -298,6 +303,8 @@ static void step(cerberus_dual_ble_scan_t *s, uint64_t now)
                     CERBERUS_DUAL_BLE_ATTACHED | CERBERUS_DUAL_BLE_SNAPSHOTS)) ||
                 (info.version == CERBERUS_DUAL_BLE_LEGACY_VERSION && (info.flags & CERBERUS_DUAL_BLE_SNAPSHOTS)))
                 error = ESP_ERR_INVALID_RESPONSE;
+            else if (s->start.mode == CERBERUS_DUAL_BLE_ANALYZER && info.version != CERBERUS_DUAL_BLE_VERSION)
+                error = ESP_ERR_NOT_SUPPORTED;
             else if (!(info.flags & CERBERUS_DUAL_BLE_READY) || (info.flags & CERBERUS_DUAL_BLE_ATTACHED))
                 error = ESP_ERR_INVALID_STATE;
             else if (!info.next_job_id) error = ESP_ERR_INVALID_STATE;
@@ -315,6 +322,9 @@ static void step(cerberus_dual_ble_scan_t *s, uint64_t now)
         }
     } else if (phase == START) {
         error = exchange(s, CERBERUS_SPI_COMMAND_DUAL_BLE_START, &s->start, sizeof(s->start), &status, sizeof(status));
+        /* The transport gates Analyzer START itself before any RF command on
+         * older peers. NOT_SUPPORTED establishes that no owner was acquired. */
+        if (error == ESP_ERR_NOT_SUPPORTED) s->start.job_id = 0U;
         if (error == ESP_OK) {
             if (!status_valid(s, &status)) error = ESP_ERR_INVALID_RESPONSE;
             else if (!(status.flags & CERBERUS_DUAL_BLE_ATTACHED)) {
@@ -324,7 +334,7 @@ static void step(cerberus_dual_ble_scan_t *s, uint64_t now)
                 s->next_snapshot_ms = now + 500U;
             }
         }
-    } else if (phase == POLL || phase == FENCE || phase == STOP || phase == RELEASE) {
+    } else if (phase == POLL || phase == FENCE || phase == STOP || phase == RELEASE || phase == ANALYZER_FENCE) {
         uint8_t cmd = phase == STOP ? CERBERUS_SPI_COMMAND_DUAL_BLE_STOP :
             phase == RELEASE ? CERBERUS_SPI_COMMAND_DUAL_BLE_RELEASE : CERBERUS_SPI_COMMAND_DUAL_BLE_STATUS;
         error = exchange(s, cmd, &b, sizeof(b), &status, sizeof(status));
@@ -348,6 +358,14 @@ static void step(cerberus_dual_ble_scan_t *s, uint64_t now)
                 s->next_poll_ms = status.flags & CERBERUS_DUAL_BLE_OWNED ? now + 250U : 0U;
             } else if (status.error_code || status.state == CERBERUS_BLE_SCAN_ERROR) {
                 error = status.error_code ? status.error_code : ESP_FAIL;
+            } else if (phase == ANALYZER_FENCE) {
+                if (status.state != CERBERUS_BLE_SCAN_COMPLETE || (status.flags & CERBERUS_DUAL_BLE_OWNED) ||
+                    status.count || !s->analyzer.final) error = ESP_ERR_INVALID_RESPONSE;
+                else {
+                    s->remote = status;
+                    if (s->sweeps != UINT32_MAX) ++s->sweeps;
+                    s->phase = RELEASE;
+                }
             } else if (phase == FENCE) {
                 if (status.state != CERBERUS_BLE_SCAN_COMPLETE || (status.flags & CERBERUS_DUAL_BLE_OWNED) ||
                     status.count != s->remote.count) error = ESP_ERR_INVALID_RESPONSE;
@@ -360,7 +378,11 @@ static void step(cerberus_dual_ble_scan_t *s, uint64_t now)
                 status.state != CERBERUS_BLE_SCAN_COMPLETE) error = ESP_ERR_INVALID_RESPONSE;
             else {
                 s->remote = status;
-                if (s->start.mode == CERBERUS_DUAL_BLE_TRACK) s->phase = TRACK;
+                if (s->start.mode == CERBERUS_DUAL_BLE_ANALYZER) {
+                    if (status.count) error = ESP_ERR_INVALID_RESPONSE;
+                    else s->phase = ANALYZER;
+                }
+                else if (s->start.mode == CERBERUS_DUAL_BLE_TRACK) s->phase = TRACK;
                 else if (s->live_updates && (now >= s->next_snapshot_ms ||
                     (status.state == CERBERUS_BLE_SCAN_COMPLETE && !(status.flags & CERBERUS_DUAL_BLE_OWNED)))) {
                     if (s->snapshot_request_id == UINT64_MAX) error = ESP_ERR_INVALID_STATE;
@@ -379,6 +401,38 @@ static void step(cerberus_dual_ble_scan_t *s, uint64_t now)
         }
     } else if (phase == SNAP_BEGIN || phase == SNAP_READ || phase == SNAP_FENCE || phase == SNAP_INVENTORY) {
         error = snapshot_step(s, now);
+    } else if (phase == ANALYZER) {
+        cerberus_dual_ble_analyzer_sample_t sample;
+        error = exchange(s, CERBERUS_SPI_COMMAND_DUAL_BLE_ANALYZER_SAMPLE,
+            &b, sizeof(b), &sample, sizeof(sample));
+        if (error == ESP_OK) {
+            const uint8_t allowed = CERBERUS_DUAL_BLE_ANALYZER_VALID | CERBERUS_DUAL_BLE_ANALYZER_BUSY |
+                CERBERUS_DUAL_BLE_ANALYZER_SATURATED | CERBERUS_DUAL_BLE_ANALYZER_FINAL |
+                CERBERUS_DUAL_BLE_ANALYZER_RSSI_VALID | CERBERUS_DUAL_BLE_ANALYZER_CLOCK_INVALID;
+            bool valid = (sample.flags & CERBERUS_DUAL_BLE_ANALYZER_VALID) != 0U;
+            bool rssi = (sample.flags & CERBERUS_DUAL_BLE_ANALYZER_RSSI_VALID) != 0U;
+            bool saturated = (sample.flags & CERBERUS_DUAL_BLE_ANALYZER_SATURATED) != 0U;
+            if (sample.job_id != s->start.job_id || (sample.flags & ~allowed) ||
+                (valid && (sample.flags & (CERBERUS_DUAL_BLE_ANALYZER_BUSY | CERBERUS_DUAL_BLE_ANALYZER_CLOCK_INVALID))) ||
+                (!valid && (sample.reports || sample.elapsed_ms || sample.rssi != 127)) ||
+                (valid && ((rssi && (!sample.reports || sample.rssi < -127 || sample.rssi > 20)) ||
+                    (!rssi && sample.rssi != 127) || (saturated != (sample.reports == UINT32_MAX)))))
+                error = ESP_ERR_INVALID_RESPONSE;
+            else if (sample.flags == CERBERUS_DUAL_BLE_ANALYZER_BUSY && !sample.epoch) error = ESP_ERR_TIMEOUT;
+            else if (sample.epoch != s->remote.epoch) error = ESP_ERR_INVALID_RESPONSE;
+            else if (!valid) {
+                if (sample.flags || s->remote.state == CERBERUS_BLE_SCAN_COMPLETE) error = ESP_ERR_INVALID_RESPONSE;
+                else {
+                    cerberus_dual_ble_analyzer_gap(&s->analyzer);
+                    s->phase = POLL; s->next_poll_ms = now + 500U;
+                }
+            } else if (!cerberus_dual_ble_analyzer_accept(&s->analyzer, sample.epoch, sample.job_id,
+                sample.reports, sample.elapsed_ms, saturated,
+                (sample.flags & CERBERUS_DUAL_BLE_ANALYZER_FINAL) != 0U)) error = ESP_ERR_INVALID_RESPONSE;
+            else if (sample.flags & CERBERUS_DUAL_BLE_ANALYZER_FINAL) s->phase = ANALYZER_FENCE;
+            else if (s->remote.state == CERBERUS_BLE_SCAN_COMPLETE) error = ESP_ERR_INVALID_RESPONSE;
+            else { s->phase = POLL; s->next_poll_ms = now + 500U; }
+        }
     } else if (phase == TRACK) {
         cerberus_dual_ble_track_t track;
         error = exchange(s, CERBERUS_SPI_COMMAND_DUAL_BLE_TRACK_STATUS, &b, sizeof(b), &track, sizeof(track));
@@ -455,8 +509,11 @@ static void step(cerberus_dual_ble_scan_t *s, uint64_t now)
         }
     }
     if (error != ESP_OK) {
+        if (s->start.mode == CERBERUS_DUAL_BLE_ANALYZER) cerberus_dual_ble_analyzer_gap(&s->analyzer);
         if (phase == STOP || phase == RELEASE) { s->error = error; s->phase = STOP; s->next_poll_ms = now + 250U; }
-        else if (error == ESP_ERR_TIMEOUT && s->retries++ < 2U) { s->next_poll_ms = now + 100U; }
+        else if (error == ESP_ERR_TIMEOUT && s->retries++ < 2U) {
+            s->next_poll_ms = now + (s->start.mode == CERBERUS_DUAL_BLE_ANALYZER ? 500U : 100U);
+        }
         else fail(s, error);
     } else s->retries = 0U;
 }
@@ -527,4 +584,23 @@ void cerberus_dual_ble_track_view(const cerberus_dual_ble_scan_t *s, uint64_t no
     out->rssi = s->track.rssi; out->reports = s->track.reports;
     out->age_upper_ms = cerberus_dual_ble_age_upper(s->track.age_ms, s->track_request_ms, now);
     out->fresh = out->seen && out->age_upper_ms <= CERBERUS_DUAL_BLE_STALE_MS;
+}
+
+void cerberus_dual_ble_analyzer_view(const cerberus_dual_ble_scan_t *s,
+    cerberus_dual_ble_analyzer_view_t *out)
+{
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    if (!s || s->start.mode != CERBERUS_DUAL_BLE_ANALYZER) return;
+    out->enabled = s->enabled; out->attached = s->start.job_id != 0U;
+    out->receiving = (s->remote.flags & CERBERUS_DUAL_BLE_OWNED) != 0U;
+    out->stopping = s->phase == STOP || s->phase == RELEASE;
+    out->extended = s->extended; out->error = s->error; out->sweeps = s->sweeps;
+    const cerberus_dual_ble_analyzer_history_t *h = &s->analyzer;
+    out->epoch = h->epoch; out->samples = h->samples; out->reports = h->reports;
+    out->elapsed_ms = h->elapsed_ms; out->sample_valid = h->sample_valid;
+    out->saturated = h->saturated; out->final = h->final; out->history_count = h->count;
+    for (uint8_t i = 0U; i < h->count; ++i)
+        out->history[i] = h->history[(h->head + CERBERUS_DUAL_BLE_ANALYZER_HISTORY - h->count + i) %
+            CERBERUS_DUAL_BLE_ANALYZER_HISTORY];
 }

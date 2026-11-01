@@ -10,12 +10,20 @@ esp_err_t c5_spi_link_dual_ble_exchange(uint8_t command, const void *input,
         command <= CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_STATUS;
     bool inventory = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_INVENTORY;
     bool metadata = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA;
-    allowed = allowed || snapshot || inventory || metadata;
+    bool analyzer = command == CERBERUS_SPI_COMMAND_DUAL_BLE_ANALYZER_SAMPLE;
+    allowed = allowed || snapshot || inventory || metadata || analyzer;
     allowed = allowed || command == CERBERUS_SPI_COMMAND_BLE_SCAN_RESULT ||
         command == CERBERUS_SPI_COMMAND_BLE_SCAN_DATA;
     if (!allowed || !output || !output_size || output_size > CERBERUS_SPI_FRAME_PAYLOAD_SIZE ||
         input_size > CERBERUS_SPI_FRAME_PAYLOAD_SIZE || (!input && input_size)) return ESP_ERR_INVALID_ARG;
     memset(output, 0, output_size);
+    if (command == CERBERUS_SPI_COMMAND_DUAL_BLE_START) {
+        cerberus_dual_ble_start_t start_request;
+        if (!input || input_size != sizeof(start_request)) return ESP_ERR_INVALID_ARG;
+        memcpy(&start_request, input, sizeof(start_request));
+        if (!cerberus_dual_ble_start_valid(&start_request)) return ESP_ERR_INVALID_ARG;
+        analyzer = start_request.mode == CERBERUS_DUAL_BLE_ANALYZER;
+    }
     if (!link_mutex) return ESP_ERR_INVALID_STATE;
     int64_t start = esp_timer_get_time();
     if (start < 0) return ESP_ERR_INVALID_STATE;
@@ -32,7 +40,8 @@ esp_err_t c5_spi_link_dual_ble_exchange(uint8_t command, const void *input,
             error = ESP_ERR_TIMEOUT;
         peer_firmware_version = error == ESP_OK ? peer.firmware_version : 0U;
     }
-    if (error == ESP_OK && peer_firmware_version < (metadata ? CERBERUS_DUAL_BLE_METADATA_MIN_FIRMWARE :
+    if (error == ESP_OK && peer_firmware_version < (analyzer ? CERBERUS_DUAL_BLE_ANALYZER_MIN_FIRMWARE :
+        metadata ? CERBERUS_DUAL_BLE_METADATA_MIN_FIRMWARE :
         inventory ? CERBERUS_DUAL_BLE_INVENTORY_MIN_FIRMWARE :
         snapshot ? CERBERUS_DUAL_BLE_SNAPSHOT_MIN_FIRMWARE : CERBERUS_DUAL_BLE_MIN_FIRMWARE))
         error = ESP_ERR_NOT_SUPPORTED;
