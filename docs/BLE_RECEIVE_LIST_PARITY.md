@@ -1,8 +1,8 @@
 # BLE receive-list parity audit
 
-## Rev102 source candidate: C5 receive metadata in saved reports
+## Rev102 checkpoint: C5 receive metadata in saved reports
 
-The v4 archive candidate retains the frozen C5 receive envelope alongside the
+The v4 archive retains the frozen C5 receive envelope alongside the
 same original ADV, RSSI semantics, age bound and full-width boot/epoch
 provenance. Its eight bytes describe callback source, delivered length,
 properties, SID, primary/secondary PHY, controller status and independent
@@ -31,14 +31,15 @@ Focused host validation passes **1,881 offline UI**, **924 controller**,
 **297,359 actual-storage**, and **15,021 worker/lifecycle** checks. The tests
 include full-size mixed reports, immutable receive bytes after later bank
 replacement, staging isolation, pending-release cancellation, pinned concurrent
-copies and failed-I/O preservation. Current host layouts are **15,376 bytes
+copies and failed-I/O preservation. Host and native layouts agree at **15,376 bytes
 per document**, **32,304 bytes for the UI store**, and **30,000 bytes for the
 worker context**. Embedded documents are included in the store totals; these
-are host sizes pending native measurement, not runtime heap or stack acceptance.
+are measured type sizes, not runtime heap or stack acceptance. Combined optional
+UI/worker requests grow 2,088 bytes; fixed internal data/BSS are unchanged.
 
-[The rev102 checkpoint](DUAL_RADIO_REV102.md) owns current build, installation
-and physical-acceptance status; this source section does not claim rev102 is
-installed. Physical save/reopen/reboot and receive-pane acceptance remain
+[The rev102 checkpoint](DUAL_RADIO_REV102.md) records all 120 host suites and five
+native targets passing, matched installation and idle boot. Physical
+save/reopen/reboot and receive-pane acceptance remain
 pending, as do controlled extended/coded reception and sustained transitions.
 Full payload retention, C5 scan-response evidence, broader history, source
 filters and full upstream family/option parity remain incomplete. See the

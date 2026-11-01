@@ -44,10 +44,12 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 Rev102 preserves the C5 receive envelope in v4 SD reports alongside the S3
 matched-response evidence. The existing offline viewer gains C5 RECEIVE INFO;
 old v1/v2/v3 reports remain readable without inventing absent metadata. Saved
-rows remain historical evidence and cannot become live action targets. Focused
-codec, capture, UI, worker and storage checks pass; full validation and local
-installation status are recorded in [the rev102 checkpoint](docs/DUAL_RADIO_REV102.md).
-Physical save/reopen and receive acceptance remain pending.
+rows remain historical evidence and cannot become live action targets. All 120
+host suites and five native targets pass; the matched local package is installed
+with verified writes, both chips online and SD mounted. Fixed internal data/BSS
+is unchanged; optional archive buffers grow 2,088 bytes. Physical save/reopen,
+receive and runtime stress/stack acceptance remain pending. See
+[the rev102 checkpoint](docs/DUAL_RADIO_REV102.md).
 
 Rev101 preserves C5 callback source, delivered length, SID/PHY, properties,
 controller status and full AD-layout validity with each original observation.

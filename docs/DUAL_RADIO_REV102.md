@@ -1,9 +1,10 @@
 # Rev102: preserve C5 receive evidence in SD reports
 
-Rev102 extends the existing BLE report rather than adding another save menu or
-receiver query. The full Marauder port remains incomplete. Rev101 is the
-preceding installed checkpoint; validation and installation evidence for this
-candidate is recorded below as it becomes available.
+Rev102 is installed as a local development checkpoint. It extends the existing
+BLE report without another save menu or receiver query. All 120 host suites and
+five native targets pass on matching unchanged inputs; paired writes and boot
+are verified. Physical feature acceptance remains pending, and the full
+Marauder port is incomplete. Rev101 is the preceding installed checkpoint.
 
 ## Saved evidence and compatibility
 
@@ -85,8 +86,43 @@ source SHA-256 is `52eea6f73c785da4a343f621807dffa07172bf4793d2ea58b6d69368232f6
 The packaged applications match the final full-matrix binaries. No image set
 has been selected as a public release.
 
-Recoverable installation checks are pending at this source checkpoint.
-Physical acceptance also remains pending: save/reopen selected C5
+## Recoverable installation and idle checks
+
+Implementation commit `57cb92b72d98cc97e3337da4fa4d16f74d08f8e1` is installed.
+Fresh first-2-MiB S3 and C5 backups match the previously installed rev101 images
+and verify against device flash. They cover every erase-rounded write region;
+higher flash remains untouched. Exact chip/MAC guards and the backup validator
+run before writes. Five identity tests and nine receipt/stage tests pass.
+All nine image writes across bridge, C5 and final S3 verify, with exclusive
+package/source/image-bound receipts. No PR or release was published.
+
+Read-only diagnostics report S3 `0.1.0-dev.rev102`, C5 protocol firmware 64,
+active display buffering, mounted SD, inactive USB storage and no previous-reset
+fault. At the final idle check, S3 internal free memory is 134,396 bytes, its
+largest block is 94,208, PSRAM free is 1,428,324 and task count is ten. These match
+the preceding idle readings; optional archive allocations are not exercised.
+C5 reports 58 KiB free and a 54 KiB minimum. Radio owners and the archive worker
+are idle. Startup SPI retains four initial READY timeouts and four legacy
+fallbacks, with zero mutex timeouts and driver errors.
+
+The observed console low-water margin is 524 bytes, versus 652 in the preceding
+checkpoint's recorded sequence. It remains 524 on the follow-up read. The exact
+console source/checker, selected emitted frames and 2,896-byte known frame
+subtotal are unchanged; this comparison does not establish the cause of the
+different runtime reading. Main-task low water is 5,176 bytes. Both are observed
+readings, not worst-case bounds; runtime stress and stack acceptance remain open.
+The existing 26,240-byte crash record was preserved and predates this update.
+
+Evidence is retained under `artifacts/device-rev102`, including
+`installation-receipt.json`, backup/write receipts, preflash verification,
+`boot-confirmed.txt`, `settled-boot.txt`, `final-idle.txt`, and
+`console-frame-comparison.json`. The receipt binds the implementation commit,
+source digest and exact matched package. These checks establish recoverable
+installation and idle boot, not RF, touch or real-card report acceptance.
+
+## Pending physical acceptance
+
+Physical acceptance remains pending: save/reopen selected C5
 and mixed reports, verify S3 matched responses and old reports, repeat Back and
 a subsequent split Wi-Fi scan, and inspect controlled extended/legacy reception.
 Real-card failure recovery, power loss and sustained use are not established by
