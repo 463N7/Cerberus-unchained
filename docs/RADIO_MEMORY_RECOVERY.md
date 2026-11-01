@@ -1,8 +1,9 @@
 # Radio memory recovery candidate
 
-Rev95 follows the installed rev94 split-scan checkpoint. Its primary acceptance
-criterion is repeated BLE discovery -> Stop/Back -> S3 2.4 GHz plus C5 5 GHz
-scanning without rebooting. The candidate is not yet physically accepted.
+Rev95 restored one measured BLE discovery -> Stop/Back -> S3 2.4 GHz plus C5
+5 GHz scan, but left a narrow internal-memory reserve. Rev96 adds headroom.
+Repeated transitions and directory browsing remain the candidate acceptance
+checks; a successful first scan is not full lifecycle acceptance.
 
 ## Observed problem
 
@@ -61,7 +62,7 @@ is therefore not a hard real-time or strictly side-effect-free operation.
 Similarly, the existing SPI software deadline cannot interrupt an in-flight
 SDK polling transfer. No hard touch-latency bound is claimed.
 
-## Validation status
+## Rev95 validation
 
 Focused host checks pass for the actual host in INTERNAL, EXTERNAL and
 Bluetooth-disabled configurations, missing PSRAM and repeated claims,
@@ -98,7 +99,42 @@ baseline; it does not demonstrate warm-memory recovery. The current boot
 reports no preceding reset fault. An older stored crash record remains and
 is not counted as a new crash.
 
-Hardware must still measure the recovered warm internal RAM, scan completion, both receiver
-counts and cleanup across repeated transitions. Full Marauder parity, active
-Wi-Fi errors, expansion/GPS hardware, calibrated Fox Hunt performance and
-sustained load remain separate work.
+The first explicit completed Wi-Fi scan after BLE Stop/Back produced 9 S3
+results and 17 C5 results in 4,959 ms. C5 reports all 17 on 5 GHz; its own
+sweep took 3,403 ms. Both radio owners and pending cleanup were clear, and
+scan/UI/radio errors were zero. Earlier telemetry before the explicit START
+still had generation zero, so the preceding display report alone was not
+treated as scan evidence.
+
+After both subsystems initialized, internal free RAM settled at 66,292 bytes,
+with a 31,744-byte largest block and 30,248-byte observed minimum. This leaves
+only 756 bytes above the 65,536-byte admission floor. The default network/event
+infrastructure remains initialized after Wi-Fi deinit; the threshold pass does
+not establish a useful reserve. SPI mutex timeouts reached four during this
+short workflow; driver errors remained zero. No zero-contention claim is made.
+
+## Rev96 headroom candidate
+
+File, saved-log and script directory metadata use three internal BSS banks
+totaling 21,760 bytes. They are ordinary CPU-accessed records, not DMA or ISR
+buffers. Rev96 replaces them with three independently allocated PSRAM banks
+whose successful allocations remain stable until reboot. The expected gross
+BSS reduction is 21,748 bytes before link alignment. The native ELF confirms
+21,760 bytes of bank symbols becoming 12 bytes of pointers. Total `.dram0.bss`
+shrinks from 167,120 to 145,376 bytes (21,744 bytes after alignment), with
+`.dram0.data` unchanged. Hardware heap recovery still needs measurement.
+
+All five directory-list producers use the guarded wrapper. Allocation/storage
+failure clears visible counts, retains existing allocated banks, and permits
+later explicit retry. Selected names/entries keep their existing copy-before-
+reload behavior. There is no internal-memory fallback: without available
+PSRAM these list pages report a memory error while Back/Reload remain usable.
+Background SD logging and USB storage services are unchanged.
+
+All five rev96 native targets and all 120 host suites pass on unchanged inputs.
+Native evidence is under `artifacts/integration`; the host receipt/logs are
+retained under `artifacts/host-checks/rev96-full-run`; the ELF comparison is
+`artifacts/rev96-directory-memory-native.json`. Physical repeat-scan and
+directory checks are pending. Full Marauder parity, active Wi-Fi errors,
+expansion/GPS hardware, calibrated Fox Hunt performance and sustained load
+remain separate work.

@@ -1,6 +1,6 @@
 # Cerberus Unchained
 
-Experimental Cerberus firmware for the expanded rev95 feature set: integrated
+Experimental Cerberus firmware for the expanded rev96 feature set: integrated
 wardriving, C5 Wi-Fi capture and analysis, S3 BLE discovery and tools, Remote ID
 receive workflows, AP/client navigation, and optional expansion radios.
 
@@ -9,7 +9,7 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev95` (candidate), paired with onboard
+**Current source version: `0.1.0-dev.rev96` (candidate), paired with onboard
 C5 protocol firmware revision 61. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -41,16 +41,24 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 
 ## Development status
 
+Rev96 moves the three CPU-only directory-list banks to lazy, stable PSRAM
+allocations to preserve internal radio memory. Their payload totals 21,760
+bytes. A missing/exhausted PSRAM bank produces an explicit memory error and a
+zero visible row count; Back and later reloads remain available. All 120 host
+suites and all five native targets pass on stable inputs. The linked internal
+sections shrink by 21,744 bytes. Physical repeat-scan checks are pending.
+
 Rev95 addresses the retained S3 memory limitation observed after Bluetooth use.
 It moves eligible NimBLE host allocations to PSRAM, preserves the existing
 buffer counts and host lifetime, and rejects BLE initialization when optional
 PSRAM is absent. It also adds cached per-radio/lifecycle diagnostics and bounded
 recovery from an unknown C5 firmware cache. All 119 host suites and all five
 native targets pass on stable inputs. The matched onboard package also passes
-image, partition, source and console-stack checks. The repeated
-BLE-to-split-Wi-Fi device check remains pending. The paired rev95 build is
-installed: both chips are online, SD is mounted, and all three new diagnostic
-commands respond. Cold S3 internal free RAM is 113,524 bytes. See
+image, partition, source and console-stack checks. The paired rev95 build is
+installed. After BLE Stop/Back, the owner and console confirmed a split scan:
+9 S3 APs plus 17 C5 APs in 4,959 ms, no scan errors and no held radio owners.
+Warm internal free RAM was 66,292 bytes, only 756 bytes above the next-scan
+admission threshold. This narrow reserve motivates rev96. See
 [radio memory recovery](docs/RADIO_MEMORY_RECOVERY.md).
 
 Rev94 adds adaptive dual-radio scanning: Wi-Fi-only scans use S3 for 2.4 GHz
@@ -61,9 +69,9 @@ fresh AP selection checks are part of the implementation. The paired rev94
 build was installed on the development board; the owner confirmed completed
 split Wi-Fi scans, Wi-Fi Stop/restart/Back and activity on both BLE receivers.
 Diagnostics confirm repeated C5 5 GHz sweeps and active S3 BLE discovery.
-A confirmed limitation remains: after BLE use, the initialized S3 Bluetooth
-host retains enough internal memory to force Wi-Fi onto the C5 fallback.
-Repairing that transition is the next priority. Dual Fox Hunt, comparative
+Rev94 could fall back to C5 after BLE retained too much S3 internal memory;
+the rev95/rev96 memory work above addresses this measured limitation.
+Dual Fox Hunt, comparative
 speed, coverage and sustained lifecycle acceptance remain pending. See
 [dual-radio scanning and validation](docs/DUAL_RADIO_SCANNING.md).
 

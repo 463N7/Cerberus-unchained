@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the 119 host suites through the dual-radio diagnostics checkpoint.
+"""Run the 120 host suites through the radio-memory headroom checkpoint.
 
 The checked-in synthetic fixtures need no board, radio, or private captures.
 Generated fixtures, native executables, previews, logs, and the result receipt
@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "artifacts" / "host-checks"
 
 CHECKS = (
+    'check_ui_directory_memory.py',
     'check_s3_wifi_scanner.py',
     'check_s3_ble_host_memory.py',
     'check_wifi_scan_band.py',
@@ -180,8 +181,8 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=3, help="Parallel compiler jobs (default: 3)")
     args = parser.parse_args()
     names = (*CHECKS, *SERIAL_CHECKS)
-    if len(names) != 119 or len(set(names)) != 119:
-        parser.error("Expected 119 unique suites; do not silently skip a suite")
+    if len(names) != 120 or len(set(names)) != 120:
+        parser.error("Expected 120 unique suites; do not silently skip a suite")
     if args.list:
         for name in names:
             print(name)
@@ -208,7 +209,7 @@ def main() -> int:
     changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
     receipt = {
         "format": 1,
-        "suite_set": "rev95",
+        "suite_set": "rev96",
         "recorded_utc": datetime.now(timezone.utc).isoformat(),
         "status": "passed" if not changed and all(r["exit_code"] == 0 for r in results) else "failed",
         "hardware_validated": False,

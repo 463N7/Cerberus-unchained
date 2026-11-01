@@ -492,7 +492,7 @@ static uint32_t sentinel_frame;
 static esp_err_t web_action_error = ESP_OK;
 static cerberus_c5_status_t c5_status;
 static bool c5_online;
-static cerberus_storage_entry_t file_entries[UI_FILE_ENTRY_CAPACITY];
+static cerberus_storage_entry_t *file_entries;
 static cerberus_storage_status_t storage_status;
 static char file_path[CERBERUS_STORAGE_PATH_MAX] = "/";
 static size_t file_entry_count;
@@ -503,7 +503,7 @@ static bool file_listing_checked;
 static bool storage_safely_removed;
 static bool storage_benchmark_running;
 static ui_script_mode_t script_mode = UI_SCRIPT_MODE_LIST;
-static cerberus_storage_entry_t script_entries[UI_SCRIPT_ENTRY_CAPACITY];
+static cerberus_storage_entry_t *script_entries;
 static size_t script_entry_count;
 static size_t script_page_offset;
 static bool script_listing_checked;
@@ -562,7 +562,7 @@ static char file_action_message[80];
 static uint16_t file_action_color = UI_DEFAULT_MUTED;
 static cerberus_firmware_package_info_t file_package_info;
 static esp_err_t file_package_error = ESP_ERR_INVALID_STATE;
-static cerberus_storage_entry_t log_entries[UI_FILE_ENTRY_CAPACITY];
+static cerberus_storage_entry_t *log_entries;
 static size_t log_entry_count;
 static size_t log_page_offset;
 static esp_err_t log_error = ESP_ERR_INVALID_STATE;
@@ -5486,6 +5486,33 @@ static void handle_self_test_tap(uint16_t x, uint16_t y)
     ESP_ERROR_CHECK(draw_detail_page());
 }
 
+/* UI-task-only directory metadata, retained for the firmware lifetime after
+ * the first successful allocation. No DMA/ISR access or exported bank pointer.
+ * Missing/exhausted PSRAM leaves the caller's visible count zero; no internal
+ * fallback consumes the radio reserve. Reload can retry a failed allocation. */
+static esp_err_t ui_list_directory(
+    const char *path,
+    cerberus_storage_entry_t **entries,
+    size_t capacity,
+    size_t *count)
+{
+    if (count == NULL) return ESP_ERR_INVALID_ARG;
+    *count = 0U;
+    if (entries == NULL || capacity == 0U || capacity > UI_FILE_ENTRY_CAPACITY)
+        return ESP_ERR_INVALID_ARG;
+    if (*entries == NULL) {
+        *entries = heap_caps_calloc(capacity, sizeof(**entries),
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (*entries == NULL) return ESP_ERR_NO_MEM;
+    }
+    esp_err_t error = cerberus_storage_list_directory(path, *entries, capacity, count);
+    if (error != ESP_OK || *count > capacity) {
+        *count = 0U;
+        return error == ESP_OK ? ESP_ERR_INVALID_SIZE : error;
+    }
+    return ESP_OK;
+}
+
 static esp_err_t refresh_file_listing(bool remount)
 {
     storage_checked = true;
@@ -5510,9 +5537,9 @@ static esp_err_t refresh_file_listing(bool remount)
         return storage_last_error;
     }
 
-    storage_last_error = cerberus_storage_list_directory(
+    storage_last_error = ui_list_directory(
         file_path,
-        file_entries,
+        &file_entries,
         UI_FILE_ENTRY_CAPACITY,
         &file_entry_count);
     if (storage_last_error != ESP_OK) {
@@ -5846,10 +5873,12 @@ static esp_err_t draw_files(void)
     }
 
     if (storage_last_error != ESP_OK) {
-        ESP_RETURN_ON_ERROR(draw_centered(132, "MICROSD NOT AVAILABLE", UI_BAD, 2), TAG, "SD error title failed");
+        ESP_RETURN_ON_ERROR(draw_centered(132, storage_last_error == ESP_ERR_NO_MEM ?
+            "LIST MEMORY UNAVAILABLE" : "MICROSD NOT AVAILABLE", UI_BAD, 2), TAG, "SD error title failed");
         snprintf(line, sizeof(line), "ERROR %s", esp_err_to_name(storage_last_error));
         ESP_RETURN_ON_ERROR(draw_centered(180, line, UI_MUTED, 1), TAG, "SD error detail failed");
-        ESP_RETURN_ON_ERROR(draw_centered(230, "INSERT FAT32 CARD", UI_TEXT, 1), TAG, "SD error help failed");
+        ESP_RETURN_ON_ERROR(draw_centered(230, storage_last_error == ESP_ERR_NO_MEM ?
+            "BACK IS AVAILABLE; RETRY LATER" : "INSERT FAT32 CARD", UI_TEXT, 1), TAG, "SD error help failed");
     } else {
         snprintf(
             line,
@@ -5957,9 +5986,9 @@ static esp_err_t refresh_log_listing(bool remount)
         storage_safely_removed = false;
         storage_checked = false;
     }
-    log_error = cerberus_storage_list_directory(
+    log_error = ui_list_directory(
         UI_LOG_PATH,
-        log_entries,
+        &log_entries,
         UI_FILE_ENTRY_CAPACITY,
         &log_entry_count);
     if (log_error == ESP_ERR_NOT_FOUND) {
@@ -5995,10 +6024,12 @@ static esp_err_t draw_log_list(void)
         (void)refresh_log_listing(false);
     }
     if (log_error != ESP_OK) {
-        ESP_RETURN_ON_ERROR(draw_centered(132, "LOG STORAGE UNAVAILABLE", UI_BAD, 2), TAG, "logs storage failed");
+        ESP_RETURN_ON_ERROR(draw_centered(132, log_error == ESP_ERR_NO_MEM ?
+            "LIST MEMORY UNAVAILABLE" : "LOG STORAGE UNAVAILABLE", UI_BAD, 2), TAG, "logs storage failed");
         snprintf(line, sizeof(line), "ERROR %s", esp_err_to_name(log_error));
         ESP_RETURN_ON_ERROR(draw_centered(180, line, UI_MUTED, 1), TAG, "logs storage detail failed");
-        ESP_RETURN_ON_ERROR(draw_centered(230, "INSERT FAT32 MICROSD CARD", UI_TEXT, 1), TAG, "logs storage help failed");
+        ESP_RETURN_ON_ERROR(draw_centered(230, log_error == ESP_ERR_NO_MEM ?
+            "BACK IS AVAILABLE; RETRY LATER" : "INSERT FAT32 MICROSD CARD", UI_TEXT, 1), TAG, "logs storage help failed");
     } else {
         snprintf(line, sizeof(line), "%u LOG FILE%s",
             (unsigned)log_entry_count,
@@ -6408,9 +6439,9 @@ static esp_err_t refresh_script_listing(void)
         }
     }
     size_t raw_count = 0U;
-    script_listing_error = cerberus_storage_list_directory(
+    script_listing_error = ui_list_directory(
         CERBERUS_STORAGE_SCRIPTS_PATH,
-        script_entries,
+        &script_entries,
         UI_SCRIPT_ENTRY_CAPACITY,
         &raw_count);
     if (script_listing_error != ESP_OK) {
@@ -6447,7 +6478,8 @@ static esp_err_t draw_scripts_list(void)
             esp_err_to_name(script_listing_error));
         ESP_RETURN_ON_ERROR(draw_centered(174, line, UI_BAD, 1), TAG,
             "scripts unavailable failed");
-        ESP_RETURN_ON_ERROR(draw_centered(206, "INSERT OR REMOUNT THE MICROSD CARD", UI_MUTED, 1), TAG,
+        ESP_RETURN_ON_ERROR(draw_centered(206, script_listing_error == ESP_ERR_NO_MEM ?
+            "BACK IS AVAILABLE; RETRY LATER" : "INSERT OR REMOUNT THE MICROSD CARD", UI_MUTED, 1), TAG,
             "scripts storage guidance failed");
     } else if (script_entry_count == 0U) {
         ESP_RETURN_ON_ERROR(draw_centered(160, "NO .CBS SCRIPTS FOUND", UI_MUTED, 2), TAG,
@@ -10015,9 +10047,9 @@ static void navigate_file_directory(const char *name)
 
     snprintf(file_path, sizeof(file_path), "%s", next_path);
     file_page_offset = 0;
-    storage_last_error = cerberus_storage_list_directory(
+    storage_last_error = ui_list_directory(
         file_path,
-        file_entries,
+        &file_entries,
         UI_FILE_ENTRY_CAPACITY,
         &file_entry_count);
     ESP_ERROR_CHECK(draw_detail_page());
@@ -10037,9 +10069,9 @@ static void navigate_file_parent(void)
     }
 
     file_page_offset = 0;
-    storage_last_error = cerberus_storage_list_directory(
+    storage_last_error = ui_list_directory(
         file_path,
-        file_entries,
+        &file_entries,
         UI_FILE_ENTRY_CAPACITY,
         &file_entry_count);
 }
