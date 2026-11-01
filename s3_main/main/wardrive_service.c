@@ -1398,16 +1398,12 @@ static esp_err_t wardrive_start_with_idle_probes_paused(bool include_expansions,
     if (!cerberus_s3_ble_host_initialized()) {
         if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < 98304U)
             return ESP_ERR_NO_MEM;
-        const unsigned warm_epoch = cerberus_s3_ble_host_epoch();
-        error = cerberus_s3_ble_host_claim(CERBERUS_S3_BLE_OWNER_SCANNER);
+        cerberus_s3_ble_host_lease_t warm_lease = {0};
+        error = cerberus_s3_ble_host_claim(CERBERUS_S3_BLE_OWNER_SCANNER, &warm_lease);
         if (error != ESP_OK) return error;
-        /* Initialization can yield to a host reset. Refuse a stale claim
-         * before releasing the shared owner label. This is a fail-closed
-         * check; host_epoch and the existing owner CAS are not one operation. */
-        if (cerberus_s3_ble_host_epoch() != warm_epoch ||
-            cerberus_s3_ble_host_owner() != CERBERUS_S3_BLE_OWNER_SCANNER)
-            return ESP_ERR_INVALID_STATE;
-        error = cerberus_s3_ble_host_release(CERBERUS_S3_BLE_OWNER_SCANNER);
+        /* The host checks token, epoch and owner together. A reset or later
+         * SCANNER claim cannot be released by this temporary initializer. */
+        error = cerberus_s3_ble_host_release(&warm_lease);
         if (error != ESP_OK) return error;
     }
     /* GPS OFF allocates no UART. Its reserve is the scanner's 32 KiB gate,

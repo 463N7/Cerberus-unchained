@@ -2,6 +2,11 @@
 
 ## Current local checkpoint
 
+[Rev120](DUAL_RADIO_REV120.md) binds shared S3 BLE host release to an exact
+claim and preserves pending initialization reservations across reset. Existing
+host clients are migrated together. This is a local candidate; rev113 remains
+the last verified installed baseline.
+
 [Rev119](DUAL_RADIO_REV119.md) extends exact S3 passive ownership to Wardriving
 acquisition, completed BLE evidence and cleanup. Its existing terminal source
 error policy remains explicit. This is a local candidate, not an installation.

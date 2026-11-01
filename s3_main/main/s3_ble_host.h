@@ -11,14 +11,30 @@ typedef enum {
     CERBERUS_S3_BLE_OWNER_CENTRAL,
 } cerberus_s3_ble_owner_t;
 
-/* One NimBLE host serves passive Recon scanning and the Radio Lab advertiser.
- * Claim before a GAP operation; release only after discovery/advertising ends. */
-esp_err_t cerberus_s3_ble_host_claim(cerberus_s3_ble_owner_t owner);
-esp_err_t cerberus_s3_ble_host_release(cerberus_s3_ble_owner_t owner);
+typedef struct {
+    uint64_t token;
+    unsigned epoch;
+    cerberus_s3_ble_owner_t owner;
+} cerberus_s3_ble_host_lease_t;
+
+/* One NimBLE host serves the scanner, advertiser and central. Successful
+ * admission returns a nonreused token bound to owner and host epoch. Failure
+ * clears the output and retains no caller-owned lease. Validate before GAP
+ * work; release this exact lease only after the procedure is quiescent.
+ * Reset/task exit atomically retire the lease. Stale release cannot affect a
+ * replacement with the same owner label. No owner-only release API exists.
+ * lease_valid proves retained ownership, not SDK readiness: a sync failure
+ * without reset does not abandon its claim. Query host_synced separately. */
+esp_err_t cerberus_s3_ble_host_claim(cerberus_s3_ble_owner_t owner,
+    cerberus_s3_ble_host_lease_t *lease);
+esp_err_t cerberus_s3_ble_host_release(const cerberus_s3_ble_host_lease_t *lease);
+bool cerberus_s3_ble_host_lease_valid(const cerberus_s3_ble_host_lease_t *lease);
+/* Admission/diagnostic label, NOT ownership proof. A pending initialization
+ * or sync wait keeps its reservation visible even if reset retired its lease. */
 cerberus_s3_ble_owner_t cerberus_s3_ble_host_owner(void);
 bool cerberus_s3_ble_host_initialized(void);
 bool cerberus_s3_ble_host_synced(void);
-/* Changes whenever the host resets; an in-flight client operation becomes stale. */
+/* Changes on reset/task exit. Exhaustion fails closed until reboot. */
 unsigned cerberus_s3_ble_host_epoch(void);
 
 typedef enum {

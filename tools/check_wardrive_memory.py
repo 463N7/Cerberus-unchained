@@ -24,7 +24,7 @@ worker = source[source.index("static void wardrive_worker(void *unused)"):source
     "static esp_err_t wardrive_start_with_idle_probes_paused(")]
 start = source[source.index("static esp_err_t wardrive_start_with_idle_probes_paused("):source.index(
     "void cerberus_wardrive_request_stop(void)")]
-assert start.index("cerberus_s3_ble_host_claim(CERBERUS_S3_BLE_OWNER_SCANNER)") < start.index(
+assert start.index("cerberus_s3_ble_host_claim(CERBERUS_S3_BLE_OWNER_SCANNER, &warm_lease)") < start.index(
     "allocate_workspace();") < start.index("field_survey_snapshot(&expansion_stage);")
 assert stop.index("stop_own_scans(") < stop.index(
     "if (wardrive_file_open) (void)save_open_file(keep);")

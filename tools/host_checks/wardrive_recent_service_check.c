@@ -46,8 +46,11 @@ static unsigned fail_alloc_at, stop_after_append, fail_append_at;
 static unsigned wifi_start_calls;
 static esp_err_t wifi_first_start_error;
 static bool host_initialized_value,reset_during_claim,replace_during_claim;
+static bool reset_before_release,replace_before_release;
 static unsigned host_epoch_value,host_claims,host_releases;
 static cerberus_s3_ble_owner_t host_owner_value;
+static uint64_t host_next_token;
+static cerberus_s3_ble_host_lease_t host_live_lease;
 static bool fail_task, immediate_task, inspect_pending, inspect_free, auto_complete, enqueue_on_start;
 static esp_err_t status_error, session_error, append_error, begin_error, copy_error;
 static bool storage_open[2], storage_owned;
@@ -135,16 +138,38 @@ esp_err_t c5_spi_link_check_wifi_relation_bank(const cerberus_c5_wifi_relation_b
 cerberus_s3_ble_owner_t cerberus_s3_ble_host_owner(void) { return host_owner_value; }
 bool cerberus_s3_ble_host_initialized(void) { return host_initialized_value; }
 unsigned cerberus_s3_ble_host_epoch(void) { return host_epoch_value; }
-esp_err_t cerberus_s3_ble_host_claim(cerberus_s3_ble_owner_t o)
+esp_err_t cerberus_s3_ble_host_claim(cerberus_s3_ble_owner_t o,
+    cerberus_s3_ble_host_lease_t *lease)
 {
     ++host_claims;CHECK(o==CERBERUS_S3_BLE_OWNER_SCANNER && host_owner_value==CERBERUS_S3_BLE_OWNER_NONE);
+    CHECK(lease!=NULL);memset(lease,0,sizeof(*lease));
     host_initialized_value=true;host_owner_value=o;
-    if(reset_during_claim)++host_epoch_value;
-    if(replace_during_claim)host_owner_value=CERBERUS_S3_BLE_OWNER_CENTRAL;
+    host_live_lease=(cerberus_s3_ble_host_lease_t){.token=++host_next_token,.epoch=host_epoch_value,.owner=o};
+    if(reset_during_claim || replace_during_claim){
+        ++host_epoch_value;host_owner_value=CERBERUS_S3_BLE_OWNER_NONE;
+        host_live_lease=(cerberus_s3_ble_host_lease_t){0};
+        if(replace_during_claim){
+            host_owner_value=CERBERUS_S3_BLE_OWNER_CENTRAL;
+            host_live_lease=(cerberus_s3_ble_host_lease_t){.token=++host_next_token,.epoch=host_epoch_value,.owner=host_owner_value};
+        }
+        return ESP_ERR_INVALID_STATE;
+    }
+    *lease=host_live_lease;
     return ESP_OK;
 }
-esp_err_t cerberus_s3_ble_host_release(cerberus_s3_ble_owner_t o)
-{ ++host_releases;CHECK(o==host_owner_value);host_owner_value=CERBERUS_S3_BLE_OWNER_NONE;return ESP_OK; }
+bool cerberus_s3_ble_host_lease_valid(const cerberus_s3_ble_host_lease_t *lease)
+{return lease&&lease->token&&lease->token==host_live_lease.token&&lease->epoch==host_live_lease.epoch&&lease->owner==host_live_lease.owner;}
+esp_err_t cerberus_s3_ble_host_release(const cerberus_s3_ble_host_lease_t *lease)
+{
+    ++host_releases;
+    if(reset_before_release){++host_epoch_value;host_owner_value=CERBERUS_S3_BLE_OWNER_NONE;host_live_lease=(cerberus_s3_ble_host_lease_t){0};}
+    if(replace_before_release){
+        host_owner_value=CERBERUS_S3_BLE_OWNER_SCANNER;
+        host_live_lease=(cerberus_s3_ble_host_lease_t){.token=++host_next_token,.epoch=host_epoch_value,.owner=host_owner_value};
+    }
+    if(!cerberus_s3_ble_host_lease_valid(lease))return ESP_ERR_INVALID_STATE;
+    host_owner_value=CERBERUS_S3_BLE_OWNER_NONE;host_live_lease=(cerberus_s3_ble_host_lease_t){0};return ESP_OK;
+}
 cerberus_s3_wifi_owner_t cerberus_s3_wifi_owner(void) { return CERBERUS_S3_WIFI_NONE; }
 void cerberus_s3_capture_status(cerberus_s3_capture_status_t *out) { memset(out,0,sizeof(*out)); }
 esp_err_t cerberus_s3_ble_scanner_get_status(cerberus_ble_scan_status_payload_t *out)
@@ -231,6 +256,7 @@ static void reset(void)
     partial_bytes=0; pending_task=NULL; recent_session_id=recent_sequence=0;
     clock_us=10000000; stop_requested=false;
     host_initialized_value=true;reset_during_claim=replace_during_claim=false;
+    reset_before_release=replace_before_release=false;host_next_token=0;host_live_lease=(cerberus_s3_ble_host_lease_t){0};
     host_epoch_value=8;host_claims=host_releases=0;host_owner_value=CERBERUS_S3_BLE_OWNER_NONE;
     passive_boundary_reset();
     for(unsigned i=0;i<32;++i){

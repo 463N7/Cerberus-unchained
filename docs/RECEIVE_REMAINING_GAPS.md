@@ -39,12 +39,16 @@ source check, not proof of complete porting or physical acceptance.
   distinguish a returned status/copy timeout from an accepted scan's reported
   controller error and from an SD append timeout; rev119 still treats those
   returned S3 call failures as terminal for the recording session.
-- **Shared BLE host:** first-use Wardriving initialization still uses the host's
-  generic SCANNER claim/release. Rev119 checks host epoch and owner around that
-  claim and refuses admission on a detected reset/replacement. These separate
-  checks and the owner-only atomic release are not one atomic epoch-bound
-  ownership transition. A shared host reset/claim/release audit remains open;
-  the scoped worker APIs do not establish that every host client is race-free.
+- **Shared BLE host:** local rev120 replaces owner-only release with a nonreused
+  token, epoch and owner checked together under a short critical lock. The
+  scanner, central, advertiser, Radio Lab and first-use Wardriving initializer
+  use the new lease. Pending initialization remains reserved across reset, and
+  readiness is distinct from retained ownership. See
+  [the milestone](DUAL_RADIO_REV120.md) for source/build evidence and limits.
+  A valid-lease check followed by an SDK operation is still not one atomic
+  operation with host reset; broader SDK command serialization and physical
+  concurrent-reset acceptance remain open. This does not establish that every
+  host client or C5 ownership path is race-free.
 - **MAC Monitor:** its context/job/epoch guards already protect callback,
   start, stop and release paths. This audit found no equivalent reachable
   takeover defect; that is not a claim of complete physical acceptance.

@@ -9,7 +9,7 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev119`, paired with onboard
+**Current source version: `0.1.0-dev.rev120`, paired with onboard
 C5 protocol firmware revision 68. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -40,6 +40,11 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev120 is a local shared BLE host candidate replacing owner-only release with
+an atomically checked claim token. Existing scanner, central, advertiser,
+Radio Lab and Wardriving callers use the exact lease. See
+[rev120](docs/DUAL_RADIO_REV120.md) for validation and acceptance limits.
 
 Rev119 is a local Wardriving candidate binding S3 BLE acquisition, completed
 evidence and cleanup to an exact passive scan. Unresolved cleanup stays in

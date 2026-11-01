@@ -29,15 +29,18 @@ static void run_passive_worker_cases(void)
     unsigned before=checks;
     /* Existing first-use host warming may yield. A replacement/reset must not
      * cause the wrapper to release another caller's shared owner label. */
-    for(unsigned fault=0;fault<3;++fault){
+    for(unsigned fault=0;fault<5;++fault){
         reset();host_initialized_value=false;
         reset_during_claim=fault==1;replace_during_claim=fault==2;
+        reset_before_release=fault==3;replace_before_release=fault==4;
         esp_err_t result=cerberus_wardrive_start(false,false);
         CHECK(host_claims==1);
         if(fault){
-            CHECK(result==ESP_ERR_INVALID_STATE && !host_releases && !workspace &&
+            CHECK(result==ESP_ERR_INVALID_STATE && host_releases==(fault>=3?1U:0U) && !workspace &&
                 !worker_active && !task_creates && !storage_owned && !allocations);
-            CHECK(host_owner_value==(fault==1?CERBERUS_S3_BLE_OWNER_SCANNER:CERBERUS_S3_BLE_OWNER_CENTRAL));
+            CHECK(host_owner_value==(fault==2?CERBERUS_S3_BLE_OWNER_CENTRAL:
+                fault==4?CERBERUS_S3_BLE_OWNER_SCANNER:CERBERUS_S3_BLE_OWNER_NONE));
+            if(fault==4)CHECK(host_live_lease.token==2 && host_live_lease.epoch==8);
         }else{
             CHECK(result==ESP_OK && host_releases==1 && host_owner_value==CERBERUS_S3_BLE_OWNER_NONE);
             cerberus_wardrive_request_stop();run_pending_worker();

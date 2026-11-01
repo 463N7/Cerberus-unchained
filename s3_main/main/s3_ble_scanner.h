@@ -11,7 +11,10 @@
 
 /* Local S3 observer. Every sweep is bounded to eight seconds; the caller must
  * consume a completed generation before starting the next one. The default
- * remains passive for Watch, Wardriving, Fox Hunt, and Analyzer. */
+ * remains passive for Watch, Wardriving, Fox Hunt, and Analyzer. Internally an
+ * exact host claim token gates callbacks and release; the public owner label
+ * never authorizes cleanup. Source epochs remain valid after a deliberate
+ * completed-sweep release, while a replaced held claim invalidates its work. */
 esp_err_t cerberus_s3_ble_scanner_start(cerberus_ble_scan_status_payload_t *status);
 /* Active 1M scan for the device list. Scan responses can add display fields
  * and separately proven passive hints to an exact same-sweep original report;

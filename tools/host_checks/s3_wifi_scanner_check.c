@@ -58,6 +58,7 @@ typedef struct {
 #include "s3_ble_host.h"
 
 static uint32_t mock_ms;
+static cerberus_s3_ble_host_lease_t test_ble_lease;
 static unsigned alloc_count, alloc_calls, fail_alloc_call, init_calls, start_calls;
 static unsigned stop_calls, scan_stop_calls, clear_calls, deinit_calls, delete_calls;
 static unsigned ble_init_calls, ble_wifi_queries;
@@ -65,6 +66,8 @@ static size_t internal_heap = 131072U;
 static bool task_fail, driver_initialized, driver_started, driver_scanning;
 static bool emit_done, emitted_done, inject_stale, stale_emitted;
 static bool cancel_in_wait, claim_wifi_on_second_ble_query;
+static bool reset_ble_during_init;
+static unsigned pending_ble_blocks;
 static uint32_t done_status;
 static const char *fail_stage;
 static void (*queued_worker)(void *);
@@ -203,7 +206,22 @@ static void nimble_port_run(void) {}
 static void nimble_port_freertos_deinit(void) {}
 static esp_err_t nimble_port_init(void) { ++ble_init_calls; return ESP_OK; }
 static void nimble_port_freertos_init(void (*task)(void *))
-{ (void)task; ble_hs_cfg.sync_cb(); }
+{
+    (void)task;
+    if(reset_ble_during_init){
+        ble_hs_cfg.reset_cb(7);
+        /* A retired token does not make unfinished initialization idle. */
+        assert(cerberus_s3_ble_host_owner()==CERBERUS_S3_BLE_OWNER_SCANNER);
+        cerberus_s3_wifi_scan_status_t status;
+        assert(cerberus_s3_wifi_scanner_start(&status)==ESP_ERR_INVALID_STATE);
+        assert(cerberus_s3_wifi_owner()==CERBERUS_S3_WIFI_NONE&&!init_calls&&!queued_worker);
+        cerberus_s3_ble_host_lease_t other={.token=99};
+        assert(cerberus_s3_ble_host_claim(CERBERUS_S3_BLE_OWNER_CENTRAL,&other)==ESP_ERR_INVALID_STATE);
+        assert(!other.token&&!other.epoch&&!other.owner);
+        ++pending_ble_blocks;
+    }
+    ble_hs_cfg.sync_cb();
+}
 
 #include "../../s3_main/main/s3_wifi_owner.c"
 static cerberus_s3_wifi_owner_t test_wifi_owner(void)
@@ -230,9 +248,12 @@ static void reset_all(void)
     scan_launching = scan_cancelled = scan_done = false;
     scan_next_job = scan_started_ms = scan_event_status = 0;
     atomic_store(&owner, CERBERUS_S3_WIFI_NONE);
-    atomic_store(&current_owner, CERBERUS_S3_BLE_OWNER_NONE);
-    atomic_store(&initialized, false);
-    atomic_store(&synced, false);
+    current_lease=(cerberus_s3_ble_host_lease_t){0};
+    last_claim_token=pending_token=0;
+    pending_owner=CERBERUS_S3_BLE_OWNER_NONE;
+    initialized=synced=host_stopped=epoch_exhausted=false;
+    host_epoch=0;test_ble_lease=(cerberus_s3_ble_host_lease_t){0};
+    memset(&memory_diagnostics,0,sizeof(memory_diagnostics));memory_sequence=0;
     netif_ready = event_ready = false;
     mock_ms = alloc_calls = fail_alloc_call = 0;
     init_calls = start_calls = stop_calls = scan_stop_calls = clear_calls = deinit_calls = delete_calls = 0;
@@ -241,6 +262,7 @@ static void reset_all(void)
     driver_initialized = driver_started = driver_scanning = task_fail = false;
     emit_done = true;
     emitted_done = inject_stale = stale_emitted = cancel_in_wait = claim_wifi_on_second_ble_query = false;
+    reset_ble_during_init=false;pending_ble_blocks=0;
     done_status = 0;
     fail_stage = NULL;
     event_callback = NULL;
@@ -288,10 +310,10 @@ static void ownership_and_admission(void)
         assert(cerberus_s3_wifi_owner() == other[i] && !init_calls);
         assert(cerberus_s3_wifi_release(other[i]) == ESP_OK);
     }
-    assert(cerberus_s3_ble_host_claim(CERBERUS_S3_BLE_OWNER_SCANNER) == ESP_OK);
+    assert(cerberus_s3_ble_host_claim(CERBERUS_S3_BLE_OWNER_SCANNER, &test_ble_lease) == ESP_OK);
     assert(cerberus_s3_wifi_scanner_start(&status) == ESP_ERR_INVALID_STATE);
     assert(cerberus_s3_wifi_owner() == CERBERUS_S3_WIFI_NONE && !init_calls);
-    assert(cerberus_s3_ble_host_release(CERBERUS_S3_BLE_OWNER_SCANNER) == ESP_OK);
+    assert(cerberus_s3_ble_host_release(&test_ble_lease) == ESP_OK);
     internal_heap = 65535;
     assert(cerberus_s3_wifi_scanner_start(&status) == ESP_ERR_NO_MEM);
     assert(!alloc_count && cerberus_s3_wifi_owner() == CERBERUS_S3_WIFI_NONE);
@@ -309,16 +331,32 @@ static void ownership_and_admission(void)
     task_fail = false;
     assert(cerberus_s3_wifi_scanner_start(&status) == ESP_OK);
     assert(cerberus_s3_wifi_scanner_start(&status) == ESP_ERR_INVALID_STATE);
-    assert(cerberus_s3_ble_host_claim(CERBERUS_S3_BLE_OWNER_SCANNER) == ESP_ERR_INVALID_STATE);
+    assert(cerberus_s3_ble_host_claim(CERBERUS_S3_BLE_OWNER_SCANNER, &test_ble_lease) == ESP_ERR_INVALID_STATE);
     assert(cerberus_s3_ble_host_owner() == CERBERUS_S3_BLE_OWNER_NONE);
     status = run_worker();
     assert(status.state == CERBERUS_S3_WIFI_SCAN_COMPLETE);
     reset_all();
     claim_wifi_on_second_ble_query = true;
-    assert(cerberus_s3_ble_host_claim(CERBERUS_S3_BLE_OWNER_SCANNER) == ESP_ERR_INVALID_STATE);
+    assert(cerberus_s3_ble_host_claim(CERBERUS_S3_BLE_OWNER_SCANNER, &test_ble_lease) == ESP_ERR_INVALID_STATE);
     assert(!ble_init_calls && cerberus_s3_ble_host_owner() == CERBERUS_S3_BLE_OWNER_NONE);
     assert(cerberus_s3_wifi_owner() == CERBERUS_S3_WIFI_SCAN);
     assert(cerberus_s3_wifi_release(CERBERUS_S3_WIFI_SCAN) == ESP_OK);
+}
+
+static void pending_ble_reset_admission(void)
+{
+    reset_all();reset_ble_during_init=true;
+    assert(cerberus_s3_ble_host_claim(CERBERUS_S3_BLE_OWNER_SCANNER,&test_ble_lease)==ESP_ERR_INVALID_STATE);
+    assert(pending_ble_blocks==1&&ble_init_calls==1&&!test_ble_lease.token);
+    assert(cerberus_s3_ble_host_owner()==CERBERUS_S3_BLE_OWNER_NONE);
+    assert(cerberus_s3_wifi_owner()==CERBERUS_S3_WIFI_NONE&&!alloc_count);
+    reset_ble_during_init=false;start_and_complete();
+    cerberus_s3_ble_host_lease_t next={0};
+    assert(cerberus_s3_ble_host_claim(CERBERUS_S3_BLE_OWNER_CENTRAL,&next)==ESP_OK);
+    assert(next.token==2&&next.epoch==1&&ble_init_calls==1);
+    assert(cerberus_s3_ble_host_lease_valid(&next));
+    assert(cerberus_s3_ble_host_release(&next)==ESP_OK);
+    reset_all();
 }
 
 static void successful_banks_and_cancel(void)
@@ -418,7 +456,7 @@ static void failure_and_cleanup(void)
         assert(cerberus_s3_wifi_owner() == CERBERUS_S3_WIFI_SCAN);
         assert(cerberus_s3_wifi_scanner_stop(status.job_id) == status.cleanup_error);
         assert(cerberus_s3_wifi_scanner_start(&status) == ESP_ERR_INVALID_STATE);
-        assert(cerberus_s3_ble_host_claim(CERBERUS_S3_BLE_OWNER_SCANNER) == ESP_ERR_INVALID_STATE);
+        assert(cerberus_s3_ble_host_claim(CERBERUS_S3_BLE_OWNER_SCANNER, &test_ble_lease) == ESP_ERR_INVALID_STATE);
     }
     reset_all();
     done_status = 1;
@@ -467,6 +505,7 @@ static void security_and_token_bounds(void)
 int main(void)
 {
     ownership_and_admission();
+    pending_ble_reset_admission();
     successful_banks_and_cancel();
     failure_and_cleanup();
     security_and_token_bounds();

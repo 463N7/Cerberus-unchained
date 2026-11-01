@@ -8,11 +8,16 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static unsigned tick, held, host_epoch;
 static unsigned mutex_takes, allocations;
 static unsigned frees, host_releases;
 static bool fail_host_release;
+static cerberus_s3_ble_host_lease_t current_host_lease;
+static uint64_t next_host_token;
+static void (*release_before)(void);
+static void (*infer_before)(void);
 static size_t available_internal = 128U * 1024U;
 static cerberus_s3_wifi_owner_t simulated_wifi_owner;
 static void (*claim_before)(void), (*claim_after)(void);
@@ -61,16 +66,39 @@ cerberus_s3_wifi_owner_t cerberus_s3_wifi_owner(void) { return simulated_wifi_ow
 cerberus_s3_ble_owner_t cerberus_s3_ble_host_owner(void) { return owner; }
 bool cerberus_s3_ble_host_initialized(void) { return true; }
 unsigned cerberus_s3_ble_host_epoch(void) { return host_epoch; }
-esp_err_t cerberus_s3_ble_host_claim(cerberus_s3_ble_owner_t requested)
-{ if (claim_before) claim_before();
-  if (owner) return ESP_ERR_INVALID_STATE; owner = requested;
-  if (claim_after) claim_after(); return ESP_OK; }
-esp_err_t cerberus_s3_ble_host_release(cerberus_s3_ble_owner_t requested)
-{ ++host_releases; if (owner != requested) return ESP_ERR_INVALID_STATE;
-  if (fail_host_release) return ESP_ERR_TIMEOUT;
-  owner = CERBERUS_S3_BLE_OWNER_NONE; return ESP_OK; }
+bool cerberus_s3_ble_host_lease_valid(const cerberus_s3_ble_host_lease_t *lease)
+{
+    return lease && lease->token && lease->token==current_host_lease.token &&
+        lease->epoch==host_epoch && lease->epoch==current_host_lease.epoch &&
+        lease->owner==owner && lease->owner==current_host_lease.owner;
+}
+esp_err_t cerberus_s3_ble_host_claim(cerberus_s3_ble_owner_t requested,
+    cerberus_s3_ble_host_lease_t *lease)
+{
+    if (!lease) return ESP_ERR_INVALID_ARG;
+    memset(lease,0,sizeof(*lease));
+    if (claim_before) claim_before();
+    if (owner) return ESP_ERR_INVALID_STATE;
+    owner=requested;
+    current_host_lease=(cerberus_s3_ble_host_lease_t){++next_host_token,host_epoch,requested};
+    *lease=current_host_lease;
+    if (claim_after) claim_after();
+    if (!cerberus_s3_ble_host_lease_valid(lease)) {
+        memset(lease,0,sizeof(*lease));return ESP_ERR_INVALID_STATE;
+    }
+    return ESP_OK;
+}
+esp_err_t cerberus_s3_ble_host_release(const cerberus_s3_ble_host_lease_t *lease)
+{
+    ++host_releases;
+    if (release_before) release_before();
+    if (!cerberus_s3_ble_host_lease_valid(lease)) return ESP_ERR_INVALID_STATE;
+    if (fail_host_release) return ESP_ERR_TIMEOUT;
+    owner=CERBERUS_S3_BLE_OWNER_NONE;current_host_lease=(cerberus_s3_ble_host_lease_t){0};
+    return ESP_OK;
+}
 int ble_hs_id_infer_auto(int privacy, uint8_t *type)
-{ (void)privacy; *type = 0; return 0; }
+{ (void)privacy; if (infer_before) infer_before(); *type = 0; return 0; }
 int ble_gap_disc(uint8_t type, int32_t duration, const struct ble_gap_disc_params *params,
     int (*callback)(struct ble_gap_event *, void *), void *arg)
 { (void)type; assert(duration == 8000 && params->passive == !expected_active && !radio_active);
@@ -652,6 +680,7 @@ static void check_watch_timing_callbacks(void)
 #include "s3_ble_track_binding_check.h"
 #include "s3_ble_passive_binding_check.h"
 #include "s3_ble_wardrive_binding_check.h"
+#include "s3_ble_host_binding_check.h"
 
 int main(void)
 {
@@ -970,5 +999,6 @@ int main(void)
     check_track_binding();
     check_passive_binding();
     check_wardrive_binding();
+    check_host_binding();
     puts("S3 BLE event checks passed: finite duration, stale callbacks, reset reconciliation, 256-start byte wrap with fresh records, and safe rearm.");
 }
