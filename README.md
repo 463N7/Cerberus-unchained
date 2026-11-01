@@ -47,7 +47,9 @@ receivers' rates, counter scopes and gaps separate. All 123 host suites and five
 native targets pass. The companion state grows by 424 PSRAM bytes; fixed
 data/BSS grows by 16 bytes on S3 and 48 bytes on C5. Local validation and limits
 are tracked in [the rev106 checkpoint](docs/DUAL_RADIO_REV106.md).
-Rev103 remains installed; no new physical acceptance is implied.
+The matched rev106/C5 firmware65 update is installed with verified writes,
+both chips online and SD mounted. Touchscreen, RF and loaded-memory acceptance
+remain pending.
 
 Rev105 adds receiver filtering and file/name/signal ordering to saved BLE
 reports. Browsing uses a bounded index over the loaded document, preserves
@@ -55,8 +57,8 @@ frozen selections and historical ages, and makes no radio or storage requests.
 The v4 file format and older readers are unchanged. All 123 host suites and
 five native targets pass. The existing optional viewer grows by 72 PSRAM bytes;
 fixed internal data/BSS is unchanged. Local validation and remaining physical
-acceptance are tracked in [the rev105 checkpoint](docs/DUAL_RADIO_REV105.md);
-rev103 remains installed.
+acceptance are tracked in [the rev105 checkpoint](docs/DUAL_RADIO_REV105.md).
+This previously local change is included in the installed rev106 update.
 
 Rev104 combines ordinary BLE discovery into one source-labelled list, with
 ALL/S3/C5 receiver filtering, stable sorting and frozen selection. It reuses
@@ -64,9 +66,9 @@ the existing concurrent receivers, keeps distinct signal/time evidence and
 adds no radio task or full observation bank. Family-specific views retain
 their S3 evidence. All 122 host suites and five native targets pass. The new
 presentation store adds 768 PSRAM bytes; fixed internal data/BSS is unchanged.
-The device remains on the installed rev103 checkpoint; measured resource
-costs and pending physical acceptance are tracked separately in
-[the rev104 checkpoint](docs/DUAL_RADIO_REV104.md).
+Measured resource costs and pending physical acceptance are tracked separately
+in [the rev104 checkpoint](docs/DUAL_RADIO_REV104.md). This previously local
+change is included in the installed rev106 update.
 
 Rev103 moves the read-only console's formatting scratch from its task stack to
 one reusable PSRAM buffer, with cleanup only after the writer is quiescent.

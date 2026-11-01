@@ -2,8 +2,10 @@
 
 This checkpoint adds a receive-only C5 Analyzer path beside the existing S3
 Analyzer. All 123 host suites and five native targets pass on the final source.
-Rev103 remains the last installed checkpoint while the matched rev106 package
-is prepared; rev104 and rev105 are verified local packages.
+The paired rev106/C5 firmware65 update is installed with verified writes and
+two read-only boot captures. It includes the previously local rev104 combined
+discovery list and rev105 saved-report filtering. Physical feature acceptance
+remains separate from this installation result.
 
 ## Upstream behavior and processor roles
 
@@ -94,7 +96,52 @@ fragmentation; neither static section sizes nor host checks establish runtime
 headroom, sustained stability or RF performance.
 
 Evidence is retained under `artifacts/rev106-host-evidence`,
-`artifacts/rev106-native-evidence` and `artifacts/device-rev106`. No installation,
-physical dual reception, rate calibration, extended/coded reception, sustained
-headroom, Stop/Back or next-scan acceptance is claimed at this preparation
-stage. Full Marauder parity, GPS and expansion hardware acceptance remain open.
+`artifacts/rev106-native-evidence` and `artifacts/device-rev106`.
+
+## Installed package and boot evidence
+
+- Implementation commit: `ed3fed60977ae414b79d95304af41238373bbc68`.
+- Matched package: `dist/cerberus-unchained-0.1.0-dev.rev106-20261101T101002Z`.
+- Source SHA-256: `1cf454655fed484bf7d63027dcb7c4338296da58d40f841a771aa64fada3dc10`.
+- Manifest SHA-256: `f4a6e4e63e76190913f10250619794f9555488ab1d8165225120151d04398fdd`.
+
+Package validation checked all image hashes, chip headers, partitions and
+bounds. All three packaged application hashes match the retained native
+matrix. Six synthetic identity-guard checks and nine offline installation
+checks passed before device access. The exact S3/C5 identities were checked
+before writes. Fresh first-2-MiB backups from each chip matched the actual
+installed rev103 images and passed device verification; they cover every
+erase-rounded region changed by the update. Higher flash was not erased or
+programmed.
+
+The bridge, C5 and S3 each verified all three programmed images. The final S3
+application reports rev106 and the C5 reports protocol2/firmware65 online.
+Both post-update read-only captures verify idle owners, SD mounted, USB storage
+inactive, a buffered display and `previous_reset_fault=no`. The retained
+26,240-byte historical crash record was not cleared. Four initial READY
+timeouts/four legacy fallbacks were present at startup and remained unchanged
+in the settled capture; mutex, fall/high READY and driver error counters were
+zero. This is not a claim that the transport never times out.
+
+The settled idle reading has 134,380 S3 internal bytes free, a 94,208-byte
+largest internal block, 1,427,552 PSRAM bytes free and ten tasks. Observed main
+and console stack low-water values are 5,432 and 1,324 bytes respectively.
+C5 reports 58 KiB free and a 54 KiB minimum. These are startup/diagnostic
+observations: the optional Analyzer/discovery/archive work has not been
+exercised on hardware in this checkpoint, so idle readings do not measure its
+loaded memory or stack headroom.
+
+`artifacts/device-rev106/installation-receipt.json` binds the preflight, fresh
+backups, nine verified image writes and two boot captures. The earlier
+`local-milestone.json` remains an immutable pre-install package receipt;
+installation is recorded separately. Recovery did not need to run. No pull
+request, push, public release or web installer selection was performed.
+
+## Remaining physical acceptance
+
+The user was unavailable for touchscreen checks. The next physical checks are
+both Analyzer displays receiving, Stop and Back releasing both owners, a
+subsequent normal Wi-Fi scan, and the new combined discovery/archive views.
+Real-card save/reopen, source-rate calibration, extended/coded reception and
+sustained memory/stack headroom remain open. Full Marauder parity, GPS and
+expansion hardware acceptance are not complete.
