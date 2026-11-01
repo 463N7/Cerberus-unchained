@@ -45,9 +45,12 @@ Rev103 moves the read-only console's formatting scratch from its task stack to
 one reusable PSRAM buffer, with cleanup only after the writer is quiescent.
 It preserves the 4 KiB stack, full 64-bit formatting and output capacity. Long
 archive paths and filenames now print separately to avoid combined truncation.
-The native build and package gates enforce a small formatter frame. See
-[the rev103 checkpoint](docs/DUAL_RADIO_REV103.md) for validation and installation
-status; runtime USB handover and full feature acceptance remain distinct.
+The formatter's compiled frame falls 848 to 80 bytes, and the observed remaining
+console stack rises 524 to 1,292 bytes in the read-only sequence. All 121 host
+suites and five native targets pass; the matched local update is installed with
+both chips online and SD mounted. See [the rev103 checkpoint](docs/DUAL_RADIO_REV103.md)
+for evidence and limits; USB handover, sustained load and full feature acceptance
+remain open.
 
 Rev102 preserves the C5 receive envelope in v4 SD reports alongside the S3
 matched-response evidence. The existing offline viewer gains C5 RECEIVE INFO;

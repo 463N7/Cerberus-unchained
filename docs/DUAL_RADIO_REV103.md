@@ -1,9 +1,11 @@
 # Rev103: reduce diagnostic stack pressure
 
-Rev103 addresses the limited console-stack headroom observed during rev102's
-read-only checks. Rev102 is the preceding installed checkpoint. This change does
-not complete the full Marauder port; receive, UI, saved-report, GPS/expansion and
-earlier active-feature acceptance remain separately tracked.
+Rev103 is installed and addresses the limited console-stack headroom observed
+during rev102's read-only checks. All 121 host suites and five native targets
+pass on matching unchanged inputs, with verified paired installation and boot.
+The observed diagnostic-sequence margin improves from 524 to 1,292 bytes.
+This does not complete the full Marauder port; receive, UI, saved-report,
+GPS/expansion and earlier active-feature acceptance remain separately tracked.
 
 ## Console-owned PSRAM scratch
 
@@ -57,12 +59,12 @@ receipt: S3, onboard C5, bridge, WROOM and XIAO. The onboard C5 data/BSS remain
 are retained in `artifacts/rev103-native-evidence`. This is compiled evidence;
 physical expansion and runtime acceptance remain separate gates.
 
-The installed rev102 baseline reported 524 bytes of remaining console stack in
-its read-only sequence, with a 2,896-byte known compiled frame subtotal. Neither
-measurement is a worst-case bound, and the reason for its variation from the
-prior boot was not established. Rev103 must demonstrate reduced compiled
-formatting frames and collect comparable device readings before a runtime
-improvement is claimed. USB SD handover still requires physical acceptance.
+The rev102 baseline reported 524 bytes of remaining console stack in its
+read-only sequence, with a 2,896-byte known compiled frame subtotal. Rev103's
+comparable sequence reports 1,292 remaining bytes, matching the 768-byte
+compiled reduction. Neither measurement is a worst-case bound; the prior
+boot-to-boot variation was not explained. USB SD handover and restart under
+load still require physical acceptance.
 
 No scan, transmitter, radio owner, archive schema or C5 protocol change is part
 of this checkpoint. C5 firmware protocol remains 64. Full upstream mode and
@@ -75,9 +77,37 @@ hash, chip-header, partition and bound verification. Firmware source SHA-256 is
 `9054482a36aa78cfa80d9254230282889e2c4061d9cc35e8cacde513cc4cdebc`.
 The packaged application hashes match the final full-matrix binaries. The
 retained native console comparison binds the 80-byte formatter measurement to
-that same S3 ELF, not a preliminary or different build. Local installation and
-boot evidence will be recorded after the staged update. No public release or PR
+that same S3 ELF, not a preliminary or different build. No public release or PR
 is selected by these packaging checks.
+
+## Paired installation and runtime observation
+
+Implementation commit `1ab784db22783fa17c888b8ad41bff0b48a5bcb9` is installed.
+Fresh first-2-MiB S3/C5 backups match the installed rev102 images and verify
+against flash. They cover every erase-rounded update write; higher flash is
+preserved. Exact board/ROM/stub identity guards remain in place. All nine
+bridge/C5/S3 image writes verify. The five identity, nine receipt/stage and
+three offline helper/proof tests pass. Evidence is under
+`artifacts/device-rev103`, including the installation receipt and bound backups,
+write receipts, native comparison, preflash proof and boot/settled/final reads.
+`runtime-console-comparison.json` binds the before/after readings by file hash.
+
+The boot reports S3 `0.1.0-dev.rev103`, C5 protocol firmware 64, active display
+buffering, mounted SD and inactive USB storage. No previous-reset fault is
+reported. Settled S3 internal free memory remains 134,396 bytes with a 94,208-byte
+largest block and ten tasks. PSRAM free is 1,427,552 bytes, 772 below the rev102
+baseline, consistent with the 768-byte scratch request plus allocation overhead.
+C5 reports 58 KiB free and a 54 KiB minimum. The console low-water observation is
+1,292 bytes and main-task low water is 5,432 bytes; these are exercised-sequence
+readings, not full load bounds. Radio owners and the archive worker are idle.
+The final idle check at about 77 seconds retains the same 1,292-byte console
+margin and free-memory readings as the settled check.
+
+Startup SPI records four initial READY timeouts and four legacy fallbacks,
+unchanged from the preceding startup, with zero mutex timeouts or driver errors.
+The existing 26,240-byte crash record is preserved and predates the update.
+Real USB handover/restart, physical report save/reopen, active receive workflows
+and sustained operation remain pending. No PR or release was published.
 
 ## Next receive milestone
 
