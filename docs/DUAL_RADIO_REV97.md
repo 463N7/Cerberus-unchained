@@ -93,6 +93,16 @@ their scope. No new PR or public binary release was created for this checkpoint.
 
 ## Physical acceptance still needed
 
+The owner confirmed that the correct AP opened twice. The matching console
+capture (`artifacts/device-rev97/accepted-handoff.txt`) shows three successful
+C5 scans in retained generation 1, no failures, `rebind_cached=0`, and a fresh
+all-band handoff (14 2.4 GHz plus 15 5 GHz rows) taking 7,079 ms. All owners
+were released; internal free RAM was 125,856 bytes and SPI mutex/driver errors
+were zero. This confirms navigation and fresh reacquisition, not cached reuse.
+The selected row's source label is being checked separately. Opening an S3
+row or any other fresh rebind replaces the C5 bank and makes the original
+retained list ineligible for reuse until Scan Again completes.
+
 - C5/5 GHz AP tools and Back: same selected AP, original observation age,
   no additional C5 scan, followed by a successful normal split scan.
 - S3/2.4 GHz AP tools: fresh C5 reacquisition, correct target and normal Back.
