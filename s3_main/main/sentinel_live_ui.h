@@ -674,14 +674,19 @@ static void live_make_view(void)
             "FILTER LEFT / SORT RIGHT / %u IN SWEEP", record->count);
     if (tool == SENTINEL_SCAN_BLE && ble_discovery_presenting()) {
         const cerberus_ble_discovery_session_t *discovery = &ble_discovery_live->session;
+        cerberus_dual_ble_view_t companion;
+        dual_ble_ui_get_view(&companion);
         if (discovery->drain_requested || (!discovery->enabled && discovery->epoch))
             snprintf(live_subtitle, sizeof(live_subtitle), "STOPPING / WAITING FOR RADIO RELEASE");
         else if (discovery->error)
             snprintf(live_subtitle, sizeof(live_subtitle), "SCAN ERROR / %.30s", esp_err_to_name(discovery->error));
+        else if (companion.error)
+            snprintf(live_subtitle, sizeof(live_subtitle), "S3 VIEW / C5 ERROR %ld / TAP FOR C5 >", (long)companion.error);
         else if (discovery->enabled)
-            snprintf(live_subtitle, sizeof(live_subtitle), "LIVE BLE / RESULTS UPDATE WHILE LISTENING");
+            snprintf(live_subtitle, sizeof(live_subtitle), "S3 + C5 %s / %u / TAP FOR C5 >",
+                companion.receiving ? "LIVE" : companion.reading ? "READ" : "WAIT", companion.count);
         else
-            snprintf(live_subtitle, sizeof(live_subtitle), "STOPPED / TAP SCAN TO CONTINUE");
+            snprintf(live_subtitle, sizeof(live_subtitle), "STOPPED / C5 %u / TAP FOR C5 >", companion.count);
         snprintf(live_hint, sizeof(live_hint), "KEPT %u / REPLACED %lu / CACHE FULL %u",
             ble_discovery_live->inventory.count,
             (unsigned long)ble_discovery_live->inventory.replacements,
@@ -1018,6 +1023,15 @@ static void handle_live_scan_tap(uint16_t x, uint16_t y)
 {
     /* Hit-test the last painted snapshot, never a newly fetched row ordering. */
     sentinel_scan_tool_t tool = live_page_tool();
+    if (tool == SENTINEL_SCAN_BLE && ble_discovery_presenting() &&
+        x >= 8U && x < 312U && y >= 102U && y < 132U) {
+        ble_discovery_live->selection_pending = false;
+        ble_discovery_live->destination = 0U;
+        ble_mode = UI_BLE_MODE_C5;
+        dual_ble_ui_open(false);
+        ESP_ERROR_CHECK(draw_ble());
+        return;
+    }
     if (tool == SENTINEL_SCAN_BLE && x >= 8U && x < 216U && y >= 48U && y < 98U) {
         ble_filter = (cerberus_s3_ble_filter_t)(((unsigned)ble_filter + 1U) % CERBERUS_S3_BLE_FILTER_COUNT);
         if (ble_discovery_presenting()) {

@@ -8,6 +8,10 @@ extern "C" {
 #endif
 
 esp_err_t cerberus_ble_scanner_init(void);
+/* Scoped companion commands always return a bound status or an explicit
+ * rejection; they never adopt/stop an unrelated legacy scan. */
+bool cerberus_ble_dual_command(uint8_t command, const void *request,
+    size_t request_size, void *response, size_t *response_size);
 uint8_t cerberus_ble_scanner_get_boot_count(void);
 uint8_t cerberus_ble_scanner_get_phase(void);
 esp_err_t cerberus_ble_scanner_start(void);

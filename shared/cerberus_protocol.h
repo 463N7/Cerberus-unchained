@@ -12,6 +12,8 @@
 #include "wifi_relation_observation.h"
 #include "csi_protocol.h"
 #include "mac_monitor_protocol.h"
+#include "wifi_scan_band.h"
+#include "dual_ble_protocol.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,7 +21,7 @@ extern "C" {
 
 #define CERBERUS_PROTOCOL_VERSION_V1 1U
 #define CERBERUS_PROTOCOL_VERSION 2U
-#define CERBERUS_C5_FIRMWARE_VERSION 60U
+#define CERBERUS_C5_FIRMWARE_VERSION 61U
 #define CERBERUS_SPI_MAGIC 0x43455242UL
 #define CERBERUS_SPI_TRANSFER_SIZE 32U
 #define CERBERUS_SPI_FRAME_PAYLOAD_SIZE 22U
@@ -141,6 +143,17 @@ typedef enum {
     CERBERUS_SPI_COMMAND_WIFI_RELATION_STATUS = 112,
     CERBERUS_SPI_COMMAND_WIFI_RELATION_CHUNK = 113,
     CERBERUS_SPI_COMMAND_WIFI_RELATION_CLOCK = 114,
+    CERBERUS_SPI_COMMAND_WIFI_SCAN_BAND_START = 115,
+    CERBERUS_SPI_COMMAND_DUAL_BLE_INFO = 116,
+    CERBERUS_SPI_COMMAND_DUAL_BLE_START = 117,
+    CERBERUS_SPI_COMMAND_DUAL_BLE_STATUS = 118,
+    CERBERUS_SPI_COMMAND_DUAL_BLE_STOP = 119,
+    CERBERUS_SPI_COMMAND_DUAL_BLE_RELEASE = 120,
+    CERBERUS_SPI_COMMAND_DUAL_BLE_ROW_TIME = 121,
+    CERBERUS_SPI_COMMAND_DUAL_BLE_TRACK_STATUS = 122,
+    CERBERUS_SPI_COMMAND_WIFI_SCAN_BAND_INFO = 123,
+    CERBERUS_SPI_COMMAND_WIFI_SCAN_BAND_STATUS = 124,
+    CERBERUS_SPI_COMMAND_WIFI_SCAN_BAND_STOP = 125,
 } cerberus_spi_command_t;
 
 typedef enum {
@@ -565,6 +578,27 @@ typedef struct __attribute__((packed)) {
     uint8_t reserved[2];
     int32_t error_code;
 } cerberus_wifi_scan_status_payload_t;
+
+/* Additive commands: old zero-payload WIFI_SCAN_START remains dual-band.
+ * INFO returns the C5-issued epoch. A new start requires epoch+1; every
+ * accepted ordinary/default scan advances it. Same-current-token retries
+ * never rescan, and old tokens cannot adopt or stop a later bank. */
+typedef struct __attribute__((packed)) {
+    uint64_t session_id;
+    uint8_t band;
+} cerberus_wifi_scan_band_request_t;
+
+typedef struct __attribute__((packed)) {
+    cerberus_wifi_scan_status_payload_t status;
+    uint64_t session_id;
+    uint8_t band;
+    uint8_t bound;
+} cerberus_wifi_scan_band_response_t;
+
+_Static_assert(sizeof(cerberus_wifi_scan_band_request_t) <= CERBERUS_SPI_FRAME_PAYLOAD_SIZE,
+    "band scan request fits SPI");
+_Static_assert(sizeof(cerberus_wifi_scan_band_response_t) <= CERBERUS_SPI_FRAME_PAYLOAD_SIZE,
+    "band scan response fits SPI");
 
 typedef struct __attribute__((packed)) {
     uint8_t generation;

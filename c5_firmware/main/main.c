@@ -197,6 +197,46 @@ static void prepare_v2_response(const cerberus_spi_frame_t *request)
         prepare_frame_response(CERBERUS_SPI_COMMAND_STATUS, request->sequence, &payload, sizeof(payload));
         break;
     }
+    case CERBERUS_SPI_COMMAND_DUAL_BLE_INFO:
+    case CERBERUS_SPI_COMMAND_DUAL_BLE_START:
+    case CERBERUS_SPI_COMMAND_DUAL_BLE_STATUS:
+    case CERBERUS_SPI_COMMAND_DUAL_BLE_STOP:
+    case CERBERUS_SPI_COMMAND_DUAL_BLE_RELEASE:
+    case CERBERUS_SPI_COMMAND_DUAL_BLE_ROW_TIME:
+    case CERBERUS_SPI_COMMAND_DUAL_BLE_TRACK_STATUS: {
+        uint8_t payload[CERBERUS_SPI_FRAME_PAYLOAD_SIZE] = {0};
+        size_t length = 0;
+        if (cerberus_ble_dual_command((uint8_t)request->command, request->payload,
+                request->payload_length, payload, &length))
+            prepare_frame_response((cerberus_spi_command_t)request->command,
+                request->sequence, payload, length);
+        break;
+    }
+    case CERBERUS_SPI_COMMAND_WIFI_SCAN_BAND_INFO: {
+        if (request->payload_length) return;
+        cerberus_wifi_scan_band_response_t payload;
+        esp_err_t error = cerberus_wifi_scanner_band_info(&payload);
+        if (error != ESP_OK) { payload.status.state = CERBERUS_WIFI_SCAN_ERROR; payload.status.error_code = error; }
+        prepare_frame_response(CERBERUS_SPI_COMMAND_WIFI_SCAN_BAND_INFO,
+            request->sequence, &payload, sizeof(payload));
+        break;
+    }
+    case CERBERUS_SPI_COMMAND_WIFI_SCAN_BAND_START:
+    case CERBERUS_SPI_COMMAND_WIFI_SCAN_BAND_STATUS:
+    case CERBERUS_SPI_COMMAND_WIFI_SCAN_BAND_STOP: {
+        if (request->payload_length != sizeof(cerberus_wifi_scan_band_request_t)) return;
+        cerberus_wifi_scan_band_request_t query;
+        cerberus_wifi_scan_band_response_t payload;
+        memcpy(&query, request->payload, sizeof(query));
+        if (request->command == CERBERUS_SPI_COMMAND_WIFI_SCAN_BAND_START)
+            (void)cerberus_wifi_scanner_start_band(&query, &payload);
+        else if (request->command == CERBERUS_SPI_COMMAND_WIFI_SCAN_BAND_STOP)
+            (void)cerberus_wifi_scanner_band_stop(&query, &payload);
+        else (void)cerberus_wifi_scanner_band_status(&query, &payload);
+        prepare_frame_response((cerberus_spi_command_t)request->command,
+            request->sequence, &payload, sizeof(payload));
+        break;
+    }
     case CERBERUS_SPI_COMMAND_WIFI_SCAN_START:
     case CERBERUS_SPI_COMMAND_WIFI_SCAN_STOP:
     case CERBERUS_SPI_COMMAND_WIFI_SCAN_STATUS: {

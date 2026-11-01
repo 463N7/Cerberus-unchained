@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the 107 host suites used for the rev93 development checkpoint.
+"""Run the 115 host suites through the rev94 dual-radio development checkpoint.
 
 The checked-in synthetic fixtures need no board, radio, or private captures.
 Generated fixtures, native executables, previews, logs, and the result receipt
@@ -23,6 +23,13 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "artifacts" / "host-checks"
 
 CHECKS = (
+    'check_s3_wifi_scanner.py',
+    'check_wifi_scan_band.py',
+    'check_dual_wifi_scan.py',
+    'check_dual_wifi_ui.py',
+    'check_dual_wifi_live.py',
+    'check_dual_wifi_routing.py',
+    'check_dual_ble.py',
     'check_wardrive_recent.py',
     'check_wardrive_recent_service.py',
     'check_ble_archive.py',
@@ -113,6 +120,7 @@ CHECKS = (
 )
 
 SERIAL_CHECKS = (
+    'check_dual_ble_ui.py',
     'check_wardrive_recent_ui.py',
     'check_wardrive_recent_live.py',
     'check_ble_archive_ui.py',
@@ -168,8 +176,8 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=3, help="Parallel compiler jobs (default: 3)")
     args = parser.parse_args()
     names = (*CHECKS, *SERIAL_CHECKS)
-    if len(names) != 107 or len(set(names)) != 107:
-        parser.error("Expected the 107 unique rev93 suites; do not silently skip a suite")
+    if len(names) != 115 or len(set(names)) != 115:
+        parser.error("Expected the 115 unique rev94 suites; do not silently skip a suite")
     if args.list:
         for name in names:
             print(name)
@@ -196,7 +204,7 @@ def main() -> int:
     changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
     receipt = {
         "format": 1,
-        "suite_set": "rev93",
+        "suite_set": "rev94",
         "recorded_utc": datetime.now(timezone.utc).isoformat(),
         "status": "passed" if not changed and all(r["exit_code"] == 0 for r in results) else "failed",
         "hardware_validated": False,

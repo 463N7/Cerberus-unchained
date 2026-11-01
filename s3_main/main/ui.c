@@ -229,6 +229,7 @@ typedef enum {
     UI_WIFI_MODE_DIAGNOSTICS,
     UI_WIFI_MODE_MDNS,
     UI_WIFI_MODE_BASELINE,
+    UI_WIFI_MODE_DUAL,
 } ui_wifi_mode_t;
 
 typedef cerberus_s3_wifi_ssid_analysis_t ui_wifi_ssid_analysis_t;
@@ -244,6 +245,7 @@ typedef enum {
     UI_BLE_MODE_SERVICES,
     UI_BLE_MODE_CHARACTERISTICS,
     UI_BLE_MODE_VALUE,
+    UI_BLE_MODE_C5,
 } ui_ble_mode_t;
 
 #define UI_BLE_ENVIRONMENT_READING_MAX 3U
@@ -367,6 +369,14 @@ static void wardrive_recent_release_if_left(void);
 static esp_err_t draw_live_scan(void);
 static bool live_is_view(void);
 static void live_scan_tick(uint32_t now, bool asleep);
+static esp_err_t draw_ble(void);
+static void dual_wifi_live_open(bool start_scan);
+static void dual_wifi_live_tick(uint32_t now, bool asleep);
+static void dual_wifi_live_tap(uint16_t x, uint16_t y);
+static bool dual_ble_live_enabled(void);
+static void dual_ble_live_tap(uint16_t x, uint16_t y);
+static void ble_fox_hunt_open_peer(const cerberus_c5_ble_result_t *peer, bool from_c5);
+static bool dual_ble_live_prepare_fox(uint32_t now, bool asleep);
 static esp_err_t live_analyze_selected_wifi_ssid(void);
 static esp_err_t live_compare_wifi_baseline(void);
 static bool live_wifi_baseline_current(void);
@@ -641,6 +651,7 @@ static esp_err_t packet_monitor_error = ESP_ERR_INVALID_STATE;
 static uint32_t packet_monitor_last_poll;
 static cerberus_c5_wifi_result_t wifi_selected_result;
 static bool wifi_selection_valid;
+static bool dual_wifi_return_to_view;
 static cerberus_c5_wifi_result_t wifi_connection_target;
 static bool wifi_connection_target_valid;
 static ui_wifi_ssid_analysis_t wifi_ssid_analysis;
@@ -696,6 +707,9 @@ static uint32_t ble_sound_sweeps, ble_sound_attempts, ble_sound_accepted;
 static uint32_t ble_sound_responses, ble_sound_reported, ble_sound_errors;
 static esp_err_t ble_sound_error = ESP_OK;
 static bool ble_fox_hunt_exit_pending;
+static bool ble_fox_hunt_from_c5, ble_fox_hunt_start_pending;
+static uint32_t ble_fox_hunt_start_requested_ms;
+static cerberus_c5_ble_result_t ble_fox_hunt_target;
 static bool ble_fox_hunt_retry_requested;
 static esp_err_t ble_fox_hunt_error = ESP_OK;
 static uint32_t ble_fox_hunt_last_tick_ms, ble_fox_hunt_last_draw_ms;
@@ -2650,6 +2664,8 @@ static void *ui_job_allocate(size_t bytes)
 #include "wifi_relation_ui.h"
 #include "wifi_target_ui.h"
 #include "wifi_portal_ui.h"
+#include "dual_wifi_ui.h"
+#include "dual_ble_ui.h"
 
 static esp_err_t draw_wifi_connection(void)
 {
@@ -2963,6 +2979,7 @@ static esp_err_t draw_wifi_baseline(void)
 
 static esp_err_t draw_wifi(void)
 {
+    if (wifi_mode == UI_WIFI_MODE_DUAL) return dual_wifi_ui_draw();
     if (wifi_mode == UI_WIFI_MODE_TARGET) return draw_wifi_target();
     if (wifi_mode == UI_WIFI_MODE_FIELD_SURVEY) return field_survey_view_draw(UI_WIDGET_THEME);
     if (wifi_mode == UI_WIFI_MODE_NETWORK_SCAN) return net_draw();
@@ -4651,13 +4668,17 @@ static esp_err_t draw_ble_fox_hunt(void)
 {
     char line[64], identifier[24];
     cerberus_s3_ble_track_status_t track = {0};
-    esp_err_t tracking_error = cerberus_s3_ble_scanner_track_status(&track);
-    cerberus_privacy_format_ble_identifier(ble_selected_result.address,
+    /* The displayed target changes before both scanners finish draining.
+     * Until track_begin binds it, the S3 tracker may still describe the prior
+     * target; neither its sample, meter nor report count belongs on this page. */
+    esp_err_t tracking_error = ble_fox_hunt_start_pending ? ESP_OK :
+        cerberus_s3_ble_scanner_track_status(&track);
+    cerberus_privacy_format_ble_identifier(ble_fox_hunt_target.address,
         privacy_addresses_masked(), identifier, sizeof(identifier));
     ESP_RETURN_ON_ERROR(draw_centered(68, "FOX HUNT / LIVE BLE RSSI", UI_TEXT, 2),
         TAG, "BLE Fox Hunt title failed");
-    snprintf(line, sizeof(line), "%.30s", ble_selected_result.name[0] ?
-        ble_selected_result.name : "<UNNAMED DEVICE>");
+    snprintf(line, sizeof(line), "%.30s", ble_fox_hunt_target.name[0] ?
+        ble_fox_hunt_target.name : "<UNNAMED DEVICE>");
     ESP_RETURN_ON_ERROR(draw_centered(92, line, UI_TEXT, 1),
         TAG, "BLE Fox Hunt name failed");
     ESP_RETURN_ON_ERROR(draw_centered(110, identifier, UI_MUTED, 1),
@@ -4665,6 +4686,7 @@ static esp_err_t draw_ble_fox_hunt(void)
     const char *state = "SEARCHING";
     uint16_t state_color = UI_MUTED;
     if (ble_fox_hunt_exit_pending) state = "STOPPING";
+    else if (ble_fox_hunt_start_pending && ble_fox_hunt_error == ESP_OK) state = "RELEASING SCANNERS";
     else if (ble_fox_hunt_error != ESP_OK || tracking_error != ESP_OK) {
         state = "SCAN ERROR";
         state_color = UI_BAD;
@@ -4677,7 +4699,7 @@ static esp_err_t draw_ble_fox_hunt(void)
     ESP_RETURN_ON_ERROR(draw_centered(140, state, state_color, 2),
         TAG, "BLE Fox Hunt state failed");
     if (track.seen) {
-        snprintf(line, sizeof(line), "LAST RSSI %d dBm / AGE %lu.%lus",
+        snprintf(line, sizeof(line), "S3 %d dBm / AGE %lu.%lus",
             (int)track.rssi_dbm, (unsigned long)(track.age_ms / 1000U),
             (unsigned long)((track.age_ms % 1000U) / 100U));
         ESP_RETURN_ON_ERROR(draw_centered(176, line, track.fresh ? UI_GOOD : UI_MUTED, 1),
@@ -4697,19 +4719,18 @@ static esp_err_t draw_ble_fox_hunt(void)
             ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(20, 204, width, 26, UI_GOOD),
                 TAG, "BLE Fox Hunt meter failed");
     }
-    snprintf(line, sizeof(line), "MATCHED REPORTS %lu", (unsigned long)track.reports);
+    snprintf(line, sizeof(line), "S3 MATCHED REPORTS %lu", (unsigned long)track.reports);
     ESP_RETURN_ON_ERROR(draw_centered(250, line, UI_TEXT, 1),
         TAG, "BLE Fox Hunt reports failed");
-    ESP_RETURN_ON_ERROR(draw_centered(280,
-        "ADDRESS CHANGES END THIS TRACK", UI_MUTED, 1),
-        TAG, "BLE Fox Hunt privacy note failed");
+    ESP_RETURN_ON_ERROR(dual_ble_ui_draw_fox(280, (uint64_t)esp_timer_get_time() / 1000U),
+        TAG, "C5 BLE Fox Hunt status failed");
     if (ble_fox_hunt_error != ESP_OK) {
         snprintf(line, sizeof(line), "S3 SCAN ERROR %ld", (long)ble_fox_hunt_error);
         ESP_RETURN_ON_ERROR(draw_centered(308, line, UI_BAD, 1),
             TAG, "BLE Fox Hunt error failed");
     } else {
         ESP_RETURN_ON_ERROR(draw_centered(308,
-            "S3 BLE TRACKING / C5 WI-FI AVAILABLE", UI_MUTED, 1),
+            "ADDRESS CHANGES END THIS TRACK", UI_MUTED, 1),
             TAG, "BLE Fox Hunt roles failed");
     }
     return draw_button(40, 350, 240, 50,
@@ -4894,6 +4915,7 @@ static esp_err_t draw_ble_feature_menu(void)
 
 static esp_err_t draw_ble(void)
 {
+    if (ble_mode == UI_BLE_MODE_C5) return dual_ble_ui_draw(dual_ble_live_enabled());
     if (live_is_view()) return draw_live_scan();
     char line[64];
     bool ble_capable = (ui_capability_map & UI_CAP_BLE) != 0U;
@@ -7949,6 +7971,10 @@ static esp_err_t draw_detail_page(void)
         ieee802154_mode != UI_IEEE802154_MODE_MENU) {
         back_label = "RADIO MENU";
     }
+    if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_DUAL && !ui_capability_blocked)
+        return ESP_OK; /* This view owns both its Back and Stop controls. */
+    if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5)
+        back_label = "BACK TO S3";
     if (live_is_view()) back_label = tool_parent_page == UI_PAGE_TOOLS ? "DEVICE TOOLS" : "HOME";
     if (learning_tool_active) {
         return draw_button(12, UI_BACK_Y, 296, UI_BACK_HEIGHT, "RETURN TO LESSON");
@@ -8145,6 +8171,9 @@ static void open_main_menu(void)
 
 static void return_to_launcher(void)
 {
+    dual_wifi_return_to_view = false;
+    if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_DUAL)
+        dual_wifi_ui_leave();
     if (current_page == UI_PAGE_BLE_ATTACK) {
         /* A replay capture is valid for this review session only. Returning
          * to the catalog requires a fresh selected scan result next time. */
@@ -8618,6 +8647,7 @@ static void handle_ieee802154_tap(uint16_t x, uint16_t y)
 
 static void handle_wifi_tap(uint16_t x, uint16_t y)
 {
+    if (wifi_mode == UI_WIFI_MODE_DUAL) { dual_wifi_live_tap(x, y); return; }
     if (wifi_mode == UI_WIFI_MODE_TARGET) {
         wifi_target_handle_tap(x,y); ESP_ERROR_CHECK(draw_current_page()); return;
     }
@@ -8648,7 +8678,7 @@ static void handle_wifi_tap(uint16_t x, uint16_t y)
         case 8: multissid_enter(); wifi_mode = UI_WIFI_MODE_MULTISSID; break;
         case 9: pinescan_enter(); wifi_mode = UI_WIFI_MODE_PINESCAN; break;
         case 7: wifi_mode = UI_WIFI_MODE_FIELD_SURVEY; break;
-        case 0: wifi_mode = UI_WIFI_MODE_LIST; (void)refresh_wifi_scan_status(); break;
+        case 0: dual_wifi_live_open(true); break;
         case 1: wifi_mode = UI_WIFI_MODE_STATS; (void)refresh_wifi_scan_status(); break;
         case 2: wifi_mode = UI_WIFI_MODE_PACKET_MONITOR;
                 packet_monitor_from_target = false;
@@ -8665,7 +8695,7 @@ static void handle_wifi_tap(uint16_t x, uint16_t y)
                 wifi_connection_status.state == CERBERUS_WIFI_CONNECTION_CONNECTED ||
                 wifi_connection_status.state == CERBERUS_WIFI_CONNECTION_CONNECTING) {
                 wifi_mode = UI_WIFI_MODE_CONNECTION;
-            } else { wifi_mode = UI_WIFI_MODE_LIST; (void)refresh_wifi_scan_status(); }
+            } else { dual_wifi_live_open(true); }
             break;
         default: return;
         }
@@ -9091,6 +9121,7 @@ static void ble_sound_open(bool all)
 
 static void handle_ble_tap(uint16_t x, uint16_t y)
 {
+    if (ble_mode == UI_BLE_MODE_C5) { dual_ble_live_tap(x, y); return; }
     if (ble_mode == UI_BLE_MODE_FINDMY_MONITOR) {
         ble_findmy_monitor_tap(x, y);
         return;
@@ -9115,6 +9146,8 @@ static void handle_ble_tap(uint16_t x, uint16_t y)
             if (ble_fox_hunt_error != ESP_OK) {
                 ble_fox_hunt_error = ESP_OK;
                 ble_fox_hunt_retry_requested = true;
+                ble_fox_hunt_start_requested_ms = (uint32_t)(esp_timer_get_time() / 1000LL);
+                dual_ble_ui_retry();
             }
             else {
                 ble_fox_hunt_exit_pending = true;
@@ -9340,21 +9373,7 @@ static void handle_ble_tap(uint16_t x, uint16_t y)
                 if (ble_connection_is_active()) {
                     set_ble_action_message("DISCONNECT BEFORE TRACKING", UI_MUTED);
                 } else {
-                    esp_err_t track_error = cerberus_s3_ble_scanner_track_begin(
-                        ble_selected_result.address,
-                        ble_selected_result.address_type);
-                    if (track_error == ESP_OK) {
-                        ble_session_exit_page = UI_PAGE_BLE;
-                        ble_fox_hunt_exit_pending = false;
-                        ble_fox_hunt_exit_started_ms = 0U;
-                        ble_fox_hunt_retry_requested = false;
-                        ble_fox_hunt_error = ESP_OK;
-                        ble_fox_hunt_last_tick_ms = 0U;
-                        ble_fox_hunt_last_draw_ms = 0U;
-                        ble_mode = UI_BLE_MODE_FOX_HUNT;
-                    } else {
-                        set_ble_action_message("S3 BLE SCANNER BUSY", UI_MUTED);
-                    }
+                    ble_fox_hunt_open_peer(&ble_selected_result, false);
                 }
                 ESP_ERROR_CHECK(draw_detail_page());
                 return;
@@ -9555,9 +9574,10 @@ static void ble_fox_hunt_finish_exit(bool asleep, bool host_held)
     ble_fox_hunt_retry_requested = false;
     ble_fox_hunt_exit_started_ms = 0U;
     ble_fox_hunt_error = ESP_OK;
-    ble_mode = UI_BLE_MODE_DETAIL;
+    ble_mode = ble_fox_hunt_from_c5 ? UI_BLE_MODE_C5 : UI_BLE_MODE_DETAIL;
+    ble_fox_hunt_start_pending = false;
     if (host_held)
-        set_ble_action_message("BLE HOST HELD / RESET REQUIRED", UI_BAD);
+        set_ble_action_message("RADIO CLEANUP HELD / RESET REQUIRED", UI_BAD);
     else
         set_ble_action_message("TRACKING STOPPED", UI_MUTED);
     ui_page_t exit_page = ble_session_exit_page;
@@ -9578,6 +9598,7 @@ static void ble_fox_hunt_finish_exit(bool asleep, bool host_held)
 static void ble_fox_hunt_tick(uint32_t now_ms, bool asleep)
 {
     if (current_page != UI_PAGE_BLE || ble_mode != UI_BLE_MODE_FOX_HUNT) return;
+    if (!dual_ble_live_prepare_fox(now_ms, asleep)) return;
     if (ble_fox_hunt_last_tick_ms != 0U &&
         (uint32_t)(now_ms - ble_fox_hunt_last_tick_ms) < 250U) return;
     ble_fox_hunt_last_tick_ms = now_ms;
@@ -9623,8 +9644,8 @@ static void ble_fox_hunt_tick(uint32_t now_ms, bool asleep)
             CERBERUS_S3_BLE_OWNER_SCANNER;
         bool deadline_reached = (uint32_t)(now_ms -
             ble_fox_hunt_exit_started_ms) >= 12000U;
-        if (!host_held || deadline_reached) {
-            ble_fox_hunt_finish_exit(asleep, host_held);
+        if ((!host_held && dual_ble_ui_released()) || deadline_reached) {
+            ble_fox_hunt_finish_exit(asleep, host_held || !dual_ble_ui_released());
             return;
         }
     }
@@ -10968,6 +10989,8 @@ static void handle_scripts_tap(uint16_t x, uint16_t y)
 }
 
 #include "sentinel_live_ui.h"
+#include "dual_wifi_live_ui.h"
+#include "dual_ble_live_ui.h"
 #include "ble_archive_live_ui.h"
 #include "wardrive_recent_live_ui.h"
 #include "sentinel_watch_ui.h"
@@ -10998,7 +11021,7 @@ static void open_tool_page(ui_page_t page)
     }
     if (current_page == UI_PAGE_WIFI) {
         wifi_attack_selecting = false;
-        wifi_mode = UI_WIFI_MODE_LIST;
+        dual_wifi_live_open(!ui_capability_blocked);
     }
     if (current_page == UI_PAGE_BLE) {
         ble_mode = UI_BLE_MODE_LIST;
@@ -11463,7 +11486,12 @@ static void handle_tap(uint16_t x, uint16_t y)
                     ap_station_selecting=false;ap_choose(modes[action-CERBERUS_FIELD_WIFI_DEAUTH]);
                     ap_enter();wifi_mode=UI_WIFI_MODE_AP_JOB;
                 }
-                else if (action == CERBERUS_FIELD_WIFI_SELECT) wifi_attack_selecting = true;
+                else if (action == CERBERUS_FIELD_WIFI_SELECT) {
+                    wifi_attack_selecting = true;
+                    dual_wifi_return_to_view = false;
+                    dual_wifi_ui_leave();
+                    wifi_mode = UI_WIFI_MODE_LIST;
+                }
                 else if (action == CERBERUS_FIELD_WIFI_TARGET && wifi_selection_valid) {
                     wifi_mode = UI_WIFI_MODE_TARGET; wifi_target_message[0] = 0;
                     wifi_connection_error = c5_spi_link_get_wifi_connection_status(&wifi_connection_status);
@@ -11502,11 +11530,14 @@ static void handle_tap(uint16_t x, uint16_t y)
             action == SENTINEL_GUIDE_OPEN_WIFI_BASELINE) {
             open_tool_page(UI_PAGE_WIFI);
             if (!ui_capability_blocked) {
-                wifi_mode = action == SENTINEL_GUIDE_OPEN_WIFI_CHANNELS ? UI_WIFI_MODE_CHANNELS_24 :
-                    (action == SENTINEL_GUIDE_OPEN_WIFI_BASELINE ? UI_WIFI_MODE_BASELINE : UI_WIFI_MODE_LIST);
-                wifi_baseline.checked = false;
-                if (wifi_mode == UI_WIFI_MODE_CHANNELS_24) wifi_channel_survey_start_ui();
-                else (void)refresh_wifi_scan_status();
+                if (action != SENTINEL_GUIDE_OPEN_WIFI) {
+                    dual_wifi_ui_leave();
+                    wifi_mode = action == SENTINEL_GUIDE_OPEN_WIFI_CHANNELS ?
+                        UI_WIFI_MODE_CHANNELS_24 : UI_WIFI_MODE_BASELINE;
+                    wifi_baseline.checked = false;
+                    if (wifi_mode == UI_WIFI_MODE_CHANNELS_24) wifi_channel_survey_start_ui();
+                    else (void)refresh_wifi_scan_status();
+                }
             }
         } else if (action == SENTINEL_GUIDE_OPEN_BLE || action == SENTINEL_GUIDE_OPEN_BLE_SIGNAL) {
             open_tool_page(UI_PAGE_BLE);
@@ -11528,6 +11559,16 @@ static void handle_tap(uint16_t x, uint16_t y)
         return;
     }
 
+    if (!ui_capability_blocked && current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_DUAL) {
+        dual_wifi_live_tap(x, y);
+        return;
+    }
+    if (!ui_capability_blocked && current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5 &&
+        y >= UI_BACK_Y && y < UI_BACK_Y + UI_BACK_HEIGHT) {
+        ble_mode = UI_BLE_MODE_LIST;
+        ESP_ERROR_CHECK(draw_detail_page());
+        return;
+    }
     if (learning_tool_active &&
         current_page != UI_PAGE_BLE_SOUND &&
         !(current_page == UI_PAGE_BLE &&
@@ -11762,7 +11803,8 @@ static void handle_tap(uint16_t x, uint16_t y)
                 wifi_mode = UI_WIFI_MODE_TARGET;
                 ESP_ERROR_CHECK(draw_detail_page());
             } else if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_TARGET) {
-                wifi_mode = UI_WIFI_MODE_LIST;
+                if (dual_wifi_return_to_view) dual_wifi_live_open(false);
+                else wifi_mode = UI_WIFI_MODE_LIST;
                 ESP_ERROR_CHECK(draw_detail_page());
             } else if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_LIST && wifi_attack_selecting) {
                 wifi_attack_selecting = false;
@@ -11926,6 +11968,8 @@ void cerberus_ui_run(const cerberus_ui_config_t *config)
         }
         (void)cerberus_battery_poll(now_ms);
         live_scan_tick((uint32_t)now_ms, screen_asleep);
+        dual_ble_live_tick((uint64_t)now_ms, screen_asleep);
+        dual_wifi_live_tick((uint32_t)now_ms, screen_asleep);
         wifi_relation_tick((uint32_t)now_ms, !live_wifi_capture_defers_c5() && !screen_asleep && !wifi_attack_selecting &&
             current_page == UI_PAGE_WIFI && (wifi_mode == UI_WIFI_MODE_LIST ||
             wifi_mode == UI_WIFI_MODE_TARGET || wifi_mode == UI_WIFI_MODE_OBSERVED_CLIENTS),
@@ -12053,6 +12097,7 @@ void cerberus_ui_run(const cerberus_ui_config_t *config)
             !remote_id_keeps_awake() &&
             !mac_monitor_keeps_awake() &&
             !ble_discovery_keeps_awake() &&
+            !(current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_DUAL) &&
             !(current_page == UI_PAGE_SCRIPTS && script_running) &&
             now_ms - last_user_activity_ms >= (int64_t)ui_screen_timeout_seconds * 1000LL) {
             awake_brightness = cerberus_display_get_brightness();

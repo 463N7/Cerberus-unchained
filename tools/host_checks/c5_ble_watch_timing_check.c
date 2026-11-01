@@ -43,6 +43,14 @@ static cerberus_watch_capture_t watch_capture;
 static cerberus_ble_activity_capture_t activity_capture;
 static uint64_t watch_capture_epoch;
 static uint32_t scan_callback_epoch;
+/* Ordinary Watch never owns the separate companion protocol. Keep the actual
+ * scanner admission and callback branches compiled; companion lifecycle and
+ * typed-target behavior are exercised by check_dual_ble.py. */
+static bool dual_attached,dual_radio_active,dual_track_seen;
+static uint8_t dual_mode,dual_address[6],dual_address_type,dual_generation;
+static uint32_t dual_track_ms,dual_track_reports;
+static int8_t dual_track_rssi;
+static void dual_expire_locked(void){CHECK(locked&&!dual_attached);}
 static uint8_t diagnostic_phase;
 static int64_t clock_us,parse_delay;
 static unsigned parse_epoch_change,queued,rf_starts,timeout_stops;

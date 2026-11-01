@@ -693,6 +693,8 @@ esp_err_t c5_spi_link_get_wifi_scan_status(cerberus_wifi_scan_status_payload_t *
     return wifi_scan_status_command(CERBERUS_SPI_COMMAND_WIFI_SCAN_STATUS, status);
 }
 
+#include "c5_wifi_scan_band_link_impl.h"
+
 esp_err_t c5_spi_link_get_wifi_radio_stats(cerberus_wifi_radio_stats_payload_t *stats)
 {
     if (stats == NULL || link_mutex == NULL) return ESP_ERR_INVALID_ARG;
@@ -2427,3 +2429,5 @@ esp_err_t c5_spi_link_get_ieee802154_activity_scan_result(
 #include "c5_mac_monitor_link_impl.h"
 #include "c5_wifi_relation_link_impl.h"
 #include "c5_wifi_scan_link_impl.h"
+
+#include "c5_dual_ble_link_impl.h"

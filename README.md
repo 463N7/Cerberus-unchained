@@ -1,6 +1,6 @@
 # Cerberus Unchained
 
-Experimental Cerberus firmware for the expanded rev93 feature set: integrated
+Experimental Cerberus firmware for the expanded rev94 feature set: integrated
 wardriving, C5 Wi-Fi capture and analysis, S3 BLE discovery and tools, Remote ID
 receive workflows, AP/client navigation, and optional expansion radios.
 
@@ -9,8 +9,8 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev93` (experimental), paired with onboard
-C5 protocol firmware revision 60. No Unchained binary release is selected yet.**
+**Current source version: `0.1.0-dev.rev94` (experimental), paired with onboard
+C5 protocol firmware revision 61. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
 
@@ -41,6 +41,14 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 
 ## Development status
 
+Rev94 adds adaptive dual-radio scanning: Wi-Fi-only scans use S3 for 2.4 GHz
+and C5 for 5 GHz when both are available; ordinary BLE discovery and fox hunting
+gain a separate C5 receiver alongside S3. Mixed Recon and Wardriving keep C5
+Wi-Fi plus S3 BLE. Receiver provenance, bounded memory, Stop/Back recovery and
+fresh AP selection checks are part of the implementation. On-device speed,
+coverage and lifecycle acceptance remain pending. See
+[dual-radio scanning and validation](docs/DUAL_RADIO_SCANNING.md).
+
 The rev82–rev93 contribution adds bounded Wi-Fi result transfer and recovery,
 scan-list controls and passive SSID/trust review, BLE analysis and SD snapshots,
 Recon inventory and session recording, SD copy error handling, and a live
@@ -62,6 +70,7 @@ GPS reception, sustained load and six-radio expansion still need acceptance.
 The full Marauder port and Wardriving integration remain in progress.
 
 - [Rev93 contribution and remaining work](docs/CONTRIBUTION_REV93.md)
+- [Rev94 dual-radio scanning](docs/DUAL_RADIO_SCANNING.md)
 - [Original rev81 contribution](docs/CONTRIBUTION_REV81.md)
 - [Feature coverage ledger](docs/MARAUDER_COVERAGE_LEDGER.md)
 - [Integration targets and layout](INTEGRATION.md)

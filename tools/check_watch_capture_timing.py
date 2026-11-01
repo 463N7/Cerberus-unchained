@@ -15,7 +15,7 @@ pieces = []
 for first, after in (
     ("static void record_advertisement(", "static int gap_event("),
     ("static void start_scan_event(", "static void stop_scan_event("),
-    ("esp_err_t cerberus_ble_scanner_start(", "esp_err_t cerberus_ble_watch_get_status("),
+    ("static esp_err_t start_scan(", "esp_err_t cerberus_ble_watch_get_status("),
     ("esp_err_t cerberus_ble_watch_get_timing(", "esp_err_t cerberus_ble_watch_get_activity("),
 ):
     start = source.index(first)

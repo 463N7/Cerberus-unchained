@@ -30,6 +30,8 @@ esp_err_t cerberus_display_fill_rect(uint16_t x,uint16_t y,uint16_t w,uint16_t h
 #include "discovery_live_types.h"
 #include "s3_ble_discovery_session.h"
 #include "s3_ble_discovery_inventory.h"
+#include "dual_ble_scan.h"
+#define UI_BLE_MODE_C5 99U
 
 enum { UI_WIFI_MODE_LIST, UI_WIFI_MODE_MENU, UI_WIFI_MODE_BASELINE, UI_WIFI_MODE_STATS,
     UI_WIFI_MODE_DETAIL, UI_WIFI_MODE_TARGET, UI_WIFI_MODE_PASSWORD, UI_WIFI_MODE_CONNECTION,
@@ -134,6 +136,21 @@ static bool ble_analyzer_started;
 static esp_err_t ble_analyzer_error;
 static uint32_t ble_analyzer_start_requested_ms,ble_analyzer_exit_started_ms,ble_analyzer_last_tick_ms,ble_analyzer_last_draw_ms;
 static bool ble_fox_hunt_exit_pending,ble_fox_hunt_retry_requested;
+static bool ble_fox_hunt_from_c5,ble_fox_hunt_start_pending;
+static uint32_t ble_fox_hunt_start_requested_ms;
+static cerberus_c5_ble_result_t ble_fox_hunt_target;
+static bool companion_released=true;
+static void dual_ble_ui_get_view(cerberus_dual_ble_view_t *out){memset(out,0,sizeof(*out));}
+static void dual_ble_ui_open(bool reset_detail){(void)reset_detail;}
+static void dual_ble_ui_retry(void){}
+static bool dual_ble_ui_released(void){return companion_released;}
+static void dual_ble_ui_sync(int mode,const uint8_t *address,uint8_t type,uint64_t now)
+{assert(mode==-1);(void)address;(void)type;(void)now;}
+static void dual_ble_live_tap(uint16_t x,uint16_t y){(void)x;(void)y;assert(!"C5 pane routed into S3 fixture");}
+static esp_err_t draw_ble(void){return ESP_OK;}
+static void ble_fox_hunt_open_peer(const cerberus_c5_ble_result_t *,bool);
+static bool dual_ble_live_prepare_fox(uint32_t,bool);
+static void ble_fox_hunt_finish_exit(bool,bool);
 static esp_err_t ble_fox_hunt_error;
 static uint32_t ble_fox_hunt_exit_started_ms,ble_fox_hunt_last_tick_ms,ble_fox_hunt_last_draw_ms;
 static ui_page_t ble_session_exit_page,tool_parent_page;
@@ -197,7 +214,7 @@ static ble_discovery_live_store_t *ble_discovery_live;
 static bool ble_discovery_page(void){return false;}
 static bool ble_discovery_presenting(void){return false;}
 static bool ble_discovery_acquire(void){return false;}
-static void ble_discovery_leave(void){assert(!"native leave in legacy fixture");}
+static void ble_discovery_leave(void){assert(!ble_discovery_live);}
 static void ble_discovery_tick(uint64_t now,bool asleep){(void)now;(void)asleep;}
 static void ble_discovery_select_painted(unsigned row){(void)row;assert(!"native selection in legacy fixture");}
 static void ble_discovery_toggle(void){assert(!"native toggle in legacy fixture");}
@@ -294,7 +311,7 @@ static void check_meta_ui(const char *prefix)
     assert(strstr(drawn,"ADV NO META IDENTIFIER PAIRS"));
     assert(strstr(drawn,"RSP FD5F LIST128, FEB7 DATA16 / 7s"));
     assert(!strstr(drawn,"FEB7 LIST128")&&!strstr(drawn,"FD5F DATA16"));save(prefix,"meta-frozen-detail");
-    handle_ble_tap(30,300);assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&track_begins==1);
+    handle_ble_tap(30,300);assert(dual_ble_live_prepare_fox((uint32_t)clock_ms,false));assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&track_begins==1);
     assert(!memcmp(track_address,expected.peer.address,6)&&track_type==expected.peer.address_type);
     ble_fox_hunt_tick(8500,false);clock_ms=8600;actual_back(440);hold_stop=true;
     ble_fox_hunt_tick(8800,false);assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&ble_fox_hunt_exit_pending);
@@ -383,7 +400,7 @@ static void check_ibeacon_ui(const char *prefix)
     assert(strstr(drawn,"IBEACON FORMAT / RSP / CURRENT / 7s"));
     assert(strstr(drawn,"IBEACON MAJOR 65535 MINOR 65535 CAL 127 dBm"));
     assert(strstr(drawn,"F0F1F2F3-F4F5-F6F7-F8F9-FAFBFCFDFEFF"));save(prefix,"ibeacon-frozen-detail");
-    handle_ble_tap(30,300);assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&track_begins==1);
+    handle_ble_tap(30,300);assert(dual_ble_live_prepare_fox((uint32_t)clock_ms,false));assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&track_begins==1);
     assert(!memcmp(track_address,expected.peer.address,6)&&track_type==expected.peer.address_type);
     ble_fox_hunt_tick(8500,false);clock_ms=8600;actual_back(440);hold_stop=true;
     ble_fox_hunt_tick(8800,false);assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&ble_fox_hunt_exit_pending);
@@ -463,7 +480,7 @@ static void check_flock_ui(const char *prefix)
     memset(observations,0,sizeof(observations));memset(&store,0,sizeof(store));++scan.generation;
     drawn[0]='\0';cerberus_display_fill_rect(0,0,320,480,UI_BACKGROUND);assert(actual_hint_detail()==ESP_OK);
     assert(strstr(drawn,"ADV NO QUALIFYING FLOCK FORMAT"));assert(strstr(drawn,"RSP CORROB PENGUIN+09C8DATA / 7s"));save(prefix,"flock-frozen-detail");
-    handle_ble_tap(30,300);assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&track_begins==1);
+    handle_ble_tap(30,300);assert(dual_ble_live_prepare_fox((uint32_t)clock_ms,false));assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&track_begins==1);
     assert(!memcmp(track_address,expected.peer.address,6)&&track_type==expected.peer.address_type);
     ble_fox_hunt_tick(8500,false);clock_ms=8600;actual_back(440);hold_stop=true;ble_fox_hunt_tick(8800,false);
     assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&ble_fox_hunt_exit_pending);owner=CERBERUS_S3_BLE_OWNER_NONE;ble_fox_hunt_tick(9100,false);
@@ -568,7 +585,7 @@ static void check_hc_ui(const char *prefix)
     drawn[0]='\0';cerberus_display_fill_rect(0,0,320,480,UI_BACKGROUND);assert(actual_hint_detail()==ESP_OK);
     assert(strstr(drawn,"ADV NO EXACT HC NAME")&&strstr(drawn,"RSP NAME HC-06 / 7s"));
     assert(strstr(drawn,"NOT DEVICE IDENTITY")&&!strstr(drawn,"SKIMMER"));save(prefix,"hc-frozen-detail");
-    handle_ble_tap(30,300);assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&track_begins==1);
+    handle_ble_tap(30,300);assert(dual_ble_live_prepare_fox((uint32_t)clock_ms,false));assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&track_begins==1);
     assert(!memcmp(track_address,expected.peer.address,6)&&track_type==1);
     ble_fox_hunt_tick(8500,false);clock_ms=8600;actual_back(440);hold_stop=true;ble_fox_hunt_tick(8800,false);
     assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&ble_fox_hunt_exit_pending);
@@ -712,7 +729,7 @@ static void check_recent_ui(const char *prefix)
     assert(ble_mode==UI_BLE_MODE_DETAIL&&ble_selected_scan_index==0&&!memcmp(&ble_findmy_selected,&expected,sizeof(expected)));
     assert(ble_selected_sound_profile==CERBERUS_FINDMY_PROFILE_NONE);
     memset(observations,0,sizeof(observations));memset(&store,0,sizeof(store));++scan.generation;
-    track_begins=track_ends=passive_starts=0;handle_ble_tap(30,300);
+    track_begins=track_ends=passive_starts=0;handle_ble_tap(30,300);assert(dual_ble_live_prepare_fox((uint32_t)clock_ms,false));
     assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&track_begins==1&&track_type==1&&track_type==expected.peer.address_type&&!memcmp(track_address,expected.peer.address,6));
     ble_fox_hunt_tick(40500,false);clock_ms=40600;actual_back(440);hold_stop=true;ble_fox_hunt_tick(40800,false);
     assert(ble_fox_hunt_exit_pending&&ble_mode==UI_BLE_MODE_FOX_HUNT);
@@ -1429,7 +1446,7 @@ int main(int argc,char **argv)
 
     /* The real detail TRACK branch sends the frozen typed address to the
      * unchanged Fox Hunt API even after the source list has been replaced. */
-    handle_ble_tap(30,300);assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&track_begins==1);
+    handle_ble_tap(30,300);assert(dual_ble_live_prepare_fox((uint32_t)clock_ms,false));assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&track_begins==1);
     assert(!memcmp(track_address,expected.peer.address,6)&&track_type==expected.peer.address_type);
     ble_fox_hunt_tick(8500,false);assert(passive_starts==1&&owner==CERBERUS_S3_BLE_OWNER_SCANNER);
     assert(!memcmp(&ble_findmy_selected,&expected,sizeof(expected)));

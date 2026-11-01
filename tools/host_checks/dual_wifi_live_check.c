@@ -1,0 +1,263 @@
+/* Reuse the real view and its typed renderer/coordinator test adapters. */
+#define main existing_view_checks
+#include "dual_wifi_ui_check.c"
+#undef main
+#include "scan_display_store.h"
+#include "sentinel_scan_session.h"
+#include "wifi_ap_job.h"
+#include "wifi_targets.h"
+#include "field_menu.h"
+#define ESP_ERROR_CHECK(call) assert((call) == ESP_OK)
+
+enum { UI_PAGE_WIFI, UI_PAGE_OTHER, UI_WIFI_MODE_DUAL, UI_WIFI_MODE_LIST,
+    UI_WIFI_MODE_TARGET };
+static int current_page, wifi_mode;
+static bool wifi_attack_selecting, ui_capability_blocked, wifi_selection_valid;
+static bool dual_wifi_return_to_view, c5_online;
+static cerberus_c5_status_t c5_status;
+static cerberus_field_menu_t field_menu;
+static sentinel_scan_session_t live_session, live_ble_session;
+typedef struct { bool released; } mock_discovery_session_t;
+static struct { mock_discovery_session_t session; } discovery_store;
+static __typeof__(discovery_store) *ble_discovery_live;
+typedef struct {
+    bool valid, captured;
+    uint8_t state, generation, saved_generation, completed;
+    uint16_t count;
+    uint32_t captured_ms;
+    esp_err_t error;
+} live_scan_record_t;
+static live_scan_record_t live_records[SENTINEL_SCAN_TOOL_COUNT];
+static cerberus_scan_display_store_t *live_store;
+static uint64_t wifi_relation_publication;
+static bool wifi_relation_exhausted;
+static int64_t live_wifi_published_us;
+static uint32_t live_capture_pending, live_last_poll;
+static uint8_t live_wifi_built, live_wifi_painted, live_page[SENTINEL_SCAN_TOOL_COUNT];
+static cerberus_wifi_scan_status_payload_t wifi_scan_status;
+static cerberus_c5_wifi_result_t wifi_selected_result;
+static uint8_t wifi_selected_index, wifi_analysis_generation;
+static esp_err_t wifi_analysis_error, wifi_trust_error, wifi_connection_error;
+static cerberus_wifi_connection_status_payload_t wifi_connection_status;
+static bool readout_busy, companion_released, store_fail, proof_valid;
+static unsigned rebind_calls, copy_calls, publish_calls, bind_calls, launcher_calls;
+static esp_err_t rebind_error, copy_error;
+static unsigned corrupt_export;
+static cerberus_dual_wifi_row_t requested;
+
+static bool live_wifi_capture_busy(void) { return readout_busy; }
+static bool cerberus_ble_discovery_session_released(const mock_discovery_session_t *s)
+{ return s->released; }
+static bool dual_ble_ui_released(void) { return companion_released; }
+static void ble_discovery_leave(void) { /* Release remains asynchronous. */ }
+static void wifi_relation_cancel(void) { }
+static bool live_store_acquire(void)
+{
+    if (store_fail) return false;
+    if (!live_store) live_store = calloc(1U, sizeof(*live_store));
+    assert(live_store); return true;
+}
+static void live_wifi_capture_reset(void) { assert(!readout_busy); }
+static int64_t esp_timer_get_time(void) { return 1234567LL; }
+static void wifi_commit_cached_results(const cerberus_c5_wifi_result_t *rows,
+    uint16_t count, uint8_t generation)
+{ assert(rows == live_store->wifi && count == 3 && generation == 91); }
+bool cerberus_s3_wifi_relation_meta_valid(const cerberus_s3_wifi_relation_meta_t *proof)
+{ return proof_valid && proof->clock_valid; }
+static void wifi_relation_publish(uint8_t generation,
+    const cerberus_c5_wifi_relation_bank_t *proof, esp_err_t error)
+{
+    assert(generation == 91 && proof->status.generation == 91 && !error);
+    ++publish_calls; ++wifi_relation_publication;
+}
+static void wifi_relation_bind_selection(bool ordinary)
+{
+    assert(ordinary && publish_calls && wifi_selection_valid && wifi_selected_index == 2);
+    assert(!memcmp(&wifi_selected_result, &live_store->wifi[2], sizeof(wifi_selected_result)));
+    ++bind_calls;
+}
+static void wifi_target_finish_selection(void) { wifi_mode = UI_WIFI_MODE_TARGET; }
+static esp_err_t draw_detail_page(void)
+{ return wifi_mode == UI_WIFI_MODE_DUAL ? dual_wifi_ui_draw() : ESP_OK; }
+static void return_to_launcher(void)
+{ ++launcher_calls; current_page = UI_PAGE_OTHER; dual_wifi_ui_leave(); }
+#include "target_sync_impl.h"
+
+esp_err_t cerberus_dual_wifi_scan_begin_rebind(const cerberus_dual_wifi_row_t *target)
+{
+    ++rebind_calls; requested = *target;
+    if (!rebind_error) {
+        mock_status.rebind_ready = false;
+        mock_status.rebinding = true;
+        mock_status.state = CERBERUS_DUAL_WIFI_RUNNING;
+    }
+    return rebind_error;
+}
+esp_err_t cerberus_dual_wifi_scan_copy_legacy_bank(cerberus_c5_wifi_result_t *rows,
+    cerberus_s3_wifi_observation_t *observations, size_t capacity,
+    cerberus_wifi_scan_status_payload_t *status, cerberus_c5_wifi_relation_bank_t *proof,
+    uint8_t *selected)
+{
+    ++copy_calls; assert(capacity == 32U);
+    assert(mock_status.rebind_ready && !mock_status.rebinding && !mock_status.cleanup_pending);
+    if (copy_error) return copy_error;
+    memset(rows, 0, capacity * sizeof(*rows));
+    memset(observations, 0, capacity * sizeof(*observations));
+    rows[2] = requested.ap;
+    observations[2] = (cerberus_s3_wifi_observation_t){.valid = true,
+        .request_started_us = 111111U, .source_age_ms = 70U};
+    *status = (cerberus_wifi_scan_status_payload_t){.state = CERBERUS_WIFI_SCAN_COMPLETE,
+        .generation = 91, .stored_count = 3, .total_count = 3};
+    memset(proof, 0, sizeof(*proof)); proof->clock_valid = true; proof->status.generation = 91;
+    *selected = 2;
+    switch (corrupt_export) {
+    case 1: ++rows[2].channel; break;
+    case 2: ++rows[2].security; break;
+    case 3: ++rows[2].bssid[5]; break;
+    case 4: rows[2].ssid[0] = '!'; break;
+    case 5: memset(rows[2].ssid, 'x', sizeof(rows[2].ssid)); break;
+    case 6: status->stored_count = 33; break;
+    case 7: *selected = 3; break;
+    case 8: proof->status.generation = 90; break;
+    case 9: status->state = CERBERUS_WIFI_SCAN_RUNNING; break;
+    case 10: status->error_code = ESP_FAIL; break;
+    case 11: status->stored_count = 0; break;
+    default: break;
+    }
+    return ESP_OK;
+}
+
+#include "../../s3_main/main/dual_wifi_live_ui.h"
+
+static void bridge_reset(void)
+{
+    reset();
+    wifi_targets_clear();
+    free(live_store); live_store = NULL;
+    sentinel_scan_session_init(&live_session); sentinel_scan_session_init(&live_ble_session);
+    memset(live_records, 0, sizeof(live_records));
+    memset(&wifi_selected_result, 0x5a, sizeof(wifi_selected_result));
+    memset(&wifi_scan_status, 0, sizeof(wifi_scan_status));
+    ble_discovery_live = NULL;
+    companion_released = proof_valid = true;
+    readout_busy = store_fail = wifi_relation_exhausted = false;
+    rebind_error = copy_error = ESP_OK; corrupt_export = 0U;
+    rebind_calls = copy_calls = publish_calls = bind_calls = launcher_calls = 0U;
+    dual_wifi_live_handoff_pending = dual_wifi_return_to_view = false;
+    ui_capability_blocked = false;
+    current_page = UI_PAGE_WIFI; wifi_mode = UI_WIFI_MODE_DUAL;
+    wifi_relation_publication = 2U;
+    live_capture_pending = UINT32_MAX;
+}
+static void select_and_request(void)
+{
+    publish(4, 42); dual_wifi_live_open(false); draw_ok();
+    dual_wifi_live_tap(20, 160); /* Select S3 identity, not a legacy C5 index. */
+    dual_wifi_live_tap(30, 335);
+    assert(!rebind_calls);
+    dual_wifi_live_tick(300, false);
+    assert(rebind_calls == 1 && requested.source == CERBERUS_DUAL_WIFI_SOURCE_S3);
+    assert(!publish_calls && dual_wifi_live_handoff_pending);
+}
+static void finish_rebind(void)
+{
+    mock_status.state = CERBERUS_DUAL_WIFI_COMPLETE;
+    mock_status.rebinding = mock_status.cleanup_pending = false;
+    mock_status.rebind_ready = true;
+}
+static void released_admission(void)
+{
+    bridge_reset(); dual_wifi_live_open(true);
+    live_session.active = SENTINEL_SCAN_WIFI;
+    dual_wifi_live_tick(1, false); assert(!start_calls);
+    live_session.active = SENTINEL_SCAN_NONE;
+    live_ble_session.pending.kind = SENTINEL_SCAN_COMMAND_STOP;
+    dual_wifi_live_tick(2, false); assert(!start_calls);
+    live_ble_session.pending.kind = SENTINEL_SCAN_COMMAND_NONE;
+    readout_busy = true; dual_wifi_live_tick(3, false); assert(!start_calls);
+    readout_busy = false; companion_released = false;
+    dual_wifi_live_tick(4, false); assert(!start_calls);
+    companion_released = true; ble_discovery_live = &discovery_store;
+    discovery_store.session.released = false;
+    dual_wifi_live_tick(5, false); assert(!start_calls);
+    discovery_store.session.released = true;
+    live_session.stop_requested = true; dual_wifi_live_tick(6, false); assert(!start_calls);
+    live_session.stop_requested = false; live_session.waiting = true;
+    dual_wifi_live_tick(7, false); assert(start_calls == 1); /* Backoff cannot deadlock idle. */
+}
+static void publication(void)
+{
+    bridge_reset();
+    cerberus_c5_wifi_result_t prior = {.bssid = {2, 2, 2, 2, 2, 2}, .channel = 11};
+    strcpy(prior.ssid, "Prior selection A");
+    assert(wifi_targets_add(&prior, 19));
+    select_and_request(); finish_rebind();
+    dual_wifi_live_tick(600, false);
+    assert(publish_calls == 1 && bind_calls == 1 && copy_calls == 1);
+    assert(!dual_wifi_live_handoff_pending && dual_wifi_return_to_view && !dual_wifi_ui_opened);
+    assert(wifi_mode == UI_WIFI_MODE_TARGET && wifi_selected_index == 2);
+    assert(wifi_target_count == 0); /* Old multi-select cannot override new B. */
+    wifi_target_sync_menu();
+    assert(wifi_target_count == 1 && wifi_selected_index == 2 &&
+        !memcmp(wifi_selected_result.bssid, requested.ap.bssid, 6));
+    assert(live_records[SENTINEL_SCAN_WIFI].captured && live_records[SENTINEL_SCAN_WIFI].count == 3);
+    assert(live_records[SENTINEL_SCAN_WIFI].saved_generation == 91 && wifi_scan_status.generation == 91);
+    assert(live_store->wifi_observations[2].valid && live_store->wifi_observations[2].source_age_ms == 70);
+    assert(!(live_capture_pending & (1U << SENTINEL_SCAN_WIFI)));
+    dual_wifi_live_tick(900, false); assert(publish_calls == 1);
+    dual_wifi_live_open(false); dual_wifi_live_tick(1200, false);
+    assert(!start_calls && !dual_wifi_return_to_view && dual_wifi_ui_store->count == 4);
+}
+static void rejected_publications(void)
+{
+    for (unsigned fault = 1; fault <= 15; ++fault) {
+        bridge_reset(); select_and_request(); finish_rebind();
+        assert(live_store_acquire());
+        memset(live_store->wifi, 0x35, sizeof(live_store->wifi));
+        if (fault <= 11) corrupt_export = fault;
+        if (fault == 12) proof_valid = false;
+        if (fault == 13) wifi_relation_publication = UINT64_MAX;
+        if (fault == 14) copy_error = ESP_ERR_INVALID_STATE;
+        if (fault == 15) store_fail = true;
+        dual_wifi_live_tick(600, false);
+        assert(!publish_calls && !bind_calls && !dual_wifi_return_to_view);
+        assert(!dual_wifi_live_handoff_pending && wifi_mode == UI_WIFI_MODE_DUAL);
+        assert((unsigned char)live_store->wifi[0].ssid[0] == 0x35);
+        assert((unsigned char)wifi_selected_result.ssid[0] == 0x5a);
+        assert(dual_wifi_ui_error != ESP_OK);
+    }
+}
+static void cancellation_and_fallback(void)
+{
+    for (unsigned mode = 0; mode < 5; ++mode) {
+        bridge_reset(); select_and_request();
+        if (mode == 0) dual_wifi_live_tap(20, 440); /* Detail Back. */
+        else if (mode == 1) dual_wifi_live_tap(180, 440); /* Stop during rebind. */
+        else if (mode == 2) dual_wifi_live_tick(400, true); /* Sleep. */
+        else if (mode == 3) { current_page = UI_PAGE_OTHER; dual_wifi_live_tick(400, false); }
+        else { dual_wifi_ui_store->selected.source_generation++; dual_wifi_live_tick(400, false); }
+        assert(!dual_wifi_live_handoff_pending);
+        finish_rebind(); dual_wifi_live_tick(600, false);
+        assert(!publish_calls && !dual_wifi_return_to_view);
+    }
+    bridge_reset(); dual_wifi_live_open(true); start_error = ESP_ERR_NOT_SUPPORTED;
+    dual_wifi_live_tick(200, false);
+    assert(wifi_mode == UI_WIFI_MODE_LIST && !dual_wifi_ui_opened);
+    assert(live_session.desired == SENTINEL_SCAN_WIFI && !live_session.completed && !live_session.paused);
+    bridge_reset(); dual_wifi_live_open(true); current_page = UI_PAGE_OTHER;
+    dual_wifi_live_tick(200, false); assert(!start_calls && !dual_wifi_ui_opened && step_calls);
+    bridge_reset(); dual_wifi_live_open(false); dual_wifi_live_tap(20, 440);
+    assert(launcher_calls == 1 && current_page == UI_PAGE_OTHER);
+    bridge_reset(); publish(4, 42); dual_wifi_live_open(false); draw_ok();
+    dual_wifi_live_tap(20, 160); dual_wifi_live_tap(20, 335);
+    rebind_error = ESP_FAIL; dual_wifi_live_tick(300, false);
+    assert(!dual_wifi_live_handoff_pending && dual_wifi_ui_error == ESP_FAIL && !publish_calls);
+}
+int main(void)
+{
+    existing_view_checks();
+    released_admission(); publication(); rejected_publications(); cancellation_and_fallback();
+    bridge_reset(); dual_wifi_ui_leave(); free(live_store);
+    puts("Dual Wi-Fi bridge: owner admission, C5 proof/index publication, identity faults, legacy fallback and Back/Stop/sleep cancellation passed.");
+    return 0;
+}

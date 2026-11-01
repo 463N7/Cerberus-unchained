@@ -1,0 +1,71 @@
+#undef NDEBUG
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+
+enum { UI_PAGE_WIFI=1, UI_WIFI_MODE_MENU=2, UI_WIFI_MODE_DUAL, UI_WIFI_MODE_MULTISSID,
+    UI_WIFI_MODE_PINESCAN, UI_WIFI_MODE_FIELD_SURVEY, UI_WIFI_MODE_STATS, UI_WIFI_MODE_PACKET_MONITOR,
+    UI_WIFI_MODE_BASELINE, UI_WIFI_MODE_DEFENSE, UI_WIFI_MODE_CONNECTION, UI_WIFI_MODE_CHANNELS_24 };
+enum { SENTINEL_GUIDE_OPEN_WIFI=1, SENTINEL_GUIDE_OPEN_WIFI_CHANNELS, SENTINEL_GUIDE_OPEN_WIFI_BASELINE };
+enum { CERBERUS_WIFI_CONNECTION_STAGING=1, CERBERUS_WIFI_CONNECTION_CONNECTED, CERBERUS_WIFI_CONNECTION_CONNECTING };
+#define SENTINEL_HUB_WIFI 1
+#define ESP_ERROR_CHECK(value) assert((value)==0)
+static unsigned current_page, wifi_mode, menu_item, dual_opens, dual_leaves, tap_count, scan_refreshes, surveys;
+static bool ui_capability_blocked, wifi_attack_selecting, pending_start, wifi_selection_valid;
+static struct { bool checked; } wifi_baseline;
+static struct { unsigned state; } wifi_connection_status;
+static bool packet_monitor_from_target, packet_monitor_attempted;
+static unsigned packet_monitor_channel, packet_monitor_last_poll;
+static char wifi_export_message[10];
+static int wifi_connection_error;
+static void dual_wifi_live_open(bool start)
+{ ++dual_opens; current_page=UI_PAGE_WIFI; wifi_mode=UI_WIFI_MODE_DUAL; pending_start=start; }
+static void dual_wifi_live_tap(uint16_t x,uint16_t y) { (void)x;(void)y;++tap_count; }
+static void dual_wifi_ui_leave(void) { ++dual_leaves; pending_start=false; }
+static int sentinel_hub_hit_test(int hub,uint16_t x,uint16_t y) { (void)x;(void)y;assert(hub==SENTINEL_HUB_WIFI);return (int)menu_item; }
+static void open_learning_lesson(int value) { (void)value; }
+static void multissid_enter(void) {}
+static void pinescan_enter(void) {}
+static int refresh_wifi_scan_status(void) { ++scan_refreshes; return 0; }
+static int refresh_wifi_defense_survey(void) { return 0; }
+static int c5_spi_link_get_wifi_connection_status(void *status) { (void)status;return 0; }
+static void packet_monitor_start_ui(void) {}
+static void wifi_channel_survey_start_ui(void) { assert(!pending_start);++surveys; }
+static int draw_detail_page(void) { return 0; }
+#include "dual_wifi_root_routes.h"
+
+static void reset(void)
+{
+    current_page=UI_PAGE_WIFI;wifi_mode=UI_WIFI_MODE_MENU;menu_item=0;
+    dual_opens=dual_leaves=tap_count=scan_refreshes=surveys=0;
+    ui_capability_blocked=wifi_attack_selecting=pending_start=wifi_selection_valid=false;
+    wifi_connection_status.state=0;
+}
+int main(void)
+{
+    reset();wifi_attack_selecting=true;open_tool_page(UI_PAGE_WIFI);
+    assert(wifi_mode==UI_WIFI_MODE_DUAL&&pending_start&&dual_opens==1&&!wifi_attack_selecting);
+    reset();ui_capability_blocked=true;open_tool_page(UI_PAGE_WIFI);
+    assert(wifi_mode==UI_WIFI_MODE_DUAL&&!pending_start);
+    reset();root_wifi_tap(10,10);assert(dual_opens==1&&pending_start&&wifi_mode==UI_WIFI_MODE_DUAL);
+    root_wifi_tap(20,445);assert(tap_count==1);root_touch(20,445);assert(tap_count==2);
+    ui_capability_blocked=true;root_touch(20,445);assert(tap_count==2);
+    reset();root_guide(SENTINEL_GUIDE_OPEN_WIFI);
+    assert(wifi_mode==UI_WIFI_MODE_DUAL&&pending_start&&dual_opens==1&&!dual_leaves&&!scan_refreshes);
+    reset();root_guide(SENTINEL_GUIDE_OPEN_WIFI_CHANNELS);
+    assert(wifi_mode==UI_WIFI_MODE_CHANNELS_24&&!pending_start&&dual_leaves==1&&surveys==1);
+    reset();root_guide(SENTINEL_GUIDE_OPEN_WIFI_BASELINE);
+    assert(wifi_mode==UI_WIFI_MODE_BASELINE&&!pending_start&&dual_leaves==1&&scan_refreshes==1);
+    reset();ui_capability_blocked=true;root_guide(SENTINEL_GUIDE_OPEN_WIFI_CHANNELS);
+    assert(wifi_mode==UI_WIFI_MODE_DUAL&&!pending_start&&!surveys);
+    reset();menu_item=5;root_wifi_tap(10,10);
+    assert(wifi_mode==UI_WIFI_MODE_DUAL&&pending_start);
+    reset();menu_item=5;wifi_selection_valid=true;root_wifi_tap(10,10);
+    assert(wifi_mode==UI_WIFI_MODE_CONNECTION&&!dual_opens);
+    reset();menu_item=5;wifi_connection_status.state=CERBERUS_WIFI_CONNECTION_CONNECTED;root_wifi_tap(10,10);
+    assert(wifi_mode==UI_WIFI_MODE_CONNECTION&&!dual_opens);
+    reset();menu_item=1;root_wifi_tap(10,10);assert(wifi_mode==UI_WIFI_MODE_STATS&&!dual_opens&&scan_refreshes==1);
+    puts("Dual Wi-Fi root routes: launcher/menu/guide use split view; special/connected/blocked routes preserve their behavior.");
+    return 0;
+}

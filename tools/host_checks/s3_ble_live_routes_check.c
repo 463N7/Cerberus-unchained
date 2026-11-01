@@ -14,7 +14,7 @@
 #define ESP_ERROR_CHECK(x) assert((x)==ESP_OK)
 enum {UI_PAGE_WIFI,UI_PAGE_BLE,UI_PAGE_IEEE802154,UI_PAGE_WATCH};
 enum {UI_WIFI_MODE_LIST,UI_WIFI_MODE_TARGET,UI_WIFI_MODE_MENU};
-enum {UI_BLE_MODE_LIST,UI_BLE_MODE_FINDMY_MONITOR,UI_BLE_MODE_MENU,UI_BLE_MODE_ANALYZER};
+enum {UI_BLE_MODE_LIST,UI_BLE_MODE_FINDMY_MONITOR,UI_BLE_MODE_MENU,UI_BLE_MODE_ANALYZER,UI_BLE_MODE_C5};
 enum {UI_IEEE802154_MODE_ENERGY,UI_IEEE802154_MODE_BEACONS,UI_IEEE802154_MODE_ACTIVITY,UI_IEEE802154_MODE_MENU};
 static unsigned current_page=UI_PAGE_BLE,ble_mode=UI_BLE_MODE_LIST,wifi_mode,ieee802154_mode;
 static bool wifi_attack_selecting,wifi_selection_valid,ble_attack_selecting;
@@ -62,6 +62,9 @@ void sentinel_scan_session_pause(sentinel_scan_session_t *s,bool p){s->paused=p;
 sentinel_view_action_t sentinel_scan_view_hit_test(const sentinel_scan_view_t*v,uint16_t x,uint16_t y){(void)v;(void)x;(void)y;return action;}
 esp_err_t sentinel_scan_view_update(const sentinel_scan_view_t*v,uint32_t f){(void)v;(void)f;return ESP_OK;}
 static esp_err_t draw_current_page(void){return ESP_OK;}
+static esp_err_t draw_ble(void){return ESP_OK;}
+static void dual_ble_ui_open(bool reset_detail){(void)reset_detail;}
+static void dual_ble_live_tap(uint16_t x,uint16_t y){(void)x;(void)y;assert(!"C5 view in legacy BLE route");}
 static void ble_findmy_monitor_open(void){++monitor_opened;ble_mode=UI_BLE_MODE_FINDMY_MONITOR;}
 static void ble_findmy_monitor_tap(uint16_t x,uint16_t y){(void)x;(void)y;++monitor_tapped;}
 static bool ble_connection_is_active(void){return false;}

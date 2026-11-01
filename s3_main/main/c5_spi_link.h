@@ -217,6 +217,22 @@ typedef struct {
 void c5_spi_link_get_transport_diagnostics(cerberus_c5_transport_diagnostics_t *out);
 esp_err_t c5_spi_link_get_status(cerberus_c5_status_t *status);
 esp_err_t c5_spi_link_start_wifi_scan(cerberus_wifi_scan_status_payload_t *status);
+/* Firmware61+: INFO issues current epoch; start requires epoch+1. A lost reply
+ * can be retried with that same epoch. Every later ordinary scan revokes it.
+ * Old peers return NOT_SUPPORTED without receiving a start command. Each
+ * operation is one bounded attempt (20ms software budget; not SDK preemption).
+ * STATUS/STOP return NOT_FOUND for stale ownership, without stopping another
+ * job. A Stop reply still RUNNING means cleanup must continue, including when
+ * its error_code reports an SDK Stop failure. */
+esp_err_t c5_spi_link_wifi_scan_band_info(cerberus_wifi_scan_band_response_t *reply);
+esp_err_t c5_spi_link_start_wifi_scan_band(uint8_t band, uint64_t session_id,
+    cerberus_wifi_scan_status_payload_t *status);
+esp_err_t c5_spi_link_wifi_scan_band_status(uint8_t band, uint64_t session_id,
+    cerberus_wifi_scan_status_payload_t *status);
+esp_err_t c5_spi_link_stop_wifi_scan_band(uint8_t band, uint64_t session_id,
+    cerberus_wifi_scan_status_payload_t *status);
+esp_err_t c5_spi_link_dual_ble_exchange(uint8_t command, const void *request,
+    size_t request_size, void *response, size_t response_size);
 esp_err_t c5_spi_link_stop_wifi_scan(cerberus_wifi_scan_status_payload_t *status);
 esp_err_t c5_spi_link_get_wifi_scan_status(cerberus_wifi_scan_status_payload_t *status);
 esp_err_t c5_spi_link_get_wifi_radio_stats(cerberus_wifi_radio_stats_payload_t *stats);

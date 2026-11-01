@@ -1,4 +1,5 @@
 #include "s3_ble_host.h"
+#include "s3_wifi_owner.h"
 #include "sdkconfig.h"
 
 #ifdef CONFIG_BT_NIMBLE_ENABLED
@@ -53,9 +54,17 @@ esp_err_t cerberus_s3_ble_host_claim(cerberus_s3_ble_owner_t owner)
     if (owner != CERBERUS_S3_BLE_OWNER_SCANNER && owner != CERBERUS_S3_BLE_OWNER_ADVERTISER &&
         owner != CERBERUS_S3_BLE_OWNER_CENTRAL)
         return ESP_ERR_INVALID_ARG;
+    if (cerberus_s3_wifi_owner() == CERBERUS_S3_WIFI_SCAN) return ESP_ERR_INVALID_STATE;
     int expected = CERBERUS_S3_BLE_OWNER_NONE;
     if (!atomic_compare_exchange_strong(&current_owner, &expected, owner))
         return ESP_ERR_INVALID_STATE;
+    /* The Wi-Fi scanner claims first and then checks BLE ownership. This
+     * second check closes a claim race before any controller/GAP work starts. */
+    if (cerberus_s3_wifi_owner() == CERBERUS_S3_WIFI_SCAN) {
+        expected = owner;
+        (void)atomic_compare_exchange_strong(&current_owner, &expected, CERBERUS_S3_BLE_OWNER_NONE);
+        return ESP_ERR_INVALID_STATE;
+    }
     if (!atomic_load(&initialized)) {
         esp_err_t err = nimble_port_init();
         if (err != ESP_OK) {

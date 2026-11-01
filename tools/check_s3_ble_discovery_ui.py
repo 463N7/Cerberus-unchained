@@ -64,6 +64,8 @@ footer_start = ui.index("    } else if (current_page == UI_PAGE_BLE && ble_mode 
 footer_end = ui.index("    } else if", footer_start + 20)
 parts += "static esp_err_t actual_analyzer_footer(void) { const char *back_label = \"BACK\";\n" + ui[footer_start:footer_end].replace("} else if", "if", 1) + "}\n"
 parts += re.search(r"    return draw_button\(64, UI_BACK_Y, 192, UI_BACK_HEIGHT, back_label\);", ui).group(0) + "\n}\n"
+dual_live = (root / "s3_main/main/dual_ble_live_ui.h").read_text()
+parts += between(dual_live, "static bool dual_ble_live_discovery_released(", "static void dual_ble_live_tap(")
 (out / "discovery_routes_impl.h").write_text(parts)
 exe = out / ("ble-discovery-native-check.exe" if native else "ble-discovery-ui-check.exe")
 env = os.environ.copy()

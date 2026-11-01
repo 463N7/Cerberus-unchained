@@ -25,12 +25,12 @@ static esp_err_t live_paint(bool full);
 static bool ble_discovery_page(void)
 {
     return !ui_capability_blocked && current_page == UI_PAGE_BLE &&
-        ble_mode == UI_BLE_MODE_LIST && !ble_attack_selecting;
+        (ble_mode == UI_BLE_MODE_LIST || ble_mode == UI_BLE_MODE_C5) && !ble_attack_selecting;
 }
 
 static bool ble_discovery_presenting(void)
 {
-    return ble_discovery_page() && ble_discovery_live != NULL;
+    return ble_discovery_page() && ble_mode == UI_BLE_MODE_LIST && ble_discovery_live != NULL;
 }
 
 static bool ble_discovery_keeps_awake(void)
@@ -178,7 +178,7 @@ static bool ble_discovery_acquire(void)
 static void ble_discovery_select_painted(unsigned row)
 {
     ble_discovery_live_store_t *store = ble_discovery_live;
-    if (!store || row >= store->painted_count) return;
+    if (!store || !ble_discovery_presenting() || row >= store->painted_count) return;
     store->selected = store->painted[row];
     store->selection_pending = true;
     store->destination = 0U;
@@ -231,7 +231,7 @@ static void ble_discovery_tick(uint64_t now_ms, bool asleep)
     store->presentation.state = store->session.enabled ||
         !cerberus_ble_discovery_session_released(&store->session) ?
         SENTINEL_SCAN_RUNNING : SENTINEL_SCAN_COMPLETE;
-    if (visible && store->selection_pending &&
+    if (visible && ble_discovery_presenting() && store->selection_pending &&
         cerberus_ble_discovery_session_released(&store->session)) {
         const cerberus_s3_ble_discovery_record_t *proof = &store->selected.record;
         cerberus_findmy_monitor_record_t frozen = {
@@ -245,7 +245,7 @@ static void ble_discovery_tick(uint64_t now_ms, bool asleep)
         ble_selected_source_ceiling_ms64 = store->selected.source_now_ms;
         return;
     }
-    if (visible && store->destination &&
+    if (visible && ble_discovery_presenting() && store->destination &&
         cerberus_ble_discovery_session_released(&store->session)) {
         uint8_t destination = store->destination;
         store->destination = 0U;
@@ -254,7 +254,7 @@ static void ble_discovery_tick(uint64_t now_ms, bool asleep)
         ESP_ERROR_CHECK(draw_current_page());
         return;
     }
-    if (visible && (store->dirty || now_ms - store->last_draw_ms >= 200U)) {
+    if (visible && ble_discovery_presenting() && (store->dirty || now_ms - store->last_draw_ms >= 200U)) {
         store->last_draw_ms = now_ms;
         ++live_frame;
         live_make_view();

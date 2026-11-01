@@ -1,4 +1,9 @@
-# Validating the rev93 contribution
+# Validation procedures and rev93 evidence
+
+Rev94 adds eight dual-radio suites to the configured runner (115 total).
+The recorded rev93 results below remain historical. Current rev94 build,
+targeted-check results and hardware limits are recorded separately in
+[Dual-radio scanning](DUAL_RADIO_SCANNING.md).
 
 The contribution brings the rev82–93 passive observation, analysis, storage and Wardriving changes into the Unchained rev81 foundation. Host checks use synthetic fixtures and selected production C code. They run on the computer without programming a board or starting radio operations. Passing them does not establish hardware acceptance or complete Marauder feature parity.
 
@@ -14,13 +19,13 @@ python tools/check_build_unified.py
 python tools/check_field_kit.py
 ```
 
-The runner names all 107 suites from the rev93 checkpoint: 87 independent suites, followed by 20 serial UI suites that share generated headers or preview outputs. It retains every suite from the upstream 79-suite runner. `--jobs 1` reduces compiler memory use; the default is three workers. Each suite receives separate Zig global/local cache roots, and individual harnesses retain their own narrower cache settings. Do not run another copy of the runner concurrently in the same checkout.
+The current runner names 115 suites: 94 independent suites, followed by 21 serial UI suites that share generated headers or preview outputs. It retains all 107 rev93 suites, including every suite from the upstream 79-suite runner. `--jobs 1` reduces compiler memory use; the default is three workers. Each suite receives separate Zig global/local cache roots, and individual harnesses retain their own narrower cache settings. Do not run another copy of the runner concurrently in the same checkout.
 
 The runner fails if a suite is missing, a suite fails, the Zig version differs, or fingerprinted inputs change during validation. Keep the checkout stable and run firmware builds separately. Source, synthetic data, production extracts and font-rendering fixtures are in this repository; no sibling integration folder, private console transcript, network capture or archived binary is required. A few older scripts contain a Windows MinGW fallback, but the full runner requires Zig and does not use it. Storage and thread fixtures retain their POSIX branches and explicit declarations for Linux.
 
-Results are written to `artifacts/host-checks/host-checks.json`, including per-suite status/log hashes, input fingerprints, Python/Zig versions, cache roots and `hardware_validated: false`. Executables, generated headers and rendered previews stay under ignored `artifacts/` directories. The SD resource check and build-report/package-proof regression tests above are additional checks, outside the count of 107. Logs can contain local compiler paths; inspect them before sharing.
+Results are written to `artifacts/host-checks/host-checks.json`, including per-suite status/log hashes, input fingerprints, Python/Zig versions, cache roots and `hardware_validated: false`. Executables, generated headers and rendered previews stay under ignored `artifacts/` directories. The SD resource check and build-report/package-proof regression tests above are additional checks, outside the count of 115. Logs can contain local compiler paths; inspect them before sharing.
 
-The host workflow runs the same commands on Linux and Windows. A configured workflow is not evidence that its current run passed: use the actual CI result or the receipt generated from the checkout being reviewed. Other historical scripts in `tools/` are not silently included in the 107-suite claim.
+The host workflow runs the same commands on Linux and Windows. A configured workflow is not evidence that its current run passed: use the actual CI result or the receipt generated from the checkout being reviewed. Other historical scripts in `tools/` are not silently included in the 115-suite configuration.
 
 ## Firmware build matrix
 

@@ -44,6 +44,13 @@ esp_err_t cerberus_wifi_station_stop(uint16_t job_id);
 void cerberus_wifi_station_status(uint16_t lease_job_id,cerberus_wifi_station_status_t *status);
 esp_err_t cerberus_wifi_station_result(const cerberus_wifi_station_query_t *query,cerberus_wifi_station_result_t *result);
 esp_err_t cerberus_wifi_scanner_start(void);
+esp_err_t cerberus_wifi_scanner_start_band(const cerberus_wifi_scan_band_request_t *request,
+    cerberus_wifi_scan_band_response_t *response);
+esp_err_t cerberus_wifi_scanner_band_info(cerberus_wifi_scan_band_response_t *response);
+esp_err_t cerberus_wifi_scanner_band_status(const cerberus_wifi_scan_band_request_t *request,
+    cerberus_wifi_scan_band_response_t *response);
+esp_err_t cerberus_wifi_scanner_band_stop(const cerberus_wifi_scan_band_request_t *request,
+    cerberus_wifi_scan_band_response_t *response);
 esp_err_t cerberus_wifi_probe_get_status(uint8_t generation, cerberus_wifi_probe_status_t *out);
 esp_err_t cerberus_wifi_probe_get_result_chunk(const cerberus_wifi_probe_query_t *query,
     cerberus_wifi_probe_chunk_t *out);

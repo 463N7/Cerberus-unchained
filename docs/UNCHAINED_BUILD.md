@@ -54,7 +54,7 @@ python tools/check_build_unified.py
 python tools/check_field_kit.py
 ```
 
-The runner covers 107 named suites and uses separate Zig caches. Run it against
+The runner covers 115 named suites and uses separate Zig caches. Run it against
 stable sources, separately from firmware builds. See [validation](VALIDATION.md)
 and [the current contribution and remaining work](CONTRIBUTION_REV93.md). The
 [original rev81 contribution](CONTRIBUTION_REV81.md) remains historical context.

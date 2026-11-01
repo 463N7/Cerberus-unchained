@@ -320,6 +320,39 @@ static void retained_badge_age(const char *prefix)
     clean_live();
 }
 
+static void companion_pane_and_fox_barrier(void)
+{
+    seed_native(CERBERUS_S3_BLE_FILTER_ALL);
+    companion_released=true;native_tick(1000,false);
+    clock_ms=1050;row(0,77,1,-45);native_tick(1050,false);
+    CHECK(ble_discovery_live->painted_count==1);
+    uint32_t frame=live_frame;
+    cerberus_s3_ble_discovery_entry_t painted=ble_discovery_live->painted[0];
+    handle_live_scan_tap(140,113);
+    CHECK(ble_mode==UI_BLE_MODE_C5&&ble_discovery_page()&&!ble_discovery_presenting());
+    clock_ms=1450;row(1,88,2,-60);native_tick(1450,false);
+    CHECK(ble_discovery_live->session.enabled&&ble_discovery_live->inventory.count==2);
+    CHECK(live_frame==frame&&!memcmp(&painted,&ble_discovery_live->painted[0],sizeof(painted)));
+    ble_discovery_select_painted(0);CHECK(!ble_discovery_live->selection_pending);
+    cerberus_c5_ble_result_t original=ble_selected_result;
+    cerberus_c5_ble_result_t target={.address={9,8,7,6,5,4},.address_type=3,.name="C5 only"};
+    companion_released=false;track_begins=0;
+    ble_fox_hunt_open_peer(&target,true);
+    CHECK(ble_mode==UI_BLE_MODE_FOX_HUNT&&ble_fox_hunt_start_pending&&track_begins==0);
+    CHECK(!memcmp(&original,&ble_selected_result,sizeof(original)));
+    CHECK(!dual_ble_live_prepare_fox(1500,false));
+    native_tick(1550,false);native_tick(1800,false);native_tick(2050,false);
+    CHECK(dual_ble_live_discovery_released()&&!dual_ble_live_prepare_fox(2100,false));
+    CHECK(track_begins==0);companion_released=true;
+    CHECK(!dual_ble_live_prepare_fox(2150,true)&&track_begins==0); /* Sleeping cannot arm a pending target. */
+    CHECK(dual_ble_live_prepare_fox(2200,false)&&track_begins==1&&track_type==3);
+    CHECK(!memcmp(track_address,target.address,6)&&!memcmp(&original,&ble_selected_result,sizeof(original)));
+    ble_fox_hunt_finish_exit(false,false);CHECK(ble_mode==UI_BLE_MODE_C5);
+    ble_mode=UI_BLE_MODE_LIST;native_tick(2300,false);
+    CHECK(!ble_discovery_live->session.enabled&&discovery_native.start==1);
+    clean_live();
+}
+
 int main(int argc,char **argv)
 {
     CHECK(argc==2);
@@ -329,6 +362,7 @@ int main(int argc,char **argv)
     deferred_navigation_and_copy_failure();
     source_switch_and_maximum(argv[1]);
     retained_badge_age(argv[1]);
+    companion_pane_and_fox_barrier();
     printf("Ordinary BLE live UI: %u checks passed; active updates, frozen painted selection, scoped cleanup and C5 independence\n",live_checks);
     return 0;
 }
