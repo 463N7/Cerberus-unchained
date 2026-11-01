@@ -27,11 +27,24 @@ source check, not proof of complete porting or physical acceptance.
   physical acceptance; the pure parallel scheduler fixture alone does not
   prove the native boundary. Whole-device/C5 ownership parity remains a
   separate audit, not a claim made by this S3 change.
-- **Wardriving:** S3 capture and cleanup use the generation byte without a full
-  host/callback binding. Its worker also deliberately ends both receivers on a
-  terminal source error. Exact local binding and a deliberate degraded-mode
-  recording/retry design remain open. A partial file or single-source period
-  must be represented honestly if that policy changes.
+- **Wardriving:** the local rev119 candidate replaces generation-byte S3
+  ownership with the exact passive attachment, whole-bank capture and retained
+  cleanup. See [the milestone](DUAL_RADIO_REV119.md) for validation and physical
+  acceptance limits. Its worker still deliberately ends both receivers on a
+  terminal source error. A deliberate degraded-mode recording/retry design
+  remains open; partial files and single-source periods need explicit reporting
+  if that policy changes. C5 ownership and expansion release remain separate
+  acceptance/audit work.
+  The scoped S3 API has a bounded mutex wait. A future retry policy must
+  distinguish a returned status/copy timeout from an accepted scan's reported
+  controller error and from an SD append timeout; rev119 still treats those
+  returned S3 call failures as terminal for the recording session.
+- **Shared BLE host:** first-use Wardriving initialization still uses the host's
+  generic SCANNER claim/release. Rev119 checks host epoch and owner around that
+  claim and refuses admission on a detected reset/replacement. These separate
+  checks and the owner-only atomic release are not one atomic epoch-bound
+  ownership transition. A shared host reset/claim/release audit remains open;
+  the scoped worker APIs do not establish that every host client is race-free.
 - **MAC Monitor:** its context/job/epoch guards already protect callback,
   start, stop and release paths. This audit found no equivalent reachable
   takeover defect; that is not a claim of complete physical acceptance.

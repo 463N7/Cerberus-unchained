@@ -22,9 +22,9 @@ wrap_end = source.index("static void reset_wifi_capture(", wrap_start)
 deadline_start = source.index("static bool before_deadline(")
 deadline_end = source.index("static esp_err_t start_optional_gps(", deadline_start)
 capture_start = source.index("static void reset_wifi_capture(")
-capture_end = source.index("static esp_err_t capture_ble(", capture_start)
+capture_end = source.index("static bool ble_completed_state(", capture_start)
 publish_start = source.index("static void publish_completed_wifi(")
-publish_end = source.index("static void drain_completed_ble(", publish_start)
+publish_end = source.index("static void publish_completed_ble(", publish_start)
 (out / "wardrive_wifi_capture_impl.h").write_text(
     source[deadline_start:deadline_end] + "\n" +
     source[capture_start:capture_end] + "\n" + source[publish_start:publish_end], encoding="utf-8")

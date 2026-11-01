@@ -651,6 +651,7 @@ static void check_watch_timing_callbacks(void)
 #include "s3_ble_analyzer_binding_check.h"
 #include "s3_ble_track_binding_check.h"
 #include "s3_ble_passive_binding_check.h"
+#include "s3_ble_wardrive_binding_check.h"
 
 int main(void)
 {
@@ -968,5 +969,6 @@ int main(void)
     check_analyzer_binding();
     check_track_binding();
     check_passive_binding();
+    check_wardrive_binding();
     puts("S3 BLE event checks passed: finite duration, stale callbacks, reset reconciliation, 256-start byte wrap with fresh records, and safe rearm.");
 }

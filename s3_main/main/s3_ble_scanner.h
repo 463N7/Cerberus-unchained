@@ -61,6 +61,16 @@ esp_err_t cerberus_s3_ble_scanner_passive_get_watch_detailed_result(uint64_t epo
     sentinel_watch_motion_t *motion, cerberus_watch_receive_timing_t *motion_timing);
 esp_err_t cerberus_s3_ble_scanner_passive_get_activity(uint64_t epoch,
     cerberus_ble_activity_payload_t *status);
+/* Atomic Wardriving bank from an exact accepted passive lease. COMPLETE and
+ * released RF/queues are required; the attachment remains until its owner
+ * releases or rearms it. Count must equal the bank count and fit capacity<=32.
+ * Caller supplies disjoint buffers; NULL rows/evidence are allowed only for
+ * zero capacity. All capacity entries and mandatory state clear on failure
+ * (clearing is bounded to32 even for invalid capacity). No allocation/RF.
+ * Rows, source-specific evidence and the final state share one locked bank. */
+esp_err_t cerberus_s3_ble_scanner_passive_copy_wardrive(uint64_t epoch, uint8_t count,
+    cerberus_c5_ble_result_t *rows, cerberus_s3_ble_wardrive_evidence_t *evidence,
+    size_t capacity, cerberus_s3_ble_passive_state_t *state);
 /* Atomic COMPLETE-bank status and local replacement count for this exact
  * generation. Both outputs are mandatory and cleared on failure. Replacement
  * discards retained inventory, while dropped_reports counts rejected reports;

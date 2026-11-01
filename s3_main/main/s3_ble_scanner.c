@@ -1360,6 +1360,46 @@ esp_err_t cerberus_s3_ble_scanner_analyzer_status(
 }
 #include "s3_ble_discovery_impl.h"
 
+esp_err_t cerberus_s3_ble_scanner_passive_copy_wardrive(uint64_t epoch, uint8_t count,
+    cerberus_c5_ble_result_t *rows, cerberus_s3_ble_wardrive_evidence_t *evidence,
+    size_t capacity, cerberus_s3_ble_passive_state_t *state)
+{
+    clear_wardrive_copy(rows, evidence, capacity);
+    if (state) memset(state, 0, sizeof(*state));
+    if (!epoch || !state || capacity > CERBERUS_BLE_SCAN_MAX_RESULTS || count > capacity ||
+        (capacity && (!rows || !evidence))) return ESP_ERR_INVALID_ARG;
+    esp_err_t error = passive_lock(epoch);
+    if (error != ESP_OK) return error;
+    bool valid = passive_complete_locked() && !passive_state.owned && !passive_state.stopping &&
+        snapshot->status.stored_count == count;
+    cerberus_s3_ble_discovery_meta_t meta = {
+        .started_ms = passive_state.started_ms, .source_now_ms = passive_state.source_now_ms,
+        .status = snapshot->status,
+    };
+    /* Validate every record before committing any caller-visible row. Missing
+     * packet hints remain absent evidence; corrupt storage never partly copies. */
+    for (size_t i = 0; valid && i < count; ++i) {
+        cerberus_s3_ble_wardrive_evidence_t item = wardrive_evidence(&snapshot->records[i], meta.status.generation);
+        valid = discovery_row_valid(&snapshot->records[i], &meta) &&
+            cerberus_s3_ble_wardrive_evidence_valid(&item);
+    }
+    for (size_t i = 0; valid && i < count; ++i) {
+        const cerberus_s3_ble_record_t *record = &snapshot->records[i];
+        memcpy(rows[i].address, record->address, sizeof(rows[i].address));
+        memcpy(rows[i].name, record->name, record->name_length);
+        rows[i].rssi = record->rssi;
+        rows[i].address_type = record->address_type;
+        rows[i].manufacturer_id = record->manufacturer_id;
+        rows[i].flags = record->flags;
+        rows[i].uuid_length = record->uuid_length;
+        memcpy(rows[i].uuid, record->uuid, record->uuid_length);
+        evidence[i] = wardrive_evidence(record, meta.status.generation);
+    }
+    if (valid) *state = passive_state;
+    xSemaphoreGive(scan_mutex);
+    return valid ? ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
 esp_err_t cerberus_s3_ble_scanner_passive_copy_row(uint64_t epoch, uint8_t index,
     cerberus_s3_ble_discovery_record_t *row, cerberus_s3_ble_passive_state_t *state)
 {
@@ -1499,6 +1539,15 @@ esp_err_t cerberus_s3_ble_scanner_passive_get_activity(uint64_t epoch,
 {
     if (status) memset(status, 0, sizeof(*status));
     return !epoch || !status ? ESP_ERR_INVALID_ARG : ESP_ERR_NOT_SUPPORTED;
+}
+esp_err_t cerberus_s3_ble_scanner_passive_copy_wardrive(uint64_t epoch, uint8_t count,
+    cerberus_c5_ble_result_t *rows, cerberus_s3_ble_wardrive_evidence_t *evidence,
+    size_t capacity, cerberus_s3_ble_passive_state_t *state)
+{
+    clear_wardrive_copy(rows, evidence, capacity);
+    if (state) memset(state, 0, sizeof(*state));
+    return !epoch || !state || capacity > CERBERUS_BLE_SCAN_MAX_RESULTS || count > capacity ||
+        (capacity && (!rows || !evidence)) ? ESP_ERR_INVALID_ARG : ESP_ERR_NOT_SUPPORTED;
 }
 esp_err_t cerberus_s3_ble_scanner_discovery_diagnostics(cerberus_s3_ble_discovery_meta_t *meta)
 {

@@ -111,6 +111,9 @@ esp_err_t cerberus_wardrive_start(bool include_expansions, bool enable_gps);
 /* Stop is asynchronous. Both terminal states mean the worker has closed its
  * SD file. STOPPED confirms release of all started scans; ERROR reports a
  * radio or storage fault, including an expansion STOP that remains uncertain.
+ * A held or uncertain accepted S3 BLE attachment keeps the worker and its
+ * streams in STOPPING, including after a cleanup timeout is reported. Only
+ * exact release or authoritative absence permits terminal cleanup.
  * A USB route may wait for either terminal state before handoff. */
 void cerberus_wardrive_request_stop(void);
 esp_err_t cerberus_wardrive_wait_stopped(uint32_t timeout_ms);

@@ -20,7 +20,7 @@ wrap_end = source.index("static void reset_wifi_capture(", wrap_start)
 
 parts = []
 for start, stop in (("static void publish_sighting(", "static void publish_invalid("),
-                    ("static esp_err_t capture_ble(", "static esp_err_t capture_expansions(")):
+                    ("static bool ble_completed_state(", "static esp_err_t capture_expansions(")):
     begin = source.index(start)
     parts.append(source[begin:source.index(stop, begin)])
 (out / "wardrive_ble_impl.h").write_text("\n".join(parts), encoding="utf-8")

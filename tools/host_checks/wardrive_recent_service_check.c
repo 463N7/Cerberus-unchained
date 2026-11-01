@@ -42,7 +42,12 @@ static int xTaskCreate(void (*)(void *), const char *, unsigned, void *, unsigne
 static int64_t clock_us;
 static unsigned lock_depth, allocations, frees, task_creates, sd_calls, sd_appends;
 static unsigned rf_starts, status_polls, gps_calls, wifi_reads, ble_copies;
-static unsigned fail_alloc_at, stop_after_append;
+static unsigned fail_alloc_at, stop_after_append, fail_append_at;
+static unsigned wifi_start_calls;
+static esp_err_t wifi_first_start_error;
+static bool host_initialized_value,reset_during_claim,replace_during_claim;
+static unsigned host_epoch_value,host_claims,host_releases;
+static cerberus_s3_ble_owner_t host_owner_value;
 static bool fail_task, immediate_task, inspect_pending, inspect_free, auto_complete, enqueue_on_start;
 static esp_err_t status_error, session_error, append_error, begin_error, copy_error;
 static bool storage_open[2], storage_owned;
@@ -56,6 +61,8 @@ static cerberus_s3_ble_wardrive_evidence_t ble_evidence[32];
 static field_survey_stream_t stream;
 static field_survey_snapshot_t field_status;
 static cerberus_wardrive_gps_snapshot_t gps_source;
+
+#include "wardrive_passive_boundary.h"
 
 static void enter_lock(void) { CHECK(lock_depth == 0U); ++lock_depth; }
 static void exit_lock(void) { CHECK(lock_depth == 1U); --lock_depth; }
@@ -80,7 +87,7 @@ static void heap_caps_free(void *ptr)
 }
 static size_t heap_caps_get_free_size(unsigned caps)
 { CHECK(caps == (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)); return 200000U; }
-static void vTaskDelay(unsigned ms) { clock_us += (int64_t)ms * 1000; }
+static void vTaskDelay(unsigned ms) { passive_delay(ms); }
 static void vTaskDelete(void *p) { CHECK(p == NULL); }
 static int xTaskCreate(void (*fn)(void *), const char *name, unsigned stack,
     void *arg, unsigned priority, void *handle)
@@ -103,7 +110,12 @@ esp_err_t c5_spi_link_wifi_capture_status(cerberus_wifi_capture_status_payload_t
 esp_err_t c5_spi_link_wifi_channel_survey_status(cerberus_wifi_channel_survey_status_payload_t *out)
 { ++status_polls; memset(out,0,sizeof(*out)); return ESP_OK; }
 esp_err_t c5_spi_link_start_wifi_scan(cerberus_wifi_scan_status_payload_t *out)
-{ ++rf_starts; wifi_status.state=CERBERUS_WIFI_SCAN_RUNNING; ++wifi_status.generation; *out=wifi_status; return ESP_OK; }
+{
+    ++wifi_start_calls;
+    esp_err_t error=wifi_start_calls==1U?wifi_first_start_error:ESP_OK;
+    if(error!=ESP_ERR_TIMEOUT){++rf_starts;wifi_status.state=CERBERUS_WIFI_SCAN_RUNNING;++wifi_status.generation;}
+    *out=wifi_status;return error;
+}
 esp_err_t c5_spi_link_stop_wifi_scan(cerberus_wifi_scan_status_payload_t *out)
 { wifi_status.state=CERBERUS_WIFI_SCAN_COMPLETE; *out=wifi_status; return ESP_OK; }
 esp_err_t c5_spi_link_get_wifi_scan_result(uint8_t generation,uint8_t index,cerberus_c5_wifi_result_t *out)
@@ -120,21 +132,31 @@ esp_err_t c5_spi_link_check_wifi_probe_bank(const cerberus_c5_wifi_probe_bank_t 
 { (void)p;(void)d; return ESP_OK; }
 esp_err_t c5_spi_link_check_wifi_relation_bank(const cerberus_c5_wifi_relation_bank_t *p,uint32_t d)
 { (void)p;(void)d; return ESP_OK; }
-cerberus_s3_ble_owner_t cerberus_s3_ble_host_owner(void) { return CERBERUS_S3_BLE_OWNER_NONE; }
-bool cerberus_s3_ble_host_initialized(void) { return true; }
-esp_err_t cerberus_s3_ble_host_claim(cerberus_s3_ble_owner_t o) { (void)o; return ESP_OK; }
-esp_err_t cerberus_s3_ble_host_release(cerberus_s3_ble_owner_t o) { (void)o; return ESP_OK; }
+cerberus_s3_ble_owner_t cerberus_s3_ble_host_owner(void) { return host_owner_value; }
+bool cerberus_s3_ble_host_initialized(void) { return host_initialized_value; }
+unsigned cerberus_s3_ble_host_epoch(void) { return host_epoch_value; }
+esp_err_t cerberus_s3_ble_host_claim(cerberus_s3_ble_owner_t o)
+{
+    ++host_claims;CHECK(o==CERBERUS_S3_BLE_OWNER_SCANNER && host_owner_value==CERBERUS_S3_BLE_OWNER_NONE);
+    host_initialized_value=true;host_owner_value=o;
+    if(reset_during_claim)++host_epoch_value;
+    if(replace_during_claim)host_owner_value=CERBERUS_S3_BLE_OWNER_CENTRAL;
+    return ESP_OK;
+}
+esp_err_t cerberus_s3_ble_host_release(cerberus_s3_ble_owner_t o)
+{ ++host_releases;CHECK(o==host_owner_value);host_owner_value=CERBERUS_S3_BLE_OWNER_NONE;return ESP_OK; }
 cerberus_s3_wifi_owner_t cerberus_s3_wifi_owner(void) { return CERBERUS_S3_WIFI_NONE; }
 void cerberus_s3_capture_status(cerberus_s3_capture_status_t *out) { memset(out,0,sizeof(*out)); }
 esp_err_t cerberus_s3_ble_scanner_get_status(cerberus_ble_scan_status_payload_t *out)
 { ++status_polls; if(auto_complete&&ble_status.state==CERBERUS_BLE_SCAN_RUNNING){ble_status.state=CERBERUS_BLE_SCAN_COMPLETE;ble_status.stored_count=2;} *out=ble_status; return ESP_OK; }
 esp_err_t cerberus_s3_ble_scanner_start(cerberus_ble_scan_status_payload_t *out)
-{ ++rf_starts; ble_status.state=CERBERUS_BLE_SCAN_RUNNING; ++ble_status.generation; *out=ble_status; return ESP_OK; }
+{ (void)out; CHECK(false && "generic BLE Start is forbidden in Wardriving"); return ESP_FAIL; }
 esp_err_t cerberus_s3_ble_scanner_stop(cerberus_ble_scan_status_payload_t *out)
-{ ble_status.state=CERBERUS_BLE_SCAN_COMPLETE; *out=ble_status; return ESP_OK; }
+{ (void)out; CHECK(false && "generic BLE Stop is forbidden in Wardriving"); return ESP_FAIL; }
 esp_err_t cerberus_s3_ble_scanner_copy_wardrive(uint8_t g,uint8_t n,
     cerberus_c5_ble_result_t *out,cerberus_s3_ble_wardrive_evidence_t *hints,size_t cap)
-{ CHECK(g==ble_status.generation && n<=cap); ++ble_copies; memcpy(out,ble_source,n*sizeof(*out)); memcpy(hints,ble_evidence,n*sizeof(*hints)); return copy_error; }
+{ (void)g;(void)n;(void)out;(void)hints;(void)cap;
+  CHECK(false && "generation-only BLE copy is forbidden in Wardriving"); return ESP_FAIL; }
 esp_err_t field_survey_set_idle_probe_enabled(bool enabled) { (void)enabled; return ESP_OK; }
 void field_survey_snapshot(field_survey_snapshot_t *out) { *out=field_status; }
 esp_err_t field_survey_set_expansion_plan(const cerberus_wardrive_plan_t *p) { (void)p; return ESP_OK; }
@@ -173,7 +195,9 @@ static esp_err_t sd_begin(unsigned which,const char *header,size_t len)
 static esp_err_t sd_append(unsigned which,const char *row,size_t len)
 {
     ++sd_calls; ++sd_appends; CHECK(!lock_depth && storage_open[which] && len==strlen(row));
-    check_preview(); if(append_error){partial_bytes+=len/2; return append_error;}
+    check_preview(); if(append_error&&(!fail_append_at||sd_appends==fail_append_at)){
+        partial_bytes+=len/2; return append_error;
+    }
     if(stop_after_append && sd_appends==stop_after_append)cerberus_wardrive_request_stop();
     return ESP_OK;
 }
@@ -200,11 +224,15 @@ static void reset(void)
     memset(wifi_source,0,sizeof(wifi_source)); memset(ble_source,0,sizeof(ble_source));
     memset(ble_evidence,0,sizeof(ble_evidence));
     allocations=frees=task_creates=sd_calls=sd_appends=rf_starts=status_polls=gps_calls=0;
-    wifi_reads=ble_copies=fail_alloc_at=stop_after_append=0;
+    wifi_reads=ble_copies=fail_alloc_at=stop_after_append=fail_append_at=wifi_start_calls=0;
     fail_task=immediate_task=inspect_pending=inspect_free=storage_owned=auto_complete=enqueue_on_start=false;
     status_error=session_error=append_error=begin_error=copy_error=ESP_OK;
+    wifi_first_start_error=ESP_OK;
     partial_bytes=0; pending_task=NULL; recent_session_id=recent_sequence=0;
     clock_us=10000000; stop_requested=false;
+    host_initialized_value=true;reset_during_claim=replace_during_claim=false;
+    host_epoch_value=8;host_claims=host_releases=0;host_owner_value=CERBERUS_S3_BLE_OWNER_NONE;
+    passive_boundary_reset();
     for(unsigned i=0;i<32;++i){
         wifi_source[i]=(cerberus_c5_wifi_result_t){.bssid={2,1,2,3,4,(uint8_t)i},.channel=6,.rssi=-50,.ssid="Lab"};
         ble_source[i]=(cerberus_c5_ble_result_t){.address={2,1,2,3,4,(uint8_t)i},.address_type=1,.rssi=-60,.name="Tag",.manufacturer_id=76};
@@ -215,13 +243,15 @@ static void prepare_capture(void)
     CHECK(cerberus_wardrive_start(false,false)==ESP_OK && worker_active && pending_task);
     recent_begin_session(); /* Same worker-entry function, then exercise captured banks. */
     wifi_status=(cerberus_wifi_scan_status_payload_t){.state=CERBERUS_WIFI_SCAN_COMPLETE,.generation=255,.stored_count=2};
-    ble_status=(cerberus_ble_scan_status_payload_t){.state=CERBERUS_BLE_SCAN_COMPLETE,.generation=255,.stored_count=2};
+    passive_seed_completed(255U,255U,2U);
     wardrive_status.state=CERBERUS_WARDRIVE_RUNNING;
 }
 static void capture_wifi_ok(bool final)
 { char radio='?'; CHECK(capture_wifi(255,2,final,now_ms()+1000,&radio)==ESP_OK && radio=='S'); }
 static cerberus_wardrive_recent_snapshot_t snapshot(void)
 { cerberus_wardrive_recent_snapshot_t out; cerberus_wardrive_copy_recent(&out); return out; }
+
+#include "wardrive_passive_worker_check.h"
 
 int main(void)
 {
@@ -255,7 +285,7 @@ int main(void)
     CHECK(field_survey_stream_push(&stream,&expansion)); CHECK(capture_expansions(false)==ESP_OK);
     view=snapshot(); CHECK(view.rows[0].observation.radio==CERBERUS_WARDRIVE_RADIO_R1 && view.rows[0].sequence==7);
     revision=view.revision; CHECK(capture_expansions(true)==ESP_OK && snapshot().revision==revision);
-    inspect_pending=false; stop_scans_and_close_file(false,0,false,0,false,0); release_workspace();
+    inspect_pending=false; stop_scans_and_close_file(false,0,false,0,255U,false); release_workspace();
     worker_active=false; wardrive_status.state=CERBERUS_WARDRIVE_STOPPED;
     view=snapshot(); CHECK(view.available && view.count==5 && !view.worker_active && view.revision==revision);
 
@@ -319,7 +349,7 @@ int main(void)
         CHECK(error==ESP_FAIL && sd_appends==1 && snapshot().revision==revision);
         CHECK(snapshot().rows[0].receipt_ms==receipt);
         inspect_pending=false;
-        stop_scans_and_close_file(!kind,255,false,0,kind,255);
+        stop_scans_and_close_file(!kind,255,false,0,kind?255U:0U,kind!=0);
         CHECK(sd_appends==1 && snapshot().revision==revision && !storage_owned);
         release_workspace(); worker_active=false; wardrive_status.state=CERBERUS_WARDRIVE_ERROR;
         CHECK(snapshot().rows[0].outcome==CERBERUS_WARDRIVE_RECENT_ERROR);
@@ -358,6 +388,7 @@ int main(void)
     reset();
     prepare_capture(); recent_session_id=UINT64_MAX; recent_begin_session();
     CHECK(!snapshot().available && snapshot().view_error==ESP_ERR_INVALID_STATE);
+    run_passive_worker_cases();
     reset();
     printf("Wardriving recent service: %u checks; actual whole-service admission, retained PSRAM, immutable cursors, outcomes and cleanup pass\n",checks);
     return 0;

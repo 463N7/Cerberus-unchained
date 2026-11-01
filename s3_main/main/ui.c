@@ -7930,7 +7930,7 @@ static esp_err_t draw_wardrive(void)
             snprintf(line, sizeof(line), "%s", esp_err_to_name(error));
         ESP_RETURN_ON_ERROR(draw_centered(324, line, UI_BAD, 1), TAG, "wardrive error");
     } else if (wardrive_return_pending) {
-        ESP_RETURN_ON_ERROR(draw_centered(324, "CLOSING SD FILE BEFORE EXIT", UI_GOOD, 1), TAG, "wardrive exit");
+        ESP_RETURN_ON_ERROR(draw_centered(324, "WAITING FOR RADIOS AND FILES", UI_GOOD, 1), TAG, "wardrive exit");
     }
     ESP_RETURN_ON_ERROR(draw_small_button(24, 346, 132, 28,
         wardrive_include_expansions ? "R1-R6: ON" : "R1-R6: OFF"),

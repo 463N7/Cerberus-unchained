@@ -2,6 +2,10 @@
 
 ## Current local checkpoint
 
+[Rev119](DUAL_RADIO_REV119.md) extends exact S3 passive ownership to Wardriving
+acquisition, completed BLE evidence and cleanup. Its existing terminal source
+error policy remains explicit. This is a local candidate, not an installation.
+
 [Rev118](DUAL_RADIO_REV118.md) develops exact S3 passive scan ownership for
 Recon acquisition, evidence and cleanup. C5 Wi-Fi retains its independent
 scheduler. This is a local candidate; rev113 remains installed.

@@ -211,6 +211,20 @@ int main(void)
     memset(&activity,0xa5,sizeof(activity));
     if(cerberus_s3_ble_scanner_passive_get_activity(1,&activity)!=ESP_ERR_NOT_SUPPORTED ||
         memcmp(&activity,&empty_activity,sizeof(activity)))return 27;
+    cerberus_c5_ble_result_t wardrive_rows[33];
+    cerberus_s3_ble_wardrive_evidence_t wardrive_evidence[33];
+    memset(wardrive_rows,0xa5,sizeof(wardrive_rows));
+    memset(wardrive_evidence,0xa5,sizeof(wardrive_evidence));
+    memset(&passive,0xa5,sizeof(passive));
+    if(cerberus_s3_ble_scanner_passive_copy_wardrive(1,32,wardrive_rows,wardrive_evidence,32,&passive)!=ESP_ERR_NOT_SUPPORTED ||
+        memcmp(&passive,&empty_passive,sizeof(passive)))return 28;
+    for(size_t i=0;i<32*sizeof(*wardrive_rows);++i)if(((uint8_t *)wardrive_rows)[i])return 29;
+    for(size_t i=0;i<32*sizeof(*wardrive_evidence);++i)if(((uint8_t *)wardrive_evidence)[i])return 30;
+    if(((uint8_t *)&wardrive_rows[32])[0]!=0xa5 || ((uint8_t *)&wardrive_evidence[32])[0]!=0xa5)return 31;
+    if(cerberus_s3_ble_scanner_passive_copy_wardrive(1,0,NULL,NULL,0,&passive)!=ESP_ERR_NOT_SUPPORTED ||
+        cerberus_s3_ble_scanner_passive_copy_wardrive(0,0,NULL,NULL,0,&passive)!=ESP_ERR_INVALID_ARG ||
+        cerberus_s3_ble_scanner_passive_copy_wardrive(1,0,NULL,NULL,0,NULL)!=ESP_ERR_INVALID_ARG ||
+        cerberus_s3_ble_scanner_passive_copy_wardrive(1,32,wardrive_rows,wardrive_evidence,33,&passive)!=ESP_ERR_INVALID_ARG)return 32;
     puts("Disabled scanner diagnostics and passive leases: canonical empty output, explicit unsupported, no host dependencies passed.");
     return 0;
 }

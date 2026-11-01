@@ -64,6 +64,9 @@ typedef int cerberus_wardrive_probe_state_t;
 typedef struct { uint8_t data[48]; } cerberus_c5_wifi_result_t;
 typedef struct { uint8_t data[52]; } cerberus_c5_ble_result_t;
 typedef struct { uint8_t data[28]; } cerberus_s3_ble_wardrive_evidence_t;
+/* Opaque boundary type: this test verifies allocation/capability/lifetime,
+ * not native structure sizing (the retained-ELF audit owns that evidence). */
+typedef struct { uint8_t data[64]; } cerberus_s3_ble_passive_state_t;
 typedef struct { uint8_t data[80]; } field_survey_snapshot_t;
 typedef struct { uint8_t data[96]; } expansion_record_t;
 static unsigned alloc_calls, free_calls, last_caps;
