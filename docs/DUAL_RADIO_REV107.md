@@ -103,3 +103,28 @@ Final host logs, native receipts/ELFs and the memory/visual review are retained
 under `artifacts/rev107-host-evidence`, `artifacts/rev107-native-evidence` and
 `artifacts/device-rev107`. This revision has not accessed or flashed the device.
 The existing rev106 installation receipt remains the last installed evidence.
+
+## Matched local package
+
+Implementation commit `ff5f3379073f3c6331beee06f114dfe4378abc87` is retained
+locally. Package
+`dist/cerberus-unchained-0.1.0-dev.rev107-20261101T104658Z` passes hash, chip
+header, partition and image-bound verification. All three packaged application
+hashes match the retained five-target native matrix, and the packaged source
+subset matches both final host/native input receipts.
+
+- Source SHA-256: `98233048155ed5b8af4770051e7c6043bc49b88c8142d745614620acff1c74c0`.
+- Manifest SHA-256: `388af56473e6a0e470d89b93ebe9e6c6603a7fd7881ec2d2a0f15c1ba3e66d3f`.
+- S3 application: 1,910,736 bytes; C5: 1,664,464 bytes; bridge: 255,296 bytes.
+
+`artifacts/device-rev107/local-milestone.json` binds the exact implementation
+commit, package, reviewed native ELF, final logs and unchanged source hashes.
+Its `installed` field is false. Rev107 was not flashed, pushed, submitted as a
+pull request or selected for the public web installer. No new physical feature
+acceptance is claimed.
+
+The next substantive C5 work is full-callback classification and selected-family
+retention, so longer valid originals and rare matching observations are not
+limited by preview-only interpretation or the generic bank's admission policy.
+That work must retain the exact boot/job/epoch/frozen-snapshot ownership and
+separate source timing already used here.
