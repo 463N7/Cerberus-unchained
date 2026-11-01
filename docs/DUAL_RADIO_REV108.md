@@ -121,3 +121,27 @@ original preview and receive metadata. Physical extended formats, dense RF
 retention, repeated family transitions, Stop/Back, saves, latency and sustained
 memory behavior remain unverified on this candidate. The Marauder coverage
 ledger continues to track all modes without claiming complete parity.
+
+## Matched local package
+
+Implementation commit `c90976e939a7c6854c60afa267894d3df2c4b3b2` is retained
+locally. Package
+`dist/cerberus-unchained-0.1.0-dev.rev108-20261101T111735Z` passes hash, chip
+header, partition and image-bound verification. All three application hashes
+match the retained five-target native matrix, and packaged source hashes
+match the final host and native receipts.
+
+- Source SHA-256: `bc6d251ad15e1b58d7fbcad3460ebe286fae6d55dd7e30b0ae395be1d7861e76`.
+- Manifest SHA-256: `93d604954d3d71057d4669e2cd6f56f2b826eebbcd5117bf858da001eabfb7c8`.
+- S3 application: 1,914,208 bytes; C5: 1,672,176 bytes; bridge: 255,296 bytes.
+
+`artifacts/device-rev108/local-milestone.json` binds the exact implementation
+commit, package, reviewed ELFs and unchanged-input validation. Its `installed`
+field is false. This revision was not flashed, pushed, submitted as a pull
+request or selected for the public installer. Rev106 is the last verified
+installed baseline; rev107 and rev108 are local candidates.
+
+The next substantive storage gap is preserving the decoded full-original
+family record in saved BLE reports, with compatible historical readers and
+the same immutable source binding. Physical validation of focused reception,
+family changes, Stop/Back and the following Wi-Fi scan remains pending.
