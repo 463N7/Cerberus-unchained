@@ -66,9 +66,27 @@ esp_err_t cerberus_s3_ble_scanner_track_begin(const uint8_t address[6],
 void cerberus_s3_ble_scanner_track_end(void);
 esp_err_t cerberus_s3_ble_scanner_track_status(
     cerberus_s3_ble_track_status_t *status);
-/* Analyzer shares the same bounded passive sweeps. Its 64-bin event history
- * is allocated in PSRAM only while this view is active. */
+/* Analyzer owns a separate attachment over the existing finite passive GAP
+ * procedure. The never-reused callback epoch and host epoch are checked under
+ * scan_mutex; generation is display metadata, never Stop authorization. */
+typedef struct {
+    cerberus_ble_scan_status_payload_t scan;
+    uint32_t scan_epoch;
+    unsigned host_epoch;
+    int32_t error;
+    bool attached, owned, receiving, stopping;
+} cerberus_s3_ble_analyzer_state_t;
+
+/* Attaches the existing optional PSRAM history/shared scanner snapshot; no RF. A second attachment
+ * is rejected. Start accepts one passive eight-second sweep; get_state never
+ * starts/rearms it. Every output is cleared for invalid/absent input. */
 esp_err_t cerberus_s3_ble_scanner_analyzer_begin(void);
+esp_err_t cerberus_s3_ble_scanner_analyzer_start(cerberus_s3_ble_analyzer_state_t *state);
+esp_err_t cerberus_s3_ble_scanner_analyzer_get_state(cerberus_s3_ble_analyzer_state_t *state);
+esp_err_t cerberus_s3_ble_scanner_analyzer_stop(cerberus_s3_ble_analyzer_state_t *state);
+/* Refuses to free an owned/queued sweep. Host reset or a proven replacement
+ * retires our ownership without stopping or attributing the foreign scan. */
+esp_err_t cerberus_s3_ble_scanner_analyzer_release(void);
+/* Compatibility wrapper: a failed release retains its attachment safely. */
 void cerberus_s3_ble_scanner_analyzer_end(void);
-esp_err_t cerberus_s3_ble_scanner_analyzer_status(
-    cerberus_ble_analyzer_view_t *view);
+esp_err_t cerberus_s3_ble_scanner_analyzer_status(cerberus_ble_analyzer_view_t *view);

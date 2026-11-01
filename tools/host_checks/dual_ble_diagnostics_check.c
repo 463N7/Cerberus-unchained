@@ -24,8 +24,12 @@ static cerberus_ble_scan_status_payload_t ble_scan_status;
 static cerberus_c5_ble_result_t ble_fox_hunt_target;
 static cerberus_s3_ble_track_status_t source_sample;
 static struct {cerberus_ble_discovery_session_t session;} discovery,*ble_discovery_live;
-enum {UI_PAGE_BLE=1,UI_BLE_MODE_FOX_HUNT=2};
+enum {UI_PAGE_BLE=1,UI_BLE_MODE_FOX_HUNT=2,UI_BLE_MODE_ANALYZER=3};
 static unsigned current_page,ble_mode;
+static bool ble_analyzer_started,ble_analyzer_s3_owned,ble_analyzer_s3_receiving_cached;
+static bool ble_analyzer_cleanup_timed_out;
+static esp_err_t ble_analyzer_error,ble_analyzer_barrier_error;
+#include "dual_ble_diagnostics_analyzer.h"
 static bool ordinary_page,monitor_page;
 static esp_err_t ble_discovery_open_error;
 static bool ble_discovery_ordinary_page(void){return ordinary_page;}
@@ -124,6 +128,65 @@ static void check_discovery_error_scope(void)
     ble_discovery_live=NULL;ble_scan_error=ESP_OK;
 }
 
+static void check_analyzer_error_scope(void)
+{
+    cerberus_dual_ble_diagnostics_t out;
+    unsigned reads=scanner_reads;
+    current_page=UI_PAGE_BLE;ble_mode=UI_BLE_MODE_ANALYZER;
+    ordinary_page=monitor_page=false;ble_discovery_live=NULL;
+    ble_scan_checked=true;ble_scan_status.state=CERBERUS_BLE_SCAN_RUNNING;
+    ble_scan_status.error_code=ESP_ERR_INVALID_RESPONSE;ble_scan_error=ESP_FAIL;
+    dual_ble_ui_mode=CERBERUS_DUAL_BLE_ANALYZER;
+    storage.start.mode=CERBERUS_DUAL_BLE_ANALYZER;storage.start.job_id=90;
+    storage.remote.flags=CERBERUS_DUAL_BLE_ATTACHED|CERBERUS_DUAL_BLE_OWNED;
+    storage.error=ESP_OK;storage.enabled=true;storage.phase=2;
+    /* A failed attachment has no RF observation, even when a foreign generic
+       scanner is RUNNING. C5 remains independently attached and receiving. */
+    ble_analyzer_error=ESP_ERR_NO_MEM;
+    dual_ble_publish_diagnostics(198,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(out.s3_scan_error==ESP_ERR_NO_MEM&&!out.s3_scan_cached&&!out.s3_state);
+    assert(out.receiving&&out.attached&&out.enabled&&out.c5_error==ESP_OK);
+    assert(!out.fox_open&&!out.fox_pending&&!out.s3.target_matches&&!out.c5.target_matches);
+    /* Use the actual lifecycle predicates: all three source flags are
+       required. Queued start, retired attachment and cached old RX differ. */
+    for(unsigned flags=0;flags<8;++flags){
+        ble_analyzer_started=(flags&1U)!=0;
+        ble_analyzer_s3_owned=(flags&2U)!=0;
+        ble_analyzer_s3_receiving_cached=(flags&4U)!=0;
+        dual_ble_publish_diagnostics(198,false);cerberus_dual_ble_diagnostics_get(&out);
+        assert(out.s3_scan_cached==(flags==7U));
+        assert(out.s3_state==(flags==7U?CERBERUS_BLE_SCAN_RUNNING:0U));
+        assert(out.s3_scan_error==ESP_ERR_NO_MEM&&out.c5_error==ESP_OK);
+    }
+    /* Receiving can remain true while a local failure drains its exact
+       lease. The error is retained independently of that measured state. */
+    ble_analyzer_barrier_error=ESP_ERR_INVALID_STATE;
+    dual_ble_publish_diagnostics(198,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(out.s3_scan_error==ESP_ERR_INVALID_STATE&&out.s3_scan_cached);
+    ble_analyzer_cleanup_timed_out=true;
+    dual_ble_publish_diagnostics(198,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(out.s3_scan_error==ESP_ERR_TIMEOUT&&out.s3_scan_cached);
+    ble_analyzer_started=ble_analyzer_s3_owned=ble_analyzer_s3_receiving_cached=false;
+    ble_analyzer_cleanup_timed_out=false;ble_analyzer_barrier_error=ESP_OK;
+    dual_ble_publish_diagnostics(198,true);cerberus_dual_ble_diagnostics_get(&out);
+    assert(out.s3_scan_error==ESP_ERR_NO_MEM&&!out.s3_scan_cached&&!out.awake);
+    printed[0]=0;unsigned host_before=host_reads;print_dual_ble();
+    assert(strstr(printed,"dual_ble_s3_scan_error=257")&&strstr(printed,"dual_ble_s3_scan_cached=0"));
+    assert(scanner_reads==reads&&host_reads==host_before);
+    /* A healthy fresh source must not inherit a previous generic scan error;
+       a C5-only fault must not manufacture an S3 failure. */
+    ble_analyzer_error=ESP_OK;storage.error=ESP_ERR_TIMEOUT;
+    dual_ble_publish_diagnostics(198,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(out.s3_scan_error==ESP_OK&&!out.s3_scan_cached&&out.c5_error==ESP_ERR_TIMEOUT);
+    /* Leaving Analyzer restores other workflows' existing cached semantics. */
+    ble_mode=0;
+    dual_ble_publish_diagnostics(198,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(out.s3_scan_cached&&out.s3_state==CERBERUS_BLE_SCAN_RUNNING&&out.s3_scan_error==ESP_FAIL);
+    assert(scanner_reads==reads);
+    ble_scan_error=ESP_OK;ble_scan_status.error_code=ESP_OK;
+    storage.error=ESP_OK;storage.start.job_id=0;storage.enabled=false;dual_ble_ui_mode=-1;
+}
+
 int main(void)
 {
     cerberus_dual_ble_diagnostics_t out,zero={0};
@@ -214,6 +277,7 @@ int main(void)
     assert(strstr(printed,"dual_ble_s3_rssi=-44")&&strstr(printed,"independent_received_reports"));
     check_family_scopes();
     check_discovery_error_scope();
+    check_analyzer_error_scope();
     cerberus_dual_ble_diagnostics_t input=out;input.c5_sweeps=123;
     input.c5_snapshots=UINT32_MAX;input.c5_first_result_ms=UINT32_MAX;input.c5_has_first_result=true;
     input.c5_inventory_known=input.c5_inventory_replacement_enabled=true;

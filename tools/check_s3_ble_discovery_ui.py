@@ -16,6 +16,9 @@ ui = (root / "s3_main/main/ui.c").read_text()
 live = (root / "s3_main/main/sentinel_live_ui.h").read_text()
 discovery = (root / "s3_main/main/s3_ble_discovery_live_ui.h").read_text()
 companion = (root / "s3_main/main/dual_ble_ui.h").read_text()
+scanner = (root / "s3_main/main/s3_ble_scanner.h").read_text()
+state_end = scanner.index("} cerberus_s3_ble_analyzer_state_t;") + len("} cerberus_s3_ble_analyzer_state_t;")
+(out / "analyzer_native_state.h").write_text(scanner[scanner.rfind("typedef struct {", 0, state_end):state_end] + "\n")
 (out / "discovery_back_geometry.h").write_text("\n".join(
     re.search(r"^#define " + name + r"\s+\d+", ui, re.M).group(0)
     for name in ("UI_BACK_Y", "UI_BACK_HEIGHT")) + "\n")
@@ -85,8 +88,7 @@ entry_menu = ui.index("        if (item == 0) {", ui.index("    if (ble_mode == 
 parts += "static void actual_discovery_menu_scan(void) " + block(ui, ui.index("{", entry_menu)) + "\n"
 entry_fallback = ui.index("            if (!ble_selection_valid) {", entry_menu)
 parts += "static void actual_discovery_missing_selection(void) " + block(ui, ui.index("{", entry_fallback)) + "\n"
-parts += between(ui, "static void ble_fox_hunt_finish_exit(", "static void ble_analyzer_finish_exit(")
-parts += between(ui, "static void ble_analyzer_finish_exit(", "static bool ble_sound_terminal(")
+parts += between(ui, "static void ble_fox_hunt_finish_exit(", "static bool ble_sound_terminal(")
 parts += between(ui, "static esp_err_t draw_ble_analyzer(", "static esp_err_t draw_ble_feature_menu(")
 metadata_start = ui.index("    if (cerberus_ble_rssi_valid(", ui.index("    format_ble_service(&ble_selected_result, service, sizeof(service));"))
 metadata_end = ui.index('\n', ui.index('TAG, "BLE detail metadata failed");', metadata_start))
@@ -116,6 +118,7 @@ parts += function(dual_live, "dual_ble_live_enabled") + "\n"
 parts += function(dual_live, "dual_ble_live_c5_retryable") + "\n"
 parts += between(dual_live, "static bool dual_ble_live_discovery_released(", "static void dual_ble_live_tick(")
 parts += function(dual_live, "dual_ble_live_tick")
+parts += '\n#include "ble_analyzer_live_ui.h"\n'
 footer_start = ui.index("if (!ui_capability_blocked && current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5 &&")
 parts += "\nstatic void actual_c5_footer_tap(uint16_t x,uint16_t y) {\n" + block(ui, footer_start) + "\n}\n"
 footer_start = ui.index("if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5) {")

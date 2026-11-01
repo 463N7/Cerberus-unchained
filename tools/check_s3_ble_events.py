@@ -1,5 +1,6 @@
 """Exercise the production S3 BLE scanner with a deterministic NimBLE event queue."""
 from pathlib import Path
+import os
 import subprocess
 import sys
 
@@ -81,6 +82,9 @@ for name in ("sdkconfig.h", "esp_heap_caps.h", "esp_timer.h", "freertos/FreeRTOS
 #define ESP_LOGW(tag,fmt,...) do { (void)(tag); } while (0)
 #define ESP_LOGE(tag,fmt,...) do { (void)(tag); } while (0)
 ''')
+env = os.environ.copy()
+env["ZIG_GLOBAL_CACHE_DIR"] = str(out / "zig-cache")
+env["ZIG_LOCAL_CACHE_DIR"] = str(out / "zig-local")
 for extended in (0, 1):
     exe = out / f"s3-ble-events-{extended}-check.exe"
     subprocess.run([
@@ -96,8 +100,8 @@ for extended in (0, 1):
         str(root / "shared/sentinel_watch_protocol.c"),
         str(root / "s3_main/main/sentinel_watch_detect.c"),
         str(root / "s3_main/main/ble_analyzer.c"), "-o", str(exe),
-    ], check=True)
-    subprocess.run([str(exe)], check=True)
+    ], check=True, env=env)
+    subprocess.run([str(exe)], check=True, env=env)
 
 # Additive inventory diagnostics remain canonical and RF-free in disabled builds.
 disabled = out / "disabled"
@@ -143,6 +147,20 @@ int main(void)
     memset(&discovery, 0xa5, sizeof(discovery));
     if(cerberus_s3_ble_scanner_discovery_diagnostics(&discovery)!=ESP_OK ||
         memcmp(&discovery,&empty_discovery,sizeof(discovery))) return 11;
+    cerberus_s3_ble_analyzer_state_t analyzer, empty_analyzer={0};
+    memset(&analyzer,0xa5,sizeof(analyzer));
+    if(cerberus_s3_ble_scanner_analyzer_start(&analyzer)!=ESP_ERR_NOT_SUPPORTED ||
+        memcmp(&analyzer,&empty_analyzer,sizeof(analyzer))) return 12;
+    memset(&analyzer,0xa5,sizeof(analyzer));
+    if(cerberus_s3_ble_scanner_analyzer_get_state(&analyzer)!=ESP_ERR_NOT_SUPPORTED ||
+        memcmp(&analyzer,&empty_analyzer,sizeof(analyzer))) return 13;
+    memset(&analyzer,0xa5,sizeof(analyzer));
+    if(cerberus_s3_ble_scanner_analyzer_stop(&analyzer)!=ESP_ERR_NOT_SUPPORTED ||
+        memcmp(&analyzer,&empty_analyzer,sizeof(analyzer))) return 14;
+    if(cerberus_s3_ble_scanner_analyzer_start(NULL)!=ESP_ERR_INVALID_ARG ||
+        cerberus_s3_ble_scanner_analyzer_get_state(NULL)!=ESP_ERR_INVALID_ARG ||
+        cerberus_s3_ble_scanner_analyzer_stop(NULL)!=ESP_ERR_INVALID_ARG ||
+        cerberus_s3_ble_scanner_analyzer_release()!=ESP_ERR_NOT_SUPPORTED) return 15;
     puts("Disabled inventory diagnostics: canonical empty output, explicit unsupported, no host dependencies passed.");
     return 0;
 }
@@ -154,5 +172,5 @@ subprocess.run([
     "-I", str(root / "shared"), "-I", str(root / "s3_main/main"),
     str(disabled / "check.c"), str(root / "s3_main/main/s3_ble_scanner.c"),
     "-o", str(exe),
-], check=True)
-subprocess.run([str(exe)], check=True)
+], check=True, env=env)
+subprocess.run([str(exe)], check=True, env=env)

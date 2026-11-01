@@ -130,9 +130,8 @@ static void dual_ble_live_tick(uint64_t now, bool asleep)
         (ordinary && !frozen_detail && !dual_ble_ui_selection_pending && dual_ble_live_enabled())))
         mode = CERBERUS_DUAL_BLE_DISCOVERY;
     else if (!asleep && ready && current_page == UI_PAGE_BLE &&
-        ble_mode == UI_BLE_MODE_ANALYZER && ble_analyzer_started &&
-        !ble_analyzer_start_pending && !ble_analyzer_exit_pending &&
-        !ble_analyzer_retry_requested && ble_analyzer_error == ESP_OK)
+        ble_mode == UI_BLE_MODE_ANALYZER && ble_analyzer_requested() &&
+        ble_analyzer_ready() && !ble_analyzer_exit_pending)
         mode = CERBERUS_DUAL_BLE_ANALYZER;
     else if (!asleep && ready && current_page == UI_PAGE_BLE &&
         ble_mode == UI_BLE_MODE_FOX_HUNT && !ble_fox_hunt_start_pending &&

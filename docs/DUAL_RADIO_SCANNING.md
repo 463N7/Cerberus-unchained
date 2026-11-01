@@ -2,6 +2,11 @@
 
 ## Current local checkpoint
 
+[Rev116](DUAL_RADIO_REV116.md) separates Analyzer receiver intent and retries,
+with exact S3 scan ownership for callback accounting and cleanup. It is a local
+candidate; the installed baseline remains rev113 and physical acceptance is
+pending.
+
 [Rev115](DUAL_RADIO_REV115.md) makes ordinary BLE discovery survive either
 receiver's failure, including an unavailable S3 store, with independent retries
 and shared release barriers for Stop, selection, navigation and saving. It is

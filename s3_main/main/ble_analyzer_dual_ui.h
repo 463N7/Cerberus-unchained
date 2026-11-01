@@ -4,9 +4,29 @@
  * clock denominator; C5 intervals are not reconstructed S3 time buckets. */
 static bool ble_analyzer_c5_retryable(void)
 {
+    /* Only the current Analyzer request may retry this source. An old store's
+     * error and an owner still draining are not permission to start a job. */
+    if (current_page != UI_PAGE_BLE || ble_mode != UI_BLE_MODE_ANALYZER ||
+        !ble_analyzer_requested() || !ble_analyzer_ready() ||
+        ble_analyzer_exit_pending || dual_ble_ui_mode != CERBERUS_DUAL_BLE_ANALYZER ||
+        !dual_ble_ui_attempted || !dual_ble_ui_released()) return false;
     cerberus_dual_ble_analyzer_view_t view;
     dual_ble_ui_get_analyzer_view(&view);
-    return view.error != ESP_OK && view.error != ESP_ERR_NOT_SUPPORTED;
+    return view.error != ESP_OK && view.error != ESP_ERR_NOT_SUPPORTED && !view.stopping;
+}
+
+/* The same cached-only controls appear in both receiver and S3-detail views.
+ * A retry action is source-specific; drawing never advances either owner. */
+static esp_err_t draw_ble_analyzer_retry_controls(void)
+{
+    if (ble_analyzer_s3_retryable())
+        ESP_RETURN_ON_ERROR(draw_button(8, 378, 148, 40,
+            ble_analyzer_barrier_error != ESP_OK ? "RETRY START" : "RETRY S3"),
+            TAG, "analyzer S3 retry");
+    if (ble_analyzer_c5_retryable())
+        ESP_RETURN_ON_ERROR(draw_button(164, 378, 148, 40, "RETRY C5"),
+            TAG, "analyzer C5 retry");
+    return ESP_OK;
 }
 
 static esp_err_t draw_ble_analyzer_both(void)
@@ -18,21 +38,18 @@ static esp_err_t draw_ble_analyzer_both(void)
     char line[80];
     ESP_RETURN_ON_ERROR(draw_small_button(8, 54, 304, 26,
         "BOTH RECEIVERS / S3 DETAILS >"), TAG, "analyzer view tab");
-    const char *state = ble_analyzer_exit_pending ?
-        (ble_analyzer_error == ESP_ERR_TIMEOUT ? "STOPPING BOTH / TIMEOUT" : "STOPPING BOTH") :
-        ble_analyzer_start_pending ? "WAITING FOR RECEIVERS" :
-        ble_analyzer_error || (ble_analyzer_started && s3_error) ? "S3 ERROR" :
-        ble_analyzer_started ? "S3 LISTENING" : "S3 READY";
-    ESP_RETURN_ON_ERROR(draw_centered(94, state,
-        ble_analyzer_error ? UI_BAD : UI_TEXT, 1), TAG, "analyzer S3 state");
-    snprintf(line, sizeof(line), "S3 CALLBACKS %s%lu / OPEN BUCKET %s%u",
+    ESP_RETURN_ON_ERROR(draw_centered(94, ble_analyzer_s3_state(),
+        ble_analyzer_s3_error() != ESP_OK ? UI_BAD : UI_TEXT, 1), TAG, "analyzer S3 state");
+    bool s3_sample = s3_error == ESP_OK;
+    if (s3_sample) snprintf(line, sizeof(line), "S3 CALLBACKS %s%lu / OPEN BUCKET %s%u",
         s3.total_events == UINT32_MAX ? ">=" : "", (unsigned long)s3.total_events,
         s3.current_events == UINT16_MAX ? ">=" : "", (unsigned)s3.current_events);
+    else snprintf(line, sizeof(line), "S3 CALLBACKS UNKNOWN / NO SOURCE SAMPLE");
     ESP_RETURN_ON_ERROR(draw_centered(110, line, UI_TEXT, 1), TAG, "analyzer S3 count");
     cerberus_ble_analyzer_window_t window = {0};
-    bool valid = cerberus_ble_analyzer_window(&s3, &window);
-    snprintf(line, sizeof(line), "S3: %u COMPLETE 200ms BUCKETS / ADV+RSP",
-        valid ? window.buckets : 0U);
+    bool valid = s3_sample && cerberus_ble_analyzer_window(&s3, &window);
+    if (valid) snprintf(line, sizeof(line), "S3: %u COMPLETE 200ms BUCKETS / ADV+RSP", window.buckets);
+    else snprintf(line, sizeof(line), "S3: NO SOURCE WINDOW / ADV+RSP");
     ESP_RETURN_ON_ERROR(draw_centered(126, line, UI_MUTED, 1), TAG, "analyzer S3 denominator");
     ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(20, 142, 280, 60, UI_PANEL), TAG, "analyzer S3 graph");
     uint32_t scale = valid && window.peak ? window.peak : 1U;
@@ -45,8 +62,9 @@ static esp_err_t draw_ble_analyzer_both(void)
         ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(32U + x * 4U, 198U - height,
             3, height, UI_GOOD), TAG, "analyzer S3 bar");
     }
-    const char *c5_state = c5.error == ESP_ERR_NOT_SUPPORTED ? "C5 UNAVAILABLE / NEEDS FIRMWARE 65" :
-        c5.error ? "C5 TELEMETRY ERROR" : c5.stopping ? "C5 STOPPING" :
+    const char *c5_state = c5.stopping ? "C5 STOPPING" :
+        c5.error == ESP_ERR_NOT_SUPPORTED ? "C5 UNAVAILABLE / NEEDS FIRMWARE 65" :
+        c5.error ? "C5 TELEMETRY ERROR" :
         c5.receiving ? "C5 LISTENING" : c5.attached ? "C5 BETWEEN SWEEPS" : "C5 WAITING";
     ESP_RETURN_ON_ERROR(draw_centered(214, c5_state,
         c5.error && c5.error != ESP_ERR_NOT_SUPPORTED ? UI_BAD : UI_TEXT, 1), TAG, "analyzer C5 state");
@@ -81,7 +99,5 @@ static esp_err_t draw_ble_analyzer_both(void)
     }
     ESP_RETURN_ON_ERROR(draw_centered(350, "SEPARATE CLOCKS / NOT UNIQUE DEVICES", UI_MUTED, 1), TAG, "analyzer receiver scope");
     ESP_RETURN_ON_ERROR(draw_centered(362, "C5 ORIGINALS + PARTIAL / NO RESPONSES", UI_MUTED, 1), TAG, "analyzer callback scope");
-    if (!ble_analyzer_exit_pending && (ble_analyzer_error != ESP_OK || ble_analyzer_c5_retryable()))
-        return draw_button(40, 378, 240, 40, "RETRY ANALYZER");
-    return ESP_OK;
+    return draw_ble_analyzer_retry_controls();
 }

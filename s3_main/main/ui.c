@@ -393,6 +393,16 @@ static void ble_fox_hunt_request_stop(uint32_t now, bool asleep);
 static void ble_fox_hunt_request_s3_retry(uint32_t now);
 static void ble_fox_hunt_request_c5_retry(void);
 static void ble_fox_hunt_attach_s3(void);
+static bool ble_analyzer_requested(void);
+static bool ble_analyzer_ready(void);
+static bool ble_analyzer_s3_receiving(void);
+static esp_err_t ble_analyzer_s3_error(void);
+static const char *ble_analyzer_s3_state(void);
+static bool ble_analyzer_s3_retryable(void);
+static void ble_analyzer_request_s3_retry(uint32_t now);
+static void ble_analyzer_request_c5_retry(uint32_t now);
+static void ble_analyzer_request_stop(uint32_t now, bool asleep);
+static void ble_analyzer_open(uint32_t now);
 static esp_err_t live_analyze_selected_wifi_ssid(void);
 static esp_err_t live_compare_wifi_baseline(void);
 static bool live_wifi_baseline_current(void);
@@ -757,9 +767,13 @@ static ui_page_t ble_session_exit_page = UI_PAGE_BLE;
 static bool ble_analyzer_start_pending, ble_analyzer_started;
 static bool ble_analyzer_exit_pending, ble_analyzer_retry_requested;
 static bool ble_analyzer_s3_details;
+static bool ble_analyzer_run_requested, ble_analyzer_s3_start_pending;
+static bool ble_analyzer_s3_owned, ble_analyzer_s3_receiving_cached, ble_analyzer_cleanup_timed_out;
 static esp_err_t ble_analyzer_error = ESP_OK;
+static esp_err_t ble_analyzer_barrier_error = ESP_OK;
 static uint32_t ble_analyzer_last_tick_ms, ble_analyzer_last_draw_ms;
 static uint32_t ble_analyzer_exit_started_ms, ble_analyzer_start_requested_ms;
+static uint32_t ble_analyzer_s3_start_requested_ms;
 static cerberus_ble_connection_status_payload_t ble_connection_status;
 static esp_err_t ble_connection_error = ESP_ERR_INVALID_STATE;
 static bool ble_connection_checked;
@@ -4873,24 +4887,27 @@ static esp_err_t draw_ble_analyzer(void)
     char line[80];
     ESP_RETURN_ON_ERROR(draw_small_button(8, 54, 304, 26, "S3 DETAILS / TAP FOR BOTH"),
         TAG, "BLE analyzer title failed");
-    const char *state = ble_analyzer_exit_pending ?
-        (ble_analyzer_error == ESP_ERR_TIMEOUT ? "STOPPING / TIMEOUT" : "STOPPING") :
-        ble_analyzer_start_pending ? "WAITING FOR RECEIVERS" :
-        ble_analyzer_error != ESP_OK ||
-            (ble_analyzer_started && view_error != ESP_OK) ? "SCAN ERROR" :
-        ble_analyzer_started ? "LISTENING" : "READY";
-    uint16_t state_color = ble_analyzer_error != ESP_OK ||
+    const char *state = ble_analyzer_s3_state();
+    uint16_t state_color = ble_analyzer_s3_error() != ESP_OK ||
         (ble_analyzer_started && view_error != ESP_OK) ? UI_BAD : UI_GOOD;
     ESP_RETURN_ON_ERROR(draw_centered(94, state, state_color, 1),
         TAG, "BLE analyzer state failed");
+    if (view_error != ESP_OK) {
+        ESP_RETURN_ON_ERROR(draw_centered(126, "S3 EVIDENCE UNAVAILABLE", UI_MUTED, 1),
+            TAG, "BLE analyzer unavailable source");
+        ESP_RETURN_ON_ERROR(draw_centered(146, "OPEN BOTH FOR C5 STATUS", UI_MUTED, 1),
+            TAG, "BLE analyzer companion route");
+        return draw_ble_analyzer_retry_controls();
+    }
     snprintf(line, sizeof(line), "FIND MY %s%lu / FLIPPER %s%lu EVENTS",
         view.findmy_hint_events == UINT32_MAX ? ">=" : "", (unsigned long)view.findmy_hint_events,
         view.flipper_hint_events == UINT32_MAX ? ">=" : "", (unsigned long)view.flipper_hint_events);
     ESP_RETURN_ON_ERROR(draw_centered(110, line, UI_MUTED, 1),
         TAG, "BLE analyzer family counters failed");
-    snprintf(line, sizeof(line), "BLE CALLBACKS %s%lu / PARTIAL %s%u",
+    if (view_error == ESP_OK) snprintf(line, sizeof(line), "BLE CALLBACKS %s%lu / PARTIAL %s%u",
         view.total_events == UINT32_MAX ? ">=" : "", (unsigned long)view.total_events,
         view.current_events == UINT16_MAX ? ">=" : "", (unsigned)view.current_events);
+    else snprintf(line, sizeof(line), "S3 COUNT UNKNOWN / NO SOURCE VIEW");
     ESP_RETURN_ON_ERROR(draw_centered(124, line, UI_TEXT, 1),
         TAG, "BLE analyzer count failed");
     cerberus_ble_analyzer_window_t window;
@@ -5027,9 +5044,7 @@ static esp_err_t draw_ble_analyzer(void)
     ESP_RETURN_ON_ERROR(draw_centered(362, line, UI_MUTED, 1), TAG, "BLE analyzer Flipper facts failed");
     /* The parent footer owns Stop/Back. Only failure recovery needs a second,
      * distinct action inside the body. */
-    if ((ble_analyzer_error != ESP_OK || ble_analyzer_c5_retryable()) && !ble_analyzer_exit_pending)
-        return draw_button(40, 378, 240, 40, "RETRY ANALYZER");
-    return ESP_OK;
+    return draw_ble_analyzer_retry_controls();
 }
 
 static esp_err_t draw_ble_feature_menu(void)
@@ -9302,16 +9317,10 @@ static void handle_ble_tap(uint16_t x, uint16_t y)
             ESP_ERROR_CHECK(draw_detail_page());
             return;
         }
-        if (y >= 378U && y < 418U && x >= 40U && x < 280U &&
-            (ble_analyzer_error != ESP_OK || ble_analyzer_c5_retryable()) && !ble_analyzer_exit_pending) {
-            ble_analyzer_error = ESP_OK;
-            ble_analyzer_retry_requested = true;
-            ble_analyzer_start_pending = true;
-            ble_discovery_leave();
-            dual_ble_ui_retry();
-            ble_analyzer_start_requested_ms =
-                (uint32_t)(esp_timer_get_time() / 1000LL);
-            ble_analyzer_last_tick_ms = 0U;
+        if (y >= 378U && y < 418U && !ble_analyzer_exit_pending) {
+            uint32_t now = (uint32_t)(esp_timer_get_time() / 1000LL);
+            if (x >= 8U && x < 156U) ble_analyzer_request_s3_retry(now);
+            else if (x >= 164U && x < 312U) ble_analyzer_request_c5_retry(now);
             ESP_ERROR_CHECK(draw_detail_page());
         }
         return;
@@ -9378,20 +9387,7 @@ static void handle_ble_tap(uint16_t x, uint16_t y)
                 }
             }
         } else if (item == 4) {
-            ble_discovery_leave();
-            dual_ble_ui_retry();
-            ble_analyzer_s3_details = false;
-            ble_mode = UI_BLE_MODE_ANALYZER;
-            ble_session_exit_page = UI_PAGE_BLE;
-            ble_analyzer_start_pending = true;
-            ble_analyzer_started = false;
-            ble_analyzer_exit_pending = false;
-            ble_analyzer_retry_requested = false;
-            ble_analyzer_error = ESP_OK;
-            ble_analyzer_last_tick_ms = 0U;
-            ble_analyzer_last_draw_ms = 0U;
-            ble_analyzer_start_requested_ms =
-                (uint32_t)(esp_timer_get_time() / 1000LL);
+            ble_analyzer_open((uint32_t)(esp_timer_get_time() / 1000LL));
         } else {
             return;
         }
@@ -9914,134 +9910,6 @@ static void ble_fox_hunt_tick(uint32_t now_ms, bool asleep)
     if (!asleep && (ble_fox_hunt_last_draw_ms == 0U ||
         (uint32_t)(now_ms - ble_fox_hunt_last_draw_ms) >= UI_BLE_REFRESH_MS)) {
         ble_fox_hunt_last_draw_ms = now_ms;
-        ESP_ERROR_CHECK(draw_detail_page());
-    }
-}
-
-static void ble_analyzer_finish_exit(bool asleep, bool host_held)
-{
-    cerberus_s3_ble_scanner_analyzer_end();
-    ble_analyzer_start_pending = false;
-    ble_analyzer_started = false;
-    ble_analyzer_exit_pending = false;
-    ble_analyzer_retry_requested = false;
-    ble_analyzer_error = ESP_OK;
-    ble_analyzer_exit_started_ms = 0U;
-    ble_mode = UI_BLE_MODE_MENU;
-    if (host_held)
-        set_ble_action_message("BLE HOST HELD / RESET REQUIRED", UI_BAD);
-    ui_page_t exit_page = ble_session_exit_page;
-    ble_session_exit_page = UI_PAGE_BLE;
-    if (host_held) exit_page = UI_PAGE_BLE;
-    if (exit_page == UI_PAGE_BLE_ATTACK) {
-        ble_attack_selecting = false;
-        open_tool_page(UI_PAGE_BLE_ATTACK);
-        return;
-    }
-    if (exit_page != UI_PAGE_BLE) {
-        return_to_launcher();
-        return;
-    }
-    if (!asleep) ESP_ERROR_CHECK(draw_detail_page());
-}
-
-static void ble_analyzer_tick(uint32_t now_ms, bool asleep)
-{
-    if (current_page != UI_PAGE_BLE || ble_mode != UI_BLE_MODE_ANALYZER) return;
-    if (ble_analyzer_last_tick_ms != 0U &&
-        (uint32_t)(now_ms - ble_analyzer_last_tick_ms) < 250U) return;
-    ble_analyzer_last_tick_ms = now_ms;
-    if (asleep && !ble_analyzer_exit_pending) {
-        ble_analyzer_exit_pending = true;
-        ble_analyzer_exit_started_ms = now_ms;
-        ble_session_exit_page = UI_PAGE_BLE;
-    }
-    if (ble_analyzer_start_pending &&
-        (uint32_t)(now_ms - ble_analyzer_start_requested_ms) >= 12000U) {
-        ble_analyzer_start_pending = false;
-        ble_analyzer_error = ESP_ERR_TIMEOUT;
-    }
-    cerberus_ble_scan_status_payload_t status = {0};
-    esp_err_t error = cerberus_s3_ble_scanner_get_status(&status);
-    if (error != ESP_OK) ble_analyzer_error = error;
-    else {
-        ble_scan_status = status;
-        ble_scan_checked = true;
-    }
-    cerberus_s3_ble_owner_t owner = cerberus_s3_ble_host_owner();
-    if (ble_analyzer_exit_pending) {
-        if (ble_analyzer_started && owner == CERBERUS_S3_BLE_OWNER_SCANNER &&
-            error == ESP_OK && status.state == CERBERUS_BLE_SCAN_RUNNING) {
-            esp_err_t stop_error = cerberus_s3_ble_scanner_stop(&status);
-            if (stop_error != ESP_OK && stop_error != ESP_ERR_INVALID_STATE)
-                ble_analyzer_error = stop_error;
-        }
-        bool host_held = (ble_analyzer_started && owner == CERBERUS_S3_BLE_OWNER_SCANNER) ||
-            !dual_ble_live_discovery_released() || !dual_ble_ui_released();
-        if (!host_held) {
-            ble_analyzer_finish_exit(asleep, false);
-            return;
-        }
-        /* A deadline reports a stuck release; it does not abandon the owner.
-         * Keep normal Stop cleanup ticking without rearming either receiver. */
-        if ((uint32_t)(now_ms - ble_analyzer_exit_started_ms) >= 12000U)
-            ble_analyzer_error = ESP_ERR_TIMEOUT;
-    } else if (error == ESP_OK && ble_analyzer_start_pending) {
-        if (status.state == CERBERUS_BLE_SCAN_RUNNING) {
-            /* Stop only this Analyzer's procedure. Other owners drain through
-             * their normal controllers; a menu transition grants no takeover. */
-            if (ble_analyzer_started && owner == CERBERUS_S3_BLE_OWNER_SCANNER)
-                (void)cerberus_s3_ble_scanner_stop(&status);
-        } else if (owner == CERBERUS_S3_BLE_OWNER_NONE &&
-            dual_ble_live_discovery_released() && dual_ble_ui_released()) {
-            if (ble_analyzer_retry_requested) {
-                cerberus_s3_ble_scanner_analyzer_end();
-                ble_analyzer_started = false;
-                ble_analyzer_retry_requested = false;
-            }
-            if (!ble_analyzer_started) {
-                error = cerberus_s3_ble_scanner_analyzer_begin();
-                if (error == ESP_OK) ble_analyzer_started = true;
-            }
-            if (ble_analyzer_started && error == ESP_OK)
-                error = cerberus_s3_ble_scanner_start(&status);
-            if (error == ESP_OK) {
-                ble_scan_status = status;
-                ble_analyzer_start_pending = false;
-            } else if (error != ESP_ERR_INVALID_STATE) {
-                ble_analyzer_error = error;
-                ble_analyzer_start_pending = false;
-            }
-        }
-    } else if (error == ESP_OK && ble_analyzer_started &&
-        ble_analyzer_error == ESP_OK) {
-        cerberus_ble_analyzer_view_t view = {0};
-        if (cerberus_s3_ble_scanner_analyzer_status(&view) != ESP_OK) {
-            ble_analyzer_error = ESP_ERR_INVALID_STATE;
-        } else if (status.state == CERBERUS_BLE_SCAN_ERROR) {
-            ble_analyzer_error = status.error_code != 0 ?
-                (esp_err_t)status.error_code : ESP_FAIL;
-        } else if ((status.state == CERBERUS_BLE_SCAN_COMPLETE ||
-            status.state == CERBERUS_BLE_SCAN_IDLE) &&
-            owner == CERBERUS_S3_BLE_OWNER_NONE) {
-            error = cerberus_s3_ble_scanner_start(&status);
-            if (error == ESP_OK) ble_scan_status = status;
-            else if (error != ESP_ERR_INVALID_STATE)
-                ble_analyzer_error = error;
-        }
-    }
-    if (!ble_analyzer_exit_pending && ble_analyzer_error != ESP_OK && ble_analyzer_started) {
-        if (owner == CERBERUS_S3_BLE_OWNER_SCANNER && error == ESP_OK &&
-            status.state == CERBERUS_BLE_SCAN_RUNNING)
-            (void)cerberus_s3_ble_scanner_stop(&status);
-        else if (owner == CERBERUS_S3_BLE_OWNER_NONE) {
-            cerberus_s3_ble_scanner_analyzer_end();
-            ble_analyzer_started = false;
-        }
-    }
-    if (!asleep && (ble_analyzer_last_draw_ms == 0U ||
-        (uint32_t)(now_ms - ble_analyzer_last_draw_ms) >= UI_BLE_REFRESH_MS)) {
-        ble_analyzer_last_draw_ms = now_ms;
         ESP_ERROR_CHECK(draw_detail_page());
     }
 }
@@ -11273,6 +11141,7 @@ static void handle_scripts_tap(uint16_t x, uint16_t y)
 #include "sentinel_live_ui.h"
 #include "dual_wifi_live_ui.h"
 #include "dual_ble_live_ui.h"
+#include "ble_analyzer_live_ui.h"
 #include "s3_findmy_monitor_ui.h"
 #include "ble_archive_live_ui.h"
 #include "wardrive_recent_live_ui.h"
@@ -11912,12 +11781,7 @@ static void handle_tap(uint16_t x, uint16_t y)
             } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_ANALYZER) {
                 ble_session_exit_page = ble_attack_selecting ? UI_PAGE_BLE_ATTACK :
                     (learning_tool_active ? tool_parent_page : UI_PAGE_BLE);
-                if (!ble_analyzer_exit_pending) {
-                    ble_analyzer_exit_pending = true;
-                    ble_analyzer_exit_started_ms =
-                        (uint32_t)(esp_timer_get_time() / 1000LL);
-                }
-                ble_analyzer_last_tick_ms = 0U;
+                ble_analyzer_request_stop((uint32_t)(esp_timer_get_time() / 1000LL), false);
                 ESP_ERROR_CHECK(draw_detail_page());
             } else if (current_page == UI_PAGE_BLE && ble_attack_selecting) {
                 ble_attack_selecting = false;

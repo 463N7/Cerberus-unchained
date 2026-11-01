@@ -64,6 +64,13 @@ static void dual_ble_publish_diagnostics(uint64_t now, bool asleep)
             out.s3_scan_error = session->error ? session->error : session->observation.error;
         }
     }
+    if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_ANALYZER) {
+        /* Analyzer attachment and source errors outlive a generic scanner
+         * observation. Never report another owner's cached scan as this run. */
+        out.s3_scan_error = ble_analyzer_s3_error();
+        out.s3_scan_cached = ble_analyzer_s3_receiving();
+        out.s3_state = out.s3_scan_cached ? CERBERUS_BLE_SCAN_RUNNING : 0U;
+    }
     out.fox_open = current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FOX_HUNT;
     out.fox_pending = out.fox_open && ble_fox_hunt_start_pending;
     out.fox_stopping = out.fox_open && ble_fox_hunt_exit_pending;

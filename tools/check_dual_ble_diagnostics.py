@@ -20,8 +20,7 @@ void draft_exit_critical(unsigned *);
 #define portENTER_CRITICAL(p) draft_enter_critical(p)
 #define portEXIT_CRITICAL(p) draft_exit_critical(p)
 """)
-source = (root / "s3_main/main/usb_console.c").read_text()
-def function(signature):
+def function(source, signature):
     start = source.index(signature + "\n{")
     brace = source.index("{", start)
     depth, end = 1, brace + 1
@@ -29,8 +28,13 @@ def function(signature):
         depth += (source[end] == "{") - (source[end] == "}")
         end += 1
     return source[start:end] + "\n"
+source = (root / "s3_main/main/usb_console.c").read_text()
 (out / "dual_ble_diagnostics_console.h").write_text(
-    function("static void print_dual_ble(void)") + function("static void print_ble_memory(void)"))
+    function(source, "static void print_dual_ble(void)") + function(source, "static void print_ble_memory(void)"))
+analyzer = (root / "s3_main/main/ble_analyzer_live_ui.h").read_text()
+(out / "dual_ble_diagnostics_analyzer.h").write_text(
+    function(analyzer, "static bool ble_analyzer_s3_receiving(void)") +
+    function(analyzer, "static esp_err_t ble_analyzer_s3_error(void)"))
 exe = out / ("dual-ble-diagnostics.exe" if os.name == "nt" else "dual-ble-diagnostics")
 subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-UNDEBUG",
     "-Wall", "-Wextra", "-Werror", "-I", str(out / "stubs"), "-I", str(out),
