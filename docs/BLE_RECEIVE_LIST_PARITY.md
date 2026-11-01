@@ -1,8 +1,8 @@
 # BLE receive-list parity audit
 
-## Rev101 source candidate: same-original C5 receive metadata
+## Rev101 source milestone: same-original C5 receive metadata
 
-The candidate preserves callback source, delivered length, SID/PHY, properties,
+The implementation preserves callback source, delivered length, SID/PHY, properties,
 controller status and full AD-layout validity in a bounded eight-byte envelope.
 It follows the same original raw/RSSI/time through a frozen snapshot and selected
 row; receiver capability never substitutes for a row's callback source. A

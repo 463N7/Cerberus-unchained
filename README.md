@@ -9,7 +9,7 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev101` (candidate), paired with onboard
+**Current source version: `0.1.0-dev.rev101`, paired with onboard
 C5 protocol firmware revision 64. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -46,7 +46,9 @@ controller status and full AD-layout validity with each original observation.
 The optional metadata read still uses eleven chunks per row. The existing C5
 detail view adds RAW ADV / RECEIVE INFO tabs; older peers retain explicit
 unknown metadata. All 120 host suites and five native targets pass on the final
-source, including the unsaved-metadata label. Rev100 remains installed. See
+source, including the unsaved-metadata label. The matched package is installed
+with both chips online and SD mounted; live reception and touchscreen acceptance
+remain pending. See
 [the rev101 checkpoint](docs/DUAL_RADIO_REV101.md).
 
 Rev100 preserves S3 matched scan-response bytes separately from original ADV

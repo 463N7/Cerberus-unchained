@@ -1,6 +1,6 @@
 # BLE SD snapshots and offline analysis
 
-This guide describes the installed rev100 development checkpoint. [The rev100 checkpoint](DUAL_RADIO_REV100.md) records its host/native validation and verified installation/boot; physical report acceptance remains pending. [The rev99 checkpoint](DUAL_RADIO_REV99.md) retains that earlier installation's scope and pending checks. Earlier contribution evidence remains in [CONTRIBUTION_REV93.md](CONTRIBUTION_REV93.md); it does not establish physical acceptance of the new report.
+This guide describes the v3 saved-report workflow retained by installed rev101. [The rev100 checkpoint](DUAL_RADIO_REV100.md) records the archive implementation's host/native validation and verified installation/boot; physical report acceptance remains pending. [Rev101](DUAL_RADIO_REV101.md) adds live C5 receive metadata without extending that archive schema. [The rev99 checkpoint](DUAL_RADIO_REV99.md) retains the earlier dual-receiver report scope. Earlier contribution evidence remains in [CONTRIBUTION_REV93.md](CONTRIBUTION_REV93.md); it does not establish physical acceptance of the new report.
 
 Cerberus can save retained S3 and C5 Bluetooth observations in one SD report and reopen them for analysis after leaving the scan or rebooting. It supports the persistence outcome of saving received BLE evidence, including a selected Find My observation. It does not establish full Marauder Save/Load Airtags parity: Cerberus uses its own versioned `.BLE` format, does not import Marauder's JSON files, and never loads saved observations into live targeting, GATT or sound actions.
 
@@ -24,7 +24,7 @@ The same browser opens new v3 reports and old v1/v2 files. V1 files show **LEGAC
 
 ## What is retained
 
-Rev101's candidate **RECEIVE INFO** panel adds live/selected C5 callback metadata.
+Rev101's **RECEIVE INFO** panel adds live/selected C5 callback metadata.
 That envelope is not part of the v3 SD format described here. The offline reader
 does not borrow those fields from current scans or reconstruct absent metadata.
 

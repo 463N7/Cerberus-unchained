@@ -1,9 +1,9 @@
 # Rev101: C5 receive metadata without more row transfers
 
-Rev101 is a source candidate. Rev100 remains installed. All 120 host suites and
+Rev101 is installed as a local development checkpoint. All 120 host suites and
 five native targets pass on the final source, including the unsaved-metadata
-label. Installation and physical acceptance remain pending, and the full
-Marauder port is incomplete.
+label. Matched image writes and application boot are verified. Physical
+acceptance remains pending, and the full Marauder port is incomplete.
 
 ## Retained observation
 
@@ -119,6 +119,35 @@ The packaged applications match the final full-matrix images. Earlier rev101
 artifacts and the initial package predate the unsaved-info label and are not the
 final installation candidate.
 
+## Local installation and boot
+
+Implementation commit `7dd2a7a64a5faea88d6082e8cf25a8974490eb3d` is installed.
+Fresh first-2-MiB S3/C5 backups match the previously installed rev100 images and
+verified against device flash. They cover every written sector; higher flash
+was preserved. The temporary bridge, C5 and final S3 each completed three image
+writes with verified hashes and exact chip/MAC guards. Exclusive write receipts
+bind package, manifest, source, image and guard-test evidence. No PR or release
+was published.
+
+Diagnostics report S3 `0.1.0-dev.rev101`, C5 protocol firmware 64, an active
+display buffer, mounted SD, inactive USB storage and no previous-reset fault.
+Settled S3 internal free memory is 134,396 bytes, its largest block is 94,208,
+free PSRAM is 1,428,324 and task count remains ten. The read-only console command
+sequence reports 652 remaining stack bytes, unchanged from the same preceding
+sequence; this is not a runtime worst-case bound. C5 reports 58 KiB free and a
+54 KiB minimum. Idle readings do not exercise optional receive/archive buffers.
+
+Startup SPI reports four initial READY timeouts and four legacy fallbacks,
+with zero mutex timeouts and driver errors. The preserved 26,240-byte crash
+record predates this update; it is not a new rev101 fault. Inspected radio
+services and the archive worker are idle after the read-only checks.
+
+Evidence is retained under `artifacts/device-rev101`: the installation receipt,
+preflash verification, per-target write receipts, backup receipts,
+`boot-confirmed.txt`, `settled-boot.txt` and `final-idle.txt`. This establishes recoverable
+installation and boot, not live RF, touchscreen, real-card persistence or
+sustained-operation acceptance.
+
 ## Pending physical acceptance
 
 - Inspect controlled legacy and extended advertisements in RECEIVE INFO and
@@ -130,3 +159,20 @@ final installation candidate.
   errors remain open, as do GPS and expansion-board hardware acceptance.
 
 No GPS or external radio board is required for this receive workflow.
+
+## Next persistence work
+
+A read-only audit proposes an explicit v4 archive suffix containing these eight
+receive fields. That would make rows 216 bytes and the maximum file 13,856 bytes,
+while old v1/v2/v3 metadata remains UNKNOWN. The version bump must explicitly
+retain v3 S3-response decoding; its current branch compares against CURRENT.
+The frozen C5 row/provenance already provides the capture boundary, so saving
+would not need another receive query or clock sample.
+
+The existing offline raw page could use its second tab for C5 RECEIVE INFO,
+while S3/LEGACY keep RESPONSE. Current native-layout arithmetic projects 2,088
+additional bytes across optional archive UI/worker objects, not a measured peak
+or a completed implementation. Codec compatibility vectors, failed-decode
+atomicity, capture provenance, selected/live/save transitions, worker/storage
+faults and native type/frame checks remain required. The audit is retained in
+`artifacts/device-rev101/next-c5-archive-metadata.md`.
