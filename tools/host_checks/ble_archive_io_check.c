@@ -126,6 +126,17 @@ static void fill(unsigned count)
         r->advertisement_length=31;for(unsigned j=0;j<31;++j)r->advertisement[j]=(uint8_t)(i+j);
         r->copy_ceiling_ms=99999;r->source_time_valid=true;r->original_source_uptime_ms=90000;
         r->receiver=CERBERUS_BLE_ARCHIVE_RECEIVER_S3;r->index=(uint8_t)(i%32);
+        if(i<32&&!(i%2)){
+            r->scan_epoch_valid=true;r->scan_epoch=55;
+            memset(r->advertisement,0,sizeof(r->advertisement));r->advertisement_length=3;
+            r->advertisement[0]=2;r->advertisement[1]=1;r->advertisement[2]=6;
+            r->response_state=CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT;
+            r->response_length=r->response_original_length=5;r->response_event_type=4;
+            memcpy(r->response,"\004\011RSP",5);
+            r->response_original_sequence=1;r->response_sequence=2;
+            r->response_original_observed_ms=90000;r->response_observed_ms=90010;
+            r->response_time_valid=true;r->response_source_uptime_ms=90010;
+        }
         if(i>=32){
             r->receiver=CERBERUS_BLE_ARCHIVE_RECEIVER_C5;r->rssi_kind=CERBERUS_BLE_ARCHIVE_RSSI_LATEST_ADV;
             r->source_time_valid=false;r->copy_ceiling_ms=r->original_source_uptime_ms=0;
@@ -191,7 +202,7 @@ int main(void)
         input.rows[0].name[0]='!';uint64_t unused;CHECK(cerberus_ble_archive_io_save(&input,&unused)==ESP_ERR_INVALID_STATE);
         run_worker();CHECK(status().state==CERBERUS_BLE_ARCHIVE_IO_COMPLETE&&status().result_ready&&status().count==count);
         console_check(CERBERUS_BLE_ARCHIVE_IO_COMPLETE);
-        CHECK(status().bytes==32+144*count&&!strcmp(status().relative_path,"/CERBERUS/BLE")&&!strcmp(status().file_name,"B00001.BLE"));
+        CHECK(status().bytes==32+208*count&&!strcmp(status().relative_path,"/CERBERUS/BLE")&&!strcmp(status().file_name,"B00001.BLE"));
         CHECK(cerberus_ble_archive_io_copy_result(id,&output)==ESP_OK&&!memcmp(&output,&expected,sizeof(output)));
         cerberus_ble_archive_io_release(id);CHECK(!outstanding&&!status().result_ready);
         console_check(CERBERUS_BLE_ARCHIVE_IO_COMPLETE);

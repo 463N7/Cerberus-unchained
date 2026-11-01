@@ -121,15 +121,33 @@ static void golden_and_bounds(void)
         "000000000000000000000000000000000d180000000000000000000000000000"
         "0201060000000000000000000000000000000000000000000000000000000000"
         "00000000000000000000000000000000";
-    uint8_t bytes[MAX + 1], expected[176], legacy[160];
+    static const char v3_hex[] =
+        "43424c454152430003002000d0000100f00000008070605040302010cd84a537"
+        "010203040506020703c9a5024c000303f8fe1f00341200000807060504030201"
+        "010000000100000005000000010000004101ff00000000000000000000000000"
+        "000000000000000000000000000000000d180000000000000000000000000000"
+        "0201060000000000000000000000000000000000000000000000000000000000"
+        "00000000000000000000000000000000"
+        "0000000000000000000000000000000000000000000000000000000000000000"
+        "0000000000000000000000000000000000000000000000000000000000000000";
+    uint8_t bytes[MAX + 1], expected[240], v2[176], legacy[160];
     from_hex(hex, legacy, sizeof(legacy));
-    from_hex(v2_hex, expected, sizeof(expected));
+    from_hex(v2_hex, v2, sizeof(v2));
+    from_hex(v3_hex, expected, sizeof(expected));
     cerberus_ble_archive_t d = sample(1), copy = d, decoded;
     /* This fixed v1 zlib vector predates the v2 writer. Compatibility is
      * checked independently, not by constructing v1 with the new encoder. */
     CHECK(cerberus_ble_archive_decode(legacy, sizeof(legacy), &decoded));
     CHECK(!memcmp(&decoded, &copy, sizeof(copy)));
     CHECK(decoded.rows[0].receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_LEGACY);
+    CHECK(decoded.rows[0].response_state == CERBERUS_BLE_ARCHIVE_RESPONSE_UNKNOWN);
+    CHECK(cerberus_ble_archive_decode(v2, sizeof(v2), &decoded));
+    CHECK(!memcmp(&decoded, &copy, sizeof(copy)));
+    for (size_t cut = 0; cut < sizeof(v2); ++cut) bad_decode(v2, cut);
+    for (size_t i = 0; i < sizeof(v2); ++i) {
+        uint8_t corrupt[176]; memcpy(corrupt, v2, sizeof(corrupt)); corrupt[i] ^= 1U;
+        bad_decode(corrupt, sizeof(corrupt));
+    }
     for (size_t cut = 0; cut < sizeof(legacy); ++cut) bad_decode(legacy, cut);
     for (size_t i = 0; i < sizeof(legacy); ++i) {
         uint8_t corrupt[160]; memcpy(corrupt, legacy, sizeof(corrupt)); corrupt[i] ^= 1U;
@@ -205,9 +223,28 @@ static void receiver_semantics(void)
     r->age_upper_valid = true; r->age_upper_at_save_ms = UINT64_C(0xfedcba9876543210);
     r->receiver_boot_id = UINT64_C(0x8877665544332211);
     uint8_t expected[176], wire[MAX]; from_hex(golden_c5, expected, sizeof(expected));
-    CHECK(encode(&c5, wire) == sizeof(expected)); CHECK(!memcmp(wire, expected, sizeof(expected)));
     CHECK(cerberus_ble_archive_decode(expected, sizeof(expected), &decoded));
     CHECK(!memcmp(&c5, &decoded, sizeof(c5)));
+    CHECK(encode(&c5, wire) == HEADER + ROW);
+    CHECK(cerberus_ble_archive_decode(wire, HEADER + ROW, &decoded));
+    CHECK(!memcmp(&c5, &decoded, sizeof(c5)));
+    /* Independent old v2 wire rows remain valid at the full 64-row bound. */
+    uint8_t v2_full[CERBERUS_BLE_ARCHIVE_V2_MAX_SIZE];
+    memcpy(v2_full, expected, HEADER);
+    for (unsigned i = 0; i < 64U; ++i) {
+        uint8_t *old = v2_full + HEADER + i * CERBERUS_BLE_ARCHIVE_V2_ROW_SIZE;
+        memcpy(old, expected + HEADER, CERBERUS_BLE_ARCHIVE_V2_ROW_SIZE);
+        old[5] = (uint8_t)i;
+        if (i < 32U) {old[7] = 5; old[19] = 1; old[22] = 0; memset(old + 128, 0, 16);}
+    }
+    put16(v2_full + 14, 64); put32(v2_full + 16, sizeof(v2_full)); seal(v2_full, sizeof(v2_full));
+    CHECK(cerberus_ble_archive_decode(v2_full, sizeof(v2_full), &decoded));
+    CHECK(decoded.count == 64 && decoded.rows[0].receiver == 1 && decoded.rows[63].receiver == 2);
+    for (unsigned i = 0; i < 64U; ++i) CHECK(decoded.rows[i].response_state == 0);
+    for (size_t cut = 0; cut < sizeof(v2_full); ++cut) bad_decode(v2_full, cut);
+    for (size_t i = 0; i < sizeof(v2_full); ++i) {
+        v2_full[i] ^= 1U; bad_decode(v2_full, sizeof(v2_full)); v2_full[i] ^= 1U;
+    }
     uint64_t age = 41;
     CHECK(!cerberus_ble_archive_age_at_save(&c5, 0, &age) && age == 41);
     CHECK(cerberus_ble_archive_age_upper_at_save(&c5, 0, &age) && age == r->age_upper_at_save_ms);
@@ -389,10 +426,133 @@ static void hostile_files(void)
     memcpy(changed, wire, n); put64(changed + HEADER + 32, UINT64_MAX); seal(changed, n); bad_decode(changed, n);
 }
 
+static cerberus_ble_archive_t response_sample(void)
+{
+    cerberus_ble_archive_t d = sample(1);
+    cerberus_ble_archive_row_t *r = &d.rows[0];
+    r->receiver = CERBERUS_BLE_ARCHIVE_RECEIVER_S3;
+    r->advertisement_flags = 0;
+    r->response_state = CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT;
+    r->response_length = r->response_original_length = 3;
+    r->response_event_type = 4;
+    r->response_original_sequence = 17; r->response_sequence = 19;
+    r->response_original_observed_ms = 1; r->response_observed_ms = 3;
+    r->response_time_valid = true; r->response_source_uptime_ms = UINT64_C(0x100000003);
+    r->response[0] = 2; r->response[1] = 10; r->response[2] = 1;
+    return d;
+}
+
+static void response_semantics(void)
+{
+    static const char golden[] =
+        "43424c454152430003002000d0000100f000000080706050403020100b2e8d21"
+        "010203040506020703c9a5024c00030300fe1f01341200000807060504030201"
+        "010000000100000005000000010000004101ff00000000000000000000000000"
+        "000000000000000000000000000000000d180000000000000000000000000000"
+        "0201060000000000000000000000000000000000000000000000000000000000"
+        "0000000000000000000000000000000002030304000002001100000013000000"
+        "01000000030000000300000001000000020a0100000000000000000000000000"
+        "00000000000000000000000000000000";
+    cerberus_ble_archive_t good = response_sample(), d, decoded;
+    uint8_t expected[240], wire[MAX], changed[MAX];
+    from_hex(golden, expected, sizeof(expected));
+    CHECK(encode(&good, wire) == sizeof(expected)); CHECK(!memcmp(wire, expected, sizeof(expected)));
+    CHECK(cerberus_ble_archive_decode(expected, sizeof(expected), &decoded));
+    CHECK(!memcmp(&good, &decoded, sizeof(good)));
+    uint64_t age = 71, original_age = 0;
+    CHECK(cerberus_ble_archive_response_age_at_save(&decoded, 0, &age));
+    CHECK(cerberus_ble_archive_age_at_save(&decoded, 0, &original_age));
+    CHECK(age + 2 == original_age && age == good.saved_uptime_ms - UINT64_C(0x100000003));
+    CHECK(!cerberus_ble_archive_response_age_at_save(NULL, 0, &age));
+    CHECK(!cerberus_ble_archive_response_age_at_save(&good, 1, &age));
+    CHECK(!cerberus_ble_archive_response_age_at_save(&good, SIZE_MAX, &age));
+    CHECK(!cerberus_ble_archive_response_age_at_save(&good, 0, NULL));
+    d = good; d.rows[0].response_time_valid = false; d.rows[0].response_source_uptime_ms = 0;
+    const uint64_t before_age = age;
+    CHECK(cerberus_ble_archive_validate(&d));
+    CHECK(!cerberus_ble_archive_response_age_at_save(&d, 0, &age) && age == before_age);
+    d.rows[0].copy_ceiling_ms = d.rows[0].original_source_uptime_ms + 1U;
+    bad_model(&d); /* UNKNOWN exact response time cannot hide a response after its frozen copy. */
+    d.rows[0].source_time_valid = false;
+    d.rows[0].original_source_uptime_ms = d.rows[0].copy_ceiling_ms = 0;
+    CHECK(cerberus_ble_archive_validate(&d)); /* Exact64 time can be unknown; source32 stays historical. */
+    d.rows[0].response_time_valid = true; bad_model(&d);
+    for (unsigned value = 0; value < 256; ++value) {
+        d = good; d.rows[0].response_state = (uint8_t)value;
+        CHECK(cerberus_ble_archive_validate(&d) == (value == 2));
+        d = good; d.rows[0].response_flags = (uint8_t)value;
+        CHECK(cerberus_ble_archive_validate(&d) == (value == 0));
+        d = good; d.rows[0].response_event_type = (uint8_t)value;
+        CHECK(cerberus_ble_archive_validate(&d) == (value == 4));
+        d.rows[0].response_sid_valid = true; d.rows[0].response_sid = 15;
+        CHECK(cerberus_ble_archive_validate(&d) == (value == 0 || value == 3));
+        d = good; d.rows[0].response_original_length = (uint8_t)value;
+        d.rows[0].response_length = (uint8_t)(value > 31 ? 31 : value);
+        d.rows[0].response_flags = value > 31 ? 1 : 0;
+        memset(d.rows[0].response, 0, 31);
+        for (unsigned i = 0; i < d.rows[0].response_length; ++i) d.rows[0].response[i] = (uint8_t)i;
+        CHECK(cerberus_ble_archive_validate(&d) == (value > 0));
+        if (value) {size_t n = encode(&d, wire); CHECK(cerberus_ble_archive_decode(wire, n, &decoded));
+            CHECK(!memcmp(&d, &decoded, sizeof(d)));}
+    }
+#define BAD_FIELD(field, value) do { d = good; d.rows[0].field = (value); bad_model(&d); } while (0)
+    BAD_FIELD(response_length, 32); BAD_FIELD(response_length, 2);
+    BAD_FIELD(response_original_length, 32); BAD_FIELD(response_original_length, 0);
+    BAD_FIELD(response_sid, 1); BAD_FIELD(response_original_sequence, 0);
+    BAD_FIELD(response_sequence, 17); BAD_FIELD(response_sequence, 0);
+    BAD_FIELD(response_original_observed_ms, 2); BAD_FIELD(response_observed_ms, 0);
+    BAD_FIELD(response_source_uptime_ms, UINT64_C(0x100000002));
+    BAD_FIELD(response_source_uptime_ms, UINT64_C(0x100000006));
+    BAD_FIELD(response_time_valid, false); BAD_FIELD(scan_epoch, 0);
+    BAD_FIELD(scan_epoch_valid, false); BAD_FIELD(receiver, 0);
+    BAD_FIELD(advertisement_event_type, 4); BAD_FIELD(advertisement_flags, 2);
+    BAD_FIELD(advertisement_flags, 1); /* TRUNCATED requires a full31 original prefix. */
+#undef BAD_FIELD
+    d = good; d.rows[0].response[30] = 1; bad_model(&d);
+    d = good; d.rows[0].response_sid_valid = true; d.rows[0].response_event_type = 3;
+    d.rows[0].response_sid = 16; bad_model(&d);
+    d.rows[0].response_sid = 15; CHECK(cerberus_ble_archive_validate(&d));
+    d = good; d.rows[0].response_time_valid = false; d.rows[0].response_source_uptime_ms = 0;
+    d.rows[0].copy_ceiling_ms = d.rows[0].original_source_uptime_ms + 2000U;
+    d.rows[0].response_observed_ms = 2001; CHECK(cerberus_ble_archive_validate(&d));
+    d.rows[0].response_observed_ms = 2002; bad_model(&d);
+    d = good; d.rows[0].original_source_uptime_ms = UINT64_C(0x1ffffffff);
+    d.rows[0].copy_ceiling_ms = UINT64_C(0x200000002);
+    d.rows[0].response_original_observed_ms = UINT32_MAX; d.rows[0].response_observed_ms = 1;
+    d.rows[0].response_source_uptime_ms = UINT64_C(0x200000001);
+    CHECK(cerberus_ble_archive_validate(&d)); /* Modular source32 wrap, exact64 ordering. */
+    d.rows[0].response_source_uptime_ms = 1; bad_model(&d);
+    d = good; d.saved_uptime_ms = UINT64_MAX;
+    d.rows[0].original_source_uptime_ms = d.rows[0].copy_ceiling_ms = UINT64_MAX;
+    d.rows[0].response_original_observed_ms = d.rows[0].response_observed_ms = UINT32_MAX;
+    d.rows[0].response_source_uptime_ms = UINT64_MAX;
+    CHECK(cerberus_ble_archive_response_age_at_save(&d, 0, &age) && age == 0);
+    d = good; d.rows[0].original_source_uptime_ms = d.rows[0].copy_ceiling_ms = 0;
+    d.rows[0].response_original_observed_ms = d.rows[0].response_observed_ms = 0;
+    d.rows[0].response_source_uptime_ms = 0; d.saved_uptime_ms = UINT64_MAX;
+    CHECK(cerberus_ble_archive_response_age_at_save(&d, 0, &age) && age == UINT64_MAX);
+    for (unsigned state = 0; state <= 1; ++state) {
+        d = sample(1); d.rows[0].receiver = 1; d.rows[0].response_state = (uint8_t)state;
+        CHECK(cerberus_ble_archive_validate(&d)); size_t n = encode(&d, wire);
+        CHECK(cerberus_ble_archive_decode(wire, n, &decoded) && decoded.rows[0].response_state == state);
+        CHECK(!cerberus_ble_archive_response_age_at_save(&decoded, 0, &age));
+        for (unsigned offset = 145; offset < 208; ++offset) {
+            memcpy(changed, wire, n); changed[HEADER + offset] = 1; seal(changed, n); bad_decode(changed, n);
+        }
+        d.rows[0].receiver = 0; CHECK(cerberus_ble_archive_validate(&d) == (state == 0));
+    }
+    d = sample(64);
+    for (unsigned i = 0; i < 32; ++i) {d.rows[i] = good.rows[0]; d.rows[i].address[5] = (uint8_t)i;}
+    size_t n = encode(&d, wire); CHECK(n == MAX && cerberus_ble_archive_decode(wire, n, &decoded));
+    CHECK(decoded.rows[31].response_state == 2 && decoded.rows[32].response_state == 0);
+    CHECK(!memcmp(&decoded, &d, sizeof(d)));
+}
+
 static void canonical_mutations(void)
 {
     uint8_t good[MAX], wire[MAX], reencoded[MAX];
-    cerberus_ble_archive_t seed = sample(1);
+    for (unsigned response = 0; response < 2; ++response) {
+    cerberus_ble_archive_t seed = response ? response_sample() : sample(1);
     const size_t n = encode(&seed, good);
     for (size_t offset = 0; offset < n; ++offset) {
         if (offset >= 28 && offset < 32) continue;
@@ -410,6 +570,7 @@ static void canonical_mutations(void)
                 }
             } else CHECK(!memcmp(&result, &before, sizeof(result)));
         }
+    }
     }
 }
 
@@ -480,6 +641,7 @@ int main(void)
     model_validation();
     time_and_projection();
     hostile_files();
+    response_semantics();
     canonical_mutations();
     generated_roundtrips();
     printf("BLE archive codec: PASS %u checks; header=%u row=%u max=%u; host document=%zu row=%zu bytes\n",

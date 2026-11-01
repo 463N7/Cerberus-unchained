@@ -9,6 +9,7 @@
 #define CERBERUS_DUAL_BLE_VERSION 2U
 #define CERBERUS_DUAL_BLE_MIN_FIRMWARE 61U
 #define CERBERUS_DUAL_BLE_SNAPSHOT_MIN_FIRMWARE 62U
+#define CERBERUS_DUAL_BLE_INVENTORY_MIN_FIRMWARE 63U
 #define CERBERUS_DUAL_BLE_CAPACITY 32U
 #define CERBERUS_DUAL_BLE_RAW_BYTES 31U
 #define CERBERUS_DUAL_BLE_STALE_MS 5000U
@@ -88,6 +89,21 @@ typedef struct __attribute__((packed)) {
     int32_t error_code;
     uint8_t count, flags;
 } cerberus_dual_ble_snapshot_status_t;
+
+/* Optional firmware63 extension; INFO v2 and its flags remain unchanged for
+ * older hosts. Request uses snapshot_binding: boot/job/full-epoch mapping is
+ * validated through the frozen handle. Counters describe this RF sweep at
+ * FIRST BEGIN, not distinct devices and not cumulative session totals.
+ * Dropped counts typed complete-original callbacks for unretained addresses
+ * rejected at a full bank; stale epochs, responses, partial extended reports
+ * and invalid address types are excluded. Counters saturate at UINT32_MAX. */
+enum { CERBERUS_DUAL_BLE_INVENTORY_REPLACEMENT = 1U };
+typedef struct __attribute__((packed)) {
+    uint64_t handle;
+    uint32_t replaced, dropped;
+    int32_t error_code;
+    uint8_t count, flags;
+} cerberus_dual_ble_snapshot_inventory_t;
 typedef struct __attribute__((packed)) {
     uint64_t handle;
     uint8_t index, chunk, byte_count, error;
@@ -117,6 +133,7 @@ _Static_assert(sizeof(cerberus_dual_ble_snapshot_begin_t) == 20U, "snapshot begi
 _Static_assert(sizeof(cerberus_dual_ble_snapshot_binding_t) == 20U, "snapshot binding frame");
 _Static_assert(sizeof(cerberus_dual_ble_snapshot_read_t) == 22U, "snapshot read frame");
 _Static_assert(sizeof(cerberus_dual_ble_snapshot_status_t) == 22U, "snapshot status frame");
+_Static_assert(sizeof(cerberus_dual_ble_snapshot_inventory_t) == 22U, "snapshot inventory frame");
 _Static_assert(sizeof(cerberus_dual_ble_snapshot_chunk_t) == 22U, "snapshot chunk frame");
 _Static_assert(sizeof(cerberus_dual_ble_snapshot_row_t) == 102U, "snapshot row layout");
 

@@ -64,6 +64,14 @@ int main(void)
         assert(c5_spi_link_dual_ble_exchange(c,&begin,sizeof(begin),&snapshot,sizeof(snapshot))==ESP_OK);
         assert(probes==1&&commands==1&&peer_firmware_version==62);
     }
+    cerberus_dual_ble_snapshot_binding_t inventory_request={.binding={123,1},.handle=456};
+    cerberus_dual_ble_snapshot_inventory_t inventory;
+    reset();peer_firmware_version=62;expected_command=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_INVENTORY;
+    assert(c5_spi_link_dual_ble_exchange(expected_command,&inventory_request,sizeof(inventory_request),
+        &inventory,sizeof(inventory))==ESP_ERR_NOT_SUPPORTED&&!probes&&!commands&&zero(&inventory,sizeof(inventory)));
+    reset();reported_version=63;expected_command=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_INVENTORY;
+    assert(c5_spi_link_dual_ble_exchange(expected_command,&inventory_request,sizeof(inventory_request),
+        &inventory,sizeof(inventory))==ESP_OK&&probes==1&&commands==1);
     puts("Production firmware-cache recovery passed: known/unknown/old firmware, transient timeout recovery, shared deadline, invalid reply and no unintended command");
     return 0;
 }

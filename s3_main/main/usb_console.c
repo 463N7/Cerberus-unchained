@@ -550,6 +550,11 @@ static void print_dual_ble(void)
         "dual_ble_sweeps_scope=completed_RF_sweeps_in_current_public_receiver_run\r\n"
         "dual_ble_first_result_scope=reader_latency_to_first_new_nonempty_bank_not_RF_time\r\n",
         (unsigned)d.c5_live_updates, d.c5_snapshots, (unsigned)d.c5_has_first_result, d.c5_first_result_ms);
+    console_printf("dual_ble_c5_inventory_known=%u\r\ndual_ble_c5_inventory_replacement_enabled=%u\r\n"
+        "dual_ble_c5_inventory_replaced=%" PRIu32 "\r\ndual_ble_c5_inventory_dropped=%" PRIu32 "\r\n"
+        "dual_ble_c5_inventory_scope=last_published_bank_not_unique_devices_or_RF_loss\r\n",
+        (unsigned)d.c5_inventory_known, (unsigned)d.c5_inventory_replacement_enabled,
+        d.c5_inventory_replaced, d.c5_inventory_dropped);
     console_printf("dual_ble_s3_initialized=%u\r\ndual_ble_s3_synced=%u\r\ndual_ble_s3_owner=%u\r\n"
         "dual_ble_s3_scan_cached=%u\r\ndual_ble_s3_state=%u\r\n"
         "dual_ble_s3_scan_error=%" PRId32 "\r\ndual_ble_s3_discovery_enabled=%u\r\n"

@@ -12,6 +12,45 @@ enum {
 };
 
 static const uint8_t archive_magic[8] = {'C', 'B', 'L', 'E', 'A', 'R', 'C', 0};
+static bool all_zero(const uint8_t *bytes, size_t length);
+
+static bool response_valid(const cerberus_ble_archive_row_t *r)
+{
+    if (r->response_state > CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT ||
+        (r->receiver != CERBERUS_BLE_ARCHIVE_RECEIVER_S3 &&
+         r->response_state != CERBERUS_BLE_ARCHIVE_RESPONSE_UNKNOWN)) return false;
+    if (r->response_state != CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT) {
+        return !r->response_length && !r->response_original_length &&
+            !r->response_event_type && !r->response_flags && !r->response_sid &&
+            !r->response_sid_valid && !r->response_time_valid &&
+            !r->response_original_sequence && !r->response_sequence &&
+            !r->response_original_observed_ms && !r->response_observed_ms &&
+            !r->response_source_uptime_ms && all_zero(r->response, sizeof(r->response));
+    }
+    const uint8_t length = r->response_original_length > CERBERUS_BLE_ARCHIVE_ADV_MAX ?
+        CERBERUS_BLE_ARCHIVE_ADV_MAX : r->response_original_length;
+    const uint32_t elapsed = r->response_observed_ms - r->response_original_observed_ms;
+    if (!r->scan_epoch_valid || !r->scan_epoch || !length || r->response_length != length ||
+        r->response_flags != (r->response_original_length > length ? 1U : 0U) ||
+        !r->response_original_sequence || r->response_sequence <= r->response_original_sequence ||
+        elapsed > 2000U || r->advertisement_event_type > 3U ||
+        (r->advertisement_flags & ~1U) ||
+        ((r->advertisement_flags & 1U) && r->advertisement_length != CERBERUS_BLE_ARCHIVE_ADV_MAX) ||
+        !all_zero(r->response + length, sizeof(r->response) - length)) return false;
+    if (r->response_sid_valid ? (r->response_sid > 15U ||
+            (r->response_event_type != 0U && r->response_event_type != 3U)) :
+        (r->response_sid || r->response_event_type != 4U)) return false;
+    if (r->source_time_valid &&
+        ((uint32_t)r->original_source_uptime_ms != r->response_original_observed_ms ||
+         elapsed > r->copy_ceiling_ms - r->original_source_uptime_ms)) return false;
+    if (r->response_time_valid) {
+        if (!r->source_time_valid || r->response_source_uptime_ms < r->original_source_uptime_ms ||
+            r->response_source_uptime_ms > r->copy_ceiling_ms ||
+            r->response_source_uptime_ms - r->original_source_uptime_ms != elapsed ||
+            (uint32_t)r->response_source_uptime_ms != r->response_observed_ms) return false;
+    } else if (r->response_source_uptime_ms) return false;
+    return true;
+}
 
 static bool overlaps(const void *left, size_t left_size, const void *right, size_t right_size)
 {
@@ -48,7 +87,7 @@ static bool row_valid(const cerberus_ble_archive_row_t *r, uint64_t saved_ms)
             (!r->age_upper_valid && r->age_upper_at_save_ms)) return false;
     } else if (r->rssi_kind != CERBERUS_BLE_ARCHIVE_RSSI_SWEEP_PEAK ||
         r->receiver_boot_id || r->age_upper_valid || r->age_upper_at_save_ms) return false;
-    return true;
+    return response_valid(r);
 }
 
 bool cerberus_ble_archive_validate(const cerberus_ble_archive_t *document)
@@ -143,6 +182,19 @@ static void encode_row(const cerberus_ble_archive_row_t *r, uint8_t *out)
     memcpy(out + 96, r->advertisement, r->advertisement_length);
     put64(out + 128, r->age_upper_at_save_ms);
     put64(out + 136, r->receiver_boot_id);
+    out[144] = r->response_state;
+    out[145] = r->response_length;
+    out[146] = r->response_original_length;
+    out[147] = r->response_event_type;
+    out[148] = r->response_flags;
+    out[149] = r->response_sid;
+    out[150] = (r->response_sid_valid ? 1U : 0U) | (r->response_time_valid ? 2U : 0U);
+    put32(out + 152, r->response_original_sequence);
+    put32(out + 156, r->response_sequence);
+    put32(out + 160, r->response_original_observed_ms);
+    put32(out + 164, r->response_observed_ms);
+    put64(out + 168, r->response_source_uptime_ms);
+    memcpy(out + 176, r->response, r->response_length);
 }
 
 static bool all_zero(const uint8_t *bytes, size_t length)
@@ -151,9 +203,10 @@ static bool all_zero(const uint8_t *bytes, size_t length)
     return true;
 }
 
-static bool decode_row(const uint8_t *p, uint64_t saved_ms, bool legacy,
+static bool decode_row(const uint8_t *p, uint64_t saved_ms, uint16_t version,
     cerberus_ble_archive_row_t *r)
 {
+    const bool legacy = version == CERBERUS_BLE_ARCHIVE_LEGACY_VERSION;
     if ((p[7] & ~(legacy ? ROW_VALIDITY_MASK : ROW_V2_VALIDITY_MASK)) || p[8] > CERBERUS_BLE_ARCHIVE_NAME_MAX ||
         p[11] > CERBERUS_BLE_ARCHIVE_UUID_MAX || p[14] > CERBERUS_BLE_ARCHIVE_ADV_MAX ||
         (legacy && (p[19] || p[22])) || p[23] || p[127] ||
@@ -190,6 +243,21 @@ static bool decode_row(const uint8_t *p, uint64_t saved_ms, bool legacy,
     if (!legacy) {
         r->age_upper_at_save_ms = get64(p + 128);
         r->receiver_boot_id = get64(p + 136);
+    }
+    if (version == CERBERUS_BLE_ARCHIVE_VERSION) {
+        if (p[145] > CERBERUS_BLE_ARCHIVE_ADV_MAX || (p[150] & ~3U) || p[151] || p[207] ||
+            !all_zero(p + 176 + p[145], CERBERUS_BLE_ARCHIVE_ADV_MAX - p[145])) return false;
+        r->response_state = p[144]; r->response_length = p[145];
+        r->response_original_length = p[146]; r->response_event_type = p[147];
+        r->response_flags = p[148]; r->response_sid = p[149];
+        r->response_sid_valid = (p[150] & 1U) != 0U;
+        r->response_time_valid = (p[150] & 2U) != 0U;
+        r->response_original_sequence = get32(p + 152);
+        r->response_sequence = get32(p + 156);
+        r->response_original_observed_ms = get32(p + 160);
+        r->response_observed_ms = get32(p + 164);
+        r->response_source_uptime_ms = get64(p + 168);
+        memcpy(r->response, p + 176, r->response_length);
     }
     return row_valid(r, saved_ms);
 }
@@ -232,8 +300,9 @@ bool cerberus_ble_archive_decode(const uint8_t *input, size_t length,
         get16(input + 10) != CERBERUS_BLE_ARCHIVE_HEADER_SIZE) return false;
     const uint16_t version = get16(input + 8);
     const bool legacy = version == CERBERUS_BLE_ARCHIVE_LEGACY_VERSION;
-    if (!legacy && version != CERBERUS_BLE_ARCHIVE_VERSION) return false;
-    const uint16_t row_size = legacy ? CERBERUS_BLE_ARCHIVE_LEGACY_ROW_SIZE : CERBERUS_BLE_ARCHIVE_ROW_SIZE;
+    if (!legacy && version != CERBERUS_BLE_ARCHIVE_V2_VERSION && version != CERBERUS_BLE_ARCHIVE_VERSION) return false;
+    const uint16_t row_size = legacy ? CERBERUS_BLE_ARCHIVE_LEGACY_ROW_SIZE :
+        version == CERBERUS_BLE_ARCHIVE_V2_VERSION ? CERBERUS_BLE_ARCHIVE_V2_ROW_SIZE : CERBERUS_BLE_ARCHIVE_ROW_SIZE;
     if (get16(input + 12) != row_size) return false;
     const uint16_t count = get16(input + 14);
     const uint64_t saved_ms = get64(input + 20);
@@ -244,7 +313,7 @@ bool cerberus_ble_archive_decode(const uint8_t *input, size_t length,
     uint8_t counts[3] = {0};
     for (size_t i = 0; i < count; ++i) {
         const uint8_t *encoded = input + CERBERUS_BLE_ARCHIVE_HEADER_SIZE + i * row_size;
-        if (!decode_row(encoded, saved_ms, legacy, &row) ||
+        if (!decode_row(encoded, saved_ms, version, &row) ||
             ++counts[row.receiver] > CERBERUS_BLE_ARCHIVE_MAX_ROWS_PER_RECEIVER) return false;
         for (size_t j = 0; j < i; ++j)
             if (!memcmp(encoded, input + CERBERUS_BLE_ARCHIVE_HEADER_SIZE +
@@ -257,7 +326,7 @@ bool cerberus_ble_archive_decode(const uint8_t *input, size_t length,
     document->count = (uint8_t)count;
     for (size_t i = 0; i < count; ++i)
         (void)decode_row(input + CERBERUS_BLE_ARCHIVE_HEADER_SIZE +
-            i * row_size, saved_ms, legacy, &document->rows[i]);
+            i * row_size, saved_ms, version, &document->rows[i]);
     return true;
 }
 
@@ -279,5 +348,16 @@ bool cerberus_ble_archive_age_upper_at_save(const cerberus_ble_archive_t *docume
         document->rows[index].receiver != CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ||
         !document->rows[index].age_upper_valid) return false;
     *age_ms = document->rows[index].age_upper_at_save_ms;
+    return true;
+}
+
+bool cerberus_ble_archive_response_age_at_save(const cerberus_ble_archive_t *document,
+    size_t index, uint64_t *age_ms)
+{
+    if (!document || !age_ms || !document->count || document->count > CERBERUS_BLE_ARCHIVE_MAX_ROWS ||
+        index >= document->count || !row_valid(&document->rows[index], document->saved_uptime_ms) ||
+        document->rows[index].response_state != CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT ||
+        !document->rows[index].response_time_valid) return false;
+    *age_ms = document->saved_uptime_ms - document->rows[index].response_source_uptime_ms;
     return true;
 }

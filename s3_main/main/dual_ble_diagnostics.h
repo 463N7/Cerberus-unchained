@@ -15,6 +15,7 @@ typedef struct {
      * automatic RF sweep rearm. Publications/first-result latency describe
      * discovery only; neither measures packet count or RF observation time. */
     uint32_t c5_sweeps, c5_snapshots, c5_first_result_ms;
+    uint32_t c5_inventory_replaced, c5_inventory_dropped;
     int32_t c5_error, s3_scan_error, s3_track_error, fox_error;
     cerberus_dual_ble_sample_diagnostics_t s3, c5;
     uint8_t version, c5_phase, c5_state, c5_generation, c5_rows, c5_read_index;
@@ -23,6 +24,7 @@ typedef struct {
     bool available, clock_valid, sequence_saturated, awake, allocated;
     bool enabled, attached, receiving, reading, stopping, released, extended_configured;
     bool c5_has_first_result, c5_live_updates;
+    bool c5_inventory_known, c5_inventory_replacement_enabled;
     bool s3_initialized, s3_synced, s3_scan_cached;
     bool s3_discovery_enabled, s3_discovery_attached, s3_discovery_owned;
     bool fox_open, fox_pending, fox_stopping;

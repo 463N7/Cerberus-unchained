@@ -188,6 +188,9 @@ static bool dual_snapshot_command(uint8_t command, const void *request,
                     dual_snapshot.request_id = begin.request_id;
                     dual_snapshot.epoch = dual_epoch; dual_snapshot.job_id = dual_job_id;
                     dual_snapshot.count = scan_status.stored_count;
+                    dual_snapshot.replaced = scan_inventory.replaced;
+                    dual_snapshot.dropped = scan_inventory.dropped;
+                    dual_snapshot.inventory_enabled = scan_inventory.enabled;
                     dual_snapshot.flags = (scan_status.state == CERBERUS_BLE_SCAN_RUNNING || dual_radio_active ?
                         CERBERUS_DUAL_BLE_SNAPSHOT_RUNNING : CERBERUS_DUAL_BLE_SNAPSHOT_COMPLETE) |
                         (MYNEWT_VAL(BLE_EXT_ADV) ? CERBERUS_DUAL_BLE_SNAPSHOT_EXTENDED : 0U);
@@ -225,11 +228,43 @@ static bool dual_snapshot_command(uint8_t command, const void *request,
     return true;
 }
 
+static bool dual_snapshot_inventory_command(const void *request, size_t request_size,
+    void *response, size_t *response_size)
+{
+    cerberus_dual_ble_snapshot_binding_t binding = {0};
+    cerberus_dual_ble_snapshot_inventory_t out = {0};
+    int32_t error = request_size == sizeof(binding) ? ESP_OK : ESP_ERR_INVALID_ARG;
+    if (!error) { memcpy(&binding, request, sizeof(binding)); out.handle = binding.handle; }
+    if (!error && !scanner_mutex) error = ESP_ERR_INVALID_STATE;
+    bool locked = false;
+    if (!error) {
+        locked = xSemaphoreTake(scanner_mutex, 0U) == pdTRUE;
+        if (!locked) error = ESP_ERR_TIMEOUT;
+    }
+    if (locked) {
+        dual_expire_locked();
+        if (!dual_snapshot_matches_locked(&binding.binding, binding.handle)) error = ESP_ERR_NOT_FOUND;
+        else {
+            dual_last_contact_ms = dual_now_ms();
+            out.replaced = dual_snapshot.replaced;
+            out.dropped = dual_snapshot.dropped;
+            out.count = dual_snapshot.count;
+            out.flags = dual_snapshot.inventory_enabled ? CERBERUS_DUAL_BLE_INVENTORY_REPLACEMENT : 0U;
+        }
+        xSemaphoreGive(scanner_mutex);
+    }
+    out.error_code = error;
+    memcpy(response, &out, sizeof(out)); *response_size = sizeof(out);
+    return true;
+}
+
 bool cerberus_ble_dual_command(uint8_t command, const void *request,
     size_t request_size, void *response, size_t *response_size)
 {
     if (!response || !response_size || (!request && request_size)) return false;
     *response_size = 0U;
+    if (command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_INVENTORY)
+        return dual_snapshot_inventory_command(request, request_size, response, response_size);
     if (command >= CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_BEGIN &&
         command <= CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_STATUS)
         return dual_snapshot_command(command, request, request_size, response, response_size);

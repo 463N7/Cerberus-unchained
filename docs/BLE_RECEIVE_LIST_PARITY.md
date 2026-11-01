@@ -1,5 +1,62 @@
 # BLE receive-list parity audit
 
+## Rev100 source candidate: matched-response archives and bounded C5 retention
+
+Rev99 remains the preceding installed checkpoint. This section records source
+and host preparation; [the rev100 checkpoint](DUAL_RADIO_REV100.md) owns current
+build/installation evidence and outstanding physical acceptance. The Marauder
+`develop` baseline was rechecked unchanged at
+`79cc6bcba1db6679baee1dab2b0c1ad5010e6363` on 2026-11-01.
+
+S3 retains an admitted matching scan response separately from the original
+advertisement through frozen discovery/history/selection and the existing SD
+save workflow. The selected full-width scan epoch is preserved. V3 archives
+keep up to 31 response bytes from a delivered source of up to 255 bytes, with
+independent original/response source times, ordered source sequences, event,
+truncation and SID when valid. Exact raw-original sequence matching prevents
+newer hints from attaching to older raw bytes, including equal-millisecond
+invalid replacements. Original bytes, RSSI and timestamps are not refreshed
+by a response or by saving.
+
+Response availability is UNKNOWN, NONE or PRESENT. NONE means no admitted
+matched response for the proven original at capture, not proof that no
+response was sent. Old v1/v2 files and C5/LEGACY records remain UNKNOWN; no
+missing raw bytes or provenance are reconstructed. V3 remains bounded to
+64 source observations and 13,344 bytes. Host documents are 14,864 bytes;
+those are host type sizes, not measured native peak memory. See
+[SD workflow](BLE_SD_SNAPSHOTS.md) and [wire format](BLE_ARCHIVE_FORMAT.md).
+
+C5 replacement is limited to protocol-v2 passive **DISCOVERY**. At a full
+32-slot bank, a new independently valid complete original can replace the
+slot with the oldest qualifying callback rank; stable slot order breaks ties.
+The callback clock must be nonnegative and monotonic, and an exhausted sequence
+fails closed. Replacement clears the entire victim before storing the new
+typed observation. Malformed/partial reports cannot trigger replacement;
+existing-row and nonfull-bank admission retain their prior behavior. Scan
+responses, invalid typed addresses and stale callbacks are excluded before
+this policy. TRACK, v1 companion and other C5 scan owners retain their previous
+capacity behavior. This does not change RF scan timing or add a radio task.
+
+Firmware 63 adds optional frozen **replaced/dropped** counters to the immutable
+snapshot. They freeze with rows at the first successful BEGIN and remain
+unchanged on retries; S3 validates the handle/count and mandatory final fence
+before publication. The live pane and cached diagnostics label them as bank
+counters. They describe that RF sweep as of its snapshot, not cumulative
+session totals, unique devices or all RF loss. Dropped counts delivered typed
+original callbacks for unretained addresses rejected at a full bank; malformed
+originals can contribute to this rejection count. Counters saturate. Older
+firmware or a failed optional read reports unavailable, while the validated
+row bank can still publish. The ordinary eight-second RF sweep and live
+snapshot transport remain; there is no new latency guarantee.
+
+S3 native extended reception remains disabled. C5 extended/coded reception,
+dense real-device retention, response-only discovery, dual Fox Hunt and
+physical save/reopen/repeated owner transitions remain pending. C5 passive
+discovery still has no raw scan-response evidence or borrowed S3 family/action
+eligibility. Full payloads, history, family behavior and upstream option parity
+remain incomplete. The following revision sections preserve their historical
+scope and exclusions; they do not override this candidate's bounded additions.
+
 ## Rev99 source milestone: one SD report from both receivers
 
 The candidate adds **SAVE BOTH RECEIVERS** to the existing BLE SD snapshots

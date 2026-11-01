@@ -2,7 +2,7 @@
 #include <string.h>
 
 enum { OFF, INFO, START, POLL, META, NAME, UUID, RAW, TIME, FENCE, TRACK,
-    SNAP_BEGIN, SNAP_READ, SNAP_FENCE, STOP, RELEASE, FAILED };
+    SNAP_BEGIN, SNAP_READ, SNAP_FENCE, STOP, RELEASE, FAILED, SNAP_INVENTORY };
 
 void cerberus_dual_ble_init(cerberus_dual_ble_scan_t *s, const cerberus_dual_ble_ops_t *ops)
 {
@@ -31,6 +31,8 @@ esp_err_t cerberus_dual_ble_begin(cerberus_dual_ble_scan_t *s, uint8_t mode,
     s->enabled = true; s->stop_requested = false; s->error = ESP_OK;
     s->sweeps = 0U; s->snapshots = 0U; s->first_result_ms = 0U; s->has_first_result = false;
     s->live_updates = false; s->snapshots_capable = false;
+    s->inventory_query_enabled = true; s->pending_inventory_known = false;
+    s->inventory_retries = 0U;
     s->discovery_clock_valid = s->ops.now_ms != NULL;
     s->discovery_started_ms = s->ops.now_ms ? s->ops.now_ms(s->ops.context) : 0U;
     if (s->discovery_started_ms == UINT64_MAX) s->discovery_clock_valid = false;
@@ -96,6 +98,11 @@ static uint64_t publish_bank(cerberus_dual_ble_scan_t *s, uint8_t count, uint64_
     s->published_boot_id = s->start.boot_id;
     s->published_epoch = s->remote.epoch;
     s->published_generation = s->remote.generation;
+    s->inventory_known = s->live_updates && s->pending_inventory_known;
+    s->inventory_replacement_enabled = s->inventory_known &&
+        (s->pending_inventory.flags & CERBERUS_DUAL_BLE_INVENTORY_REPLACEMENT) != 0U;
+    s->inventory_replaced = s->inventory_known ? s->pending_inventory.replaced : 0U;
+    s->inventory_dropped = s->inventory_known ? s->pending_inventory.dropped : 0U;
     s->count = count;
     if (s->snapshots != UINT32_MAX) ++s->snapshots;
     if (count && !s->has_first_result && s->discovery_clock_valid) {
@@ -178,10 +185,12 @@ static esp_err_t snapshot_step(cerberus_dual_ble_scan_t *s, uint64_t now)
         if (result.error_code) return result.error_code;
         if (!snapshot_valid(s, &result) || result.handle <= s->snapshot.handle) return ESP_ERR_INVALID_RESPONSE;
         s->snapshot = result;
+        s->pending_inventory_known = false; s->inventory_retries = 0U;
+        memset(&s->pending_inventory, 0, sizeof(s->pending_inventory));
         memset(s->staging, 0, sizeof(s->staging));
         memset(&s->snapshot_row, 0, sizeof(s->snapshot_row));
         s->read_index = 0U; s->copied = 0U;
-        s->phase = result.count ? SNAP_READ : SNAP_FENCE;
+        s->phase = result.count ? SNAP_READ : s->inventory_query_enabled ? SNAP_INVENTORY : SNAP_FENCE;
     } else if (s->phase == SNAP_READ) {
         cerberus_dual_ble_snapshot_read_t request = {b, s->snapshot.handle, s->read_index,
             (uint8_t)(s->copied / CERBERUS_DUAL_BLE_SNAPSHOT_CHUNK_BYTES)};
@@ -206,8 +215,31 @@ static esp_err_t snapshot_step(cerberus_dual_ble_scan_t *s, uint64_t now)
             if (error != ESP_OK) return error;
             s->copied = 0U; ++s->read_index;
             memset(&s->snapshot_row, 0, sizeof(s->snapshot_row));
-            if (s->read_index == s->snapshot.count) s->phase = SNAP_FENCE;
+            if (s->read_index == s->snapshot.count)
+                s->phase = s->inventory_query_enabled ? SNAP_INVENTORY : SNAP_FENCE;
         }
+    } else if (s->phase == SNAP_INVENTORY) {
+        cerberus_dual_ble_snapshot_binding_t request = {b, s->snapshot.handle};
+        cerberus_dual_ble_snapshot_inventory_t result;
+        esp_err_t error = exchange(s, CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_INVENTORY,
+            &request, sizeof(request), &result, sizeof(result));
+        if (error == ESP_OK) {
+            if (result.error_code) error = result.error_code;
+            else if (result.handle != s->snapshot.handle || result.count != s->snapshot.count ||
+                (result.flags & ~CERBERUS_DUAL_BLE_INVENTORY_REPLACEMENT) ||
+                (!(result.flags & CERBERUS_DUAL_BLE_INVENTORY_REPLACEMENT) && result.replaced))
+                error = ESP_ERR_INVALID_RESPONSE;
+            else { s->pending_inventory = result; s->pending_inventory_known = true; }
+        }
+        if (error == ESP_ERR_TIMEOUT && s->inventory_retries++ < 2U) {
+            s->next_poll_ms = now + 100U;
+            return ESP_OK;
+        }
+        /* Optional diagnostics never make a validated bank unreadable. A
+         * missing/invalid response remains unknown, never a zero-count claim.
+         * The final STATUS fence is mandatory even after diagnostics failure. */
+        if (error == ESP_ERR_NOT_SUPPORTED) s->inventory_query_enabled = false;
+        s->phase = SNAP_FENCE; s->next_poll_ms = 0U;
     } else {
         cerberus_dual_ble_snapshot_binding_t request = {b, s->snapshot.handle};
         cerberus_dual_ble_snapshot_status_t result;
@@ -328,7 +360,7 @@ static void step(cerberus_dual_ble_scan_t *s, uint64_t now)
             }
             }
         }
-    } else if (phase == SNAP_BEGIN || phase == SNAP_READ || phase == SNAP_FENCE) {
+    } else if (phase == SNAP_BEGIN || phase == SNAP_READ || phase == SNAP_FENCE || phase == SNAP_INVENTORY) {
         error = snapshot_step(s, now);
     } else if (phase == TRACK) {
         cerberus_dual_ble_track_t track;
@@ -435,11 +467,14 @@ void cerberus_dual_ble_view(const cerberus_dual_ble_scan_t *s, cerberus_dual_ble
     out->enabled = s->enabled; out->attached = s->start.job_id != 0U;
     out->receiving = (s->remote.flags & CERBERUS_DUAL_BLE_OWNED) != 0;
     out->reading = (s->phase >= META && s->phase <= FENCE) ||
-        (s->phase >= SNAP_BEGIN && s->phase <= SNAP_FENCE);
+        (s->phase >= SNAP_BEGIN && s->phase <= SNAP_FENCE) || s->phase == SNAP_INVENTORY;
     out->stopping = s->phase == STOP || s->phase == RELEASE;
     out->extended = s->extended; out->count = s->count; out->sweeps = s->sweeps; out->error = s->error;
     out->snapshots = s->snapshots; out->first_result_ms = s->first_result_ms;
     out->has_first_result = s->has_first_result; out->live_updates = s->live_updates;
+    out->inventory_known = s->inventory_known;
+    out->inventory_replacement_enabled = s->inventory_replacement_enabled;
+    out->inventory_replaced = s->inventory_replaced; out->inventory_dropped = s->inventory_dropped;
 }
 
 bool cerberus_dual_ble_row(const cerberus_dual_ble_scan_t *s, uint8_t index, cerberus_dual_ble_row_t *out)

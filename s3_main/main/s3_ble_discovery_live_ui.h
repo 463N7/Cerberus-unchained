@@ -241,6 +241,7 @@ static void ble_discovery_tick(uint64_t now_ms, bool asleep)
         store->selection_pending = false;
         ble_select_frozen_live(&frozen);
         ble_selected_original_time64_valid = true;
+        ble_selected_scan_epoch = store->selected.epoch;
         ble_selected_original_ms64 = store->selected.original_source_ms;
         ble_selected_source_ceiling_ms64 = store->selected.source_now_ms;
         return;

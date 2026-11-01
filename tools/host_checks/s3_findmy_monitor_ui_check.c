@@ -51,6 +51,7 @@ static bool ble_selected_from_monitor, ble_selected_raw_frozen, ble_attack_selec
 static bool ble_selected_original_time64_valid;
 static uint64_t ble_selected_original_ms64;
 static uint64_t ble_selected_source_ceiling_ms64;
+static uint64_t ble_selected_scan_epoch;
 static bool ble_findmy_running, ble_findmy_scan_owned, ble_findmy_stopping;
 static bool ble_findmy_exit_pending, ble_findmy_select_pending;
 static uint8_t ble_findmy_generation;

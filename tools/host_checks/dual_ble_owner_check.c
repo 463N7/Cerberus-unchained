@@ -1,5 +1,6 @@
 #include "cerberus_protocol.h"
 #include "esp_err.h"
+#include "ble_inventory_admission.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -41,6 +42,10 @@ static esp_err_t start_scan(bool companion)
     ++starts;++scan_status.generation;dual_generation=scan_status.generation;
     ++scan_callback_epoch;scan_status.state=CERBERUS_BLE_SCAN_RUNNING;
     scan_status.stored_count=0;scan_status.error_code=0;dual_radio_active=true;
+    scan_status.dropped_reports=0;
+    cerberus_ble_inventory_admission_begin(&scan_inventory,
+        dual_version==CERBERUS_DUAL_BLE_VERSION&&dual_mode==CERBERUS_DUAL_BLE_DISCOVERY,
+        esp_timer_get_time());
     return ESP_OK;
 }
 static esp_err_t stop_scan(bool companion)
@@ -82,6 +87,9 @@ static cerberus_dual_ble_snapshot_status_t snapshot_begin(cerberus_dual_ble_bind
 static cerberus_dual_ble_snapshot_status_t snapshot_status(cerberus_dual_ble_binding_t b,uint64_t handle)
 {cerberus_dual_ble_snapshot_binding_t r={.binding=b,.handle=handle};cerberus_dual_ble_snapshot_status_t out;
  command(CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_STATUS,&r,sizeof(r),&out,sizeof(out));return out;}
+static cerberus_dual_ble_snapshot_inventory_t snapshot_inventory(cerberus_dual_ble_binding_t b,uint64_t handle)
+{cerberus_dual_ble_snapshot_binding_t r={.binding=b,.handle=handle};cerberus_dual_ble_snapshot_inventory_t out;
+ command(CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_INVENTORY,&r,sizeof(r),&out,sizeof(out));return out;}
 static cerberus_dual_ble_snapshot_chunk_t snapshot_chunk(cerberus_dual_ble_binding_t b,uint64_t handle,uint8_t index,uint8_t chunk)
 {cerberus_dual_ble_snapshot_read_t r={.binding=b,.handle=handle,.index=index,.chunk=chunk};cerberus_dual_ble_snapshot_chunk_t out;
  command(CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ,&r,sizeof(r),&out,sizeof(out));
@@ -210,6 +218,110 @@ static void snapshot_checks(void)
     printf("C5 snapshot memory: %zu frozen rows + %zu metadata = %zu bytes; %u try-locks.\n",
         sizeof(dual_snapshot.rows),sizeof(dual_snapshot)-sizeof(dual_snapshot.rows),sizeof(dual_snapshot),try_locks);
 }
+static void dense_inventory_checks(void)
+{
+    const uint8_t flags[]={2,1,6}, bad_width[]={2,3,0x44}, bad_suffix[]={2,1,6,0,1};
+    const uint8_t duplicate_name[]={2,9,'A',2,9,'B'}, short_mfg[]={2,0xff,0x4c};
+    assert(cerberus_ble_inventory_ad_valid(NULL,0));
+    assert(cerberus_ble_inventory_ad_valid(flags,sizeof(flags)));
+    assert(!cerberus_ble_inventory_ad_valid(NULL,1));
+    assert(!cerberus_ble_inventory_ad_valid(flags,2));
+    assert(!cerberus_ble_inventory_ad_valid(bad_width,sizeof(bad_width)));
+    assert(!cerberus_ble_inventory_ad_valid(bad_suffix,sizeof(bad_suffix)));
+    assert(!cerberus_ble_inventory_ad_valid(duplicate_name,sizeof(duplicate_name)));
+    assert(!cerberus_ble_inventory_ad_valid(short_mfg,sizeof(short_mfg)));
+    scan_status.state=CERBERUS_BLE_SCAN_IDLE;dual_attached=dual_radio_active=false;dual_error=0;now_ms=5000;
+    cerberus_dual_ble_start_t start={.boot_id=dual_boot_id,.job_id=dual_job_highwater+1U,.version=2};
+    cerberus_dual_ble_status_t owner;
+    command(CERBERUS_SPI_COMMAND_DUAL_BLE_START,&start,sizeof(start),&owner,sizeof(owner));
+    assert(!owner.error_code&&scan_inventory.enabled);
+    cerberus_dual_ble_binding_t binding={dual_boot_id,start.job_id};
+    struct ble_gap_disc_desc p={.addr={{1,2,3,4,5,6},0},.rssi=-30,.event_type=0,
+        .data=flags,.length_data=sizeof(flags)};
+    int64_t stamp=esp_timer_get_time();
+    for(unsigned i=0;i<32;++i){p.addr.val[0]=(uint8_t)(i+1);record_advertisement(&p,scan_callback_epoch,++stamp);}
+    assert(scan_status.stored_count==32&&!scan_inventory.replaced&&!scan_inventory.dropped);
+    memcpy(scan_results[1].name,"OLD",3);scan_results[1].name_length=3;
+    scan_results[1].uuid_length=16;memset(scan_results[1].uuid,0xa5,16);scan_results[1].manufacturer_id=0x1234;
+    scan_results[1].reports_seen=99;
+    cerberus_dual_ble_snapshot_status_t first=snapshot_begin(binding,1);
+    assert(!first.error_code&&first.count==32);
+    cerberus_dual_ble_snapshot_row_t original=snapshot_row(binding,first.handle,1);
+    /* A valid recent original protects slot0; malformed repeated slot1 does
+     * not become more recent for replacement merely through repeated traffic. */
+    p.addr.val[0]=1;record_advertisement(&p,scan_callback_epoch,++stamp);
+    p.addr.val[0]=2;p.data=bad_suffix;p.length_data=sizeof(bad_suffix);
+    record_advertisement(&p,scan_callback_epoch,++stamp);
+    assert(scan_inventory.rank[1]<scan_inventory.rank[0]);
+    p.addr.val[0]=99;p.data=flags;p.length_data=sizeof(flags);p.event_type=3;p.rssi=-100;
+    record_advertisement(&p,scan_callback_epoch,++stamp);
+    assert(scan_inventory.replaced==1&&!scan_inventory.dropped&&scan_status.stored_count==32);
+    assert(scan_results[0].address[0]==1&&scan_results[1].address[0]==99);
+    assert(!scan_results[1].name_length&&!scan_results[1].uuid_length&&!scan_results[1].flags);
+    assert(scan_results[1].manufacturer_id==CERBERUS_BLE_MANUFACTURER_UNKNOWN);
+    assert(scan_results[1].reports_seen==1&&scan_results[1].rssi==-100&&scan_results[1].latest_rssi==-100);
+    cerberus_dual_ble_snapshot_row_t retained=snapshot_row(binding,first.handle,1);
+    assert(!memcmp(&retained,&original,sizeof(original)));
+    cerberus_dual_ble_snapshot_inventory_t stats=snapshot_inventory(binding,first.handle);
+    assert(!stats.error_code&&stats.handle==first.handle&&stats.count==32&&stats.flags==1&&!stats.replaced&&!stats.dropped);
+    cerberus_ble_record_t before[32];memcpy(before,scan_results,sizeof(before));
+    p.addr.val[0]=100;p.data=bad_width;p.length_data=sizeof(bad_width);
+    record_advertisement(&p,scan_callback_epoch,++stamp);
+    assert(scan_inventory.dropped==1);
+    p.data=flags;p.length_data=sizeof(flags);
+    record_advertisement(&p,scan_callback_epoch,-1);
+    record_advertisement(&p,scan_callback_epoch,stamp-1);
+    assert(scan_inventory.dropped==3);
+    p.addr.type=4;record_advertisement(&p,scan_callback_epoch,++stamp);p.addr.type=0;
+    p.event_type=4;record_advertisement(&p,scan_callback_epoch,++stamp);p.event_type=3;
+    record_advertisement(&p,scan_callback_epoch-1,++stamp);
+    assert(scan_inventory.dropped==3&&scan_inventory.replaced==1&&!memcmp(before,scan_results,sizeof(before)));
+    cerberus_dual_ble_snapshot_status_t second=snapshot_begin(binding,2);
+    stats=snapshot_inventory(binding,second.handle);
+    assert(!stats.error_code&&stats.replaced==1&&stats.dropped==3&&stats.count==32);
+    assert(snapshot_inventory(binding,first.handle).error_code==ESP_ERR_NOT_FOUND);
+    cerberus_dual_ble_binding_t foreign=binding;foreign.boot_id++;
+    assert(snapshot_inventory(foreign,second.handle).error_code==ESP_ERR_NOT_FOUND);
+    foreign=binding;foreign.job_id++;
+    assert(snapshot_inventory(foreign,second.handle).error_code==ESP_ERR_NOT_FOUND);
+    uint64_t epoch=dual_epoch;dual_epoch++;
+    assert(snapshot_inventory(binding,second.handle).error_code==ESP_ERR_NOT_FOUND);dual_epoch=epoch;
+    snapshot_busy=true;stats=snapshot_inventory(binding,second.handle);snapshot_busy=false;
+    assert(stats.error_code==ESP_ERR_TIMEOUT&&!stats.replaced&&!stats.dropped&&!stats.count&&!stats.flags);
+    /* Entire complete extended container validates independently of its31-byte
+     * preview. The prefix remains explicitly truncated, never reassembled. */
+    uint8_t extended[255]={254,0xff,0x4c,0};
+    assert(cerberus_ble_inventory_ad_valid(extended,sizeof(extended)));
+    assert(!cerberus_ble_inventory_ad_valid(extended,sizeof(extended)+1));
+    p.data=extended;p.length_data=255;record_advertisement(&p,scan_callback_epoch,++stamp);
+    assert(scan_inventory.replaced==2&&scan_results[2].address[0]==100&&scan_results[2].advertisement_length==31);
+    assert(scan_results[2].advertisement_flags&CERBERUS_BLE_ADVERTISEMENT_TRUNCATED);
+    scan_inventory.sequence=UINT32_MAX;p.addr.val[0]=101;p.data=flags;p.length_data=sizeof(flags);
+    record_advertisement(&p,scan_callback_epoch,++stamp);assert(scan_inventory.replaced==2&&scan_inventory.dropped==4);
+    scan_inventory.sequence=1000;scan_inventory.replaced=UINT32_MAX;
+    record_advertisement(&p,scan_callback_epoch,++stamp);assert(scan_inventory.replaced==UINT32_MAX);
+    scan_inventory.dropped=UINT32_MAX;p.addr.val[0]=102;p.data=bad_width;p.length_data=sizeof(bad_width);
+    record_advertisement(&p,scan_callback_epoch,++stamp);assert(scan_inventory.dropped==UINT32_MAX);
+    command(CERBERUS_SPI_COMMAND_DUAL_BLE_STOP,&binding,sizeof(binding),&owner,sizeof(owner));
+    assert(snapshot_inventory(binding,second.handle).error_code==ESP_ERR_NOT_FOUND);
+    command(CERBERUS_SPI_COMMAND_DUAL_BLE_RELEASE,&binding,sizeof(binding),&owner,sizeof(owner));
+    /* Legacy v1 discovery and v2 exact-address tracking keep stable first32
+     * admission. A different typed address is different even with same bytes. */
+    for(unsigned mode=0;mode<2;++mode){
+        start.job_id=dual_job_highwater+1U;start.version=mode?2:1;start.mode=(uint8_t)mode;
+        start.address[0]=mode?1:0;start.address_type=0;
+        command(CERBERUS_SPI_COMMAND_DUAL_BLE_START,&start,sizeof(start),&owner,sizeof(owner));
+        assert(!owner.error_code&&!scan_inventory.enabled&&!scan_inventory.replaced&&!scan_inventory.dropped);
+        p.data=flags;p.length_data=sizeof(flags);p.event_type=0;p.addr.type=0;
+        for(unsigned i=0;i<32;++i){p.addr.val[0]=(uint8_t)(i+1);record_advertisement(&p,scan_callback_epoch,++stamp);}
+        p.addr.val[0]=1;p.addr.type=1;record_advertisement(&p,scan_callback_epoch,++stamp);
+        assert(scan_status.stored_count==32&&!scan_inventory.replaced&&scan_inventory.dropped==1&&scan_results[0].address_type==0);
+        binding.job_id=start.job_id;
+        command(CERBERUS_SPI_COMMAND_DUAL_BLE_STOP,&binding,sizeof(binding),&owner,sizeof(owner));
+        command(CERBERUS_SPI_COMMAND_DUAL_BLE_RELEASE,&binding,sizeof(binding),&owner,sizeof(owner));
+    }
+    printf("C5 dense inventory: strict complete admission, LRU ranks, immutable snapshots/stats, typed/drop/clock/saturation/legacy checks; state=%zu bytes\n",sizeof(scan_inventory));
+}
 int main(void)
 {
     dual_boot_id=123;host_synced=true;now_ms=100;
@@ -267,6 +379,7 @@ int main(void)
     command(CERBERUS_SPI_COMMAND_DUAL_BLE_START,&other,22,&status,22);assert(status.error_code && !dual_attached && starts==2);
     command(CERBERUS_SPI_COMMAND_DUAL_BLE_START,&start,22,&status,22);assert(status.error_code && !dual_attached && starts==2);
     snapshot_checks();
+    dense_inventory_checks();
     puts("dual BLE C5 owner/callback: exact typed tracker, latest RSSI, capacity, idempotency, foreign ownership, orphan checks passed");
     return 0;
 }

@@ -1,15 +1,16 @@
 # Saved BLE evidence format
 
-This guide describes the rev99 source. See [the rev99 checkpoint](DUAL_RADIO_REV99.md) for current build and installation evidence. The new dual-receiver saved-report workflow and the preceding live BLE snapshot changes still need physical acceptance. [CONTRIBUTION_REV93.md](CONTRIBUTION_REV93.md) retains the earlier contribution's scope and evidence.
+This guide describes the rev100 source candidate. The v3 response extension has source and host validation; it is not physical SD or BLE reception acceptance. See [the rev99 checkpoint](DUAL_RADIO_REV99.md) for the preceding installation evidence. The dual-receiver saved-report workflow and live BLE snapshot changes still need physical acceptance. [CONTRIBUTION_REV93.md](CONTRIBUTION_REV93.md) retains the earlier contribution's scope and evidence.
 
-Version 2 writes a bounded, passive report of one to 64 retained BLE observations, at most 32 per receiver. The new reader also accepts existing version 1 files, which contain at most 32 observations with no encoded receiver identity. The pure codec is in `s3_main/main/ble_archive.c` and `ble_archive.h`. It performs no allocation, filesystem operation, radio operation, or ESP-IDF call.
+Version 3 writes a bounded, passive report of one to 64 retained BLE observations, at most 32 per receiver. The reader also accepts version 2 dual-receiver files and version 1 files, which contain at most 32 observations with no encoded receiver identity. The pure codec is in `s3_main/main/ble_archive.c` and `ble_archive.h`. It performs no allocation, filesystem operation, radio operation, or ESP-IDF call.
 
 | Version | Header | Row | Maximum count | Maximum file |
 | --- | ---: | ---: | ---: | ---: |
 | 1, read compatibility | 32 bytes | 128 bytes | 32 | 4,128 bytes |
-| 2, current writer/reader | 32 bytes | 144 bytes | 64, at most 32 per receiver | 9,248 bytes |
+| 2, read compatibility | 32 bytes | 144 bytes | 64, at most 32 per receiver | 9,248 bytes |
+| 3, current writer/reader | 32 bytes | 208 bytes | 64, at most 32 per receiver | 13,344 bytes |
 
-Files retain the `.BLE` extension. Version 1 readers may reject version 2 files; compatibility means that the new reader preserves support for old files, without silently rewriting them. Encoding a decoded version 1 model produces an explicit version 2 report with `LEGACY` receiver labels.
+Files retain the `.BLE` extension. Older readers may reject version 3 files; compatibility means that the new reader preserves support for old files, without silently rewriting them. Encoding a decoded version 1 model produces an explicit version 3 report with `LEGACY` receiver labels. Both v1 and v2 decode with response state `UNKNOWN` and all response metadata zero; neither version contained those bytes or sequences.
 
 This format preserves retained evidence for offline inspection. Loading it does not create live scan results, connection targets, or permission to use an active feature. It is distinct from Marauder's JSON AirTag log format and does not import that format.
 
@@ -18,11 +19,13 @@ This format preserves retained evidence for offline inspection. Loading it does 
 - An entry retains the receiver, typed BLE address, a projected received name, explicitly described RSSI, peer flags, manufacturer and UUID metadata, and up to 31 original advertisement bytes. Address bytes use NimBLE order, with the least significant octet first. Identity is `(receiver, address type, address)`: the same typed address heard by S3 and C5 is two observations, not evidence of two physical devices. `LEGACY` means the source was unspecified in version 1; decoding does not invent an S3 receiver label.
 - The name is a bounded C-string projection from the peer result. It is **not** a lossless copy of the original over-the-air name: earlier peer conversion may have discarded bytes following an embedded NUL, and the C5 companion has already sanitized its display projection. The codec preserves the bytes it receives, including S3 control/non-ASCII bytes; it cannot restore an earlier name or infer it from unrelated raw data.
 - Advertisement bytes, event type, and flag bits are preserved even when the retained advertisement is malformed, truncated, or unfamiliar. A malformed AD element does not invalidate the archive container. Offline parsers must check AD lengths independently and label truncation or malformed contents.
-- Only the retained original advertisement bytes are saved. Raw scan-response bytes were not retained by this source and are absent from this format. Pointer-containing focus objects and their decoded scan-response hints are not serialized. Reanalysis of the retained bytes cannot reproduce a live classification that depended on a scan response or an older report.
+- Version 3 can retain up to 31 bytes of the latest admitted S3 scan response independently of its original advertisement. It records the delivered response length, retained length, event, truncation, source SID where valid, ordered original/response sequences, their observed low32 source times, and an independently valid exact64 response time. It does not serialize pointer-containing focus objects, response RSSI, or older response history. A response longer than 31 bytes keeps only that prefix; the prefix can end inside an AD element. This is not full extended-advertising support.
+- `UNKNOWN` means response availability cannot be proved for this saved original, including old files, C5/LEGACY rows and stale raw ADV retained after a newer invalid original. `NONE` means the frozen valid S3 original has no **admitted matching** response at capture; it does not prove that no response existed over the air. `PRESENT` means the separately saved response passed the same-source binding checks. Non-PRESENT response fields must be zero. C5/LEGACY rows must be UNKNOWN; C5 passive discovery does not collect scan responses.
+- The S3 mapper attaches response bytes only after matching the frozen base row's typed identity, original raw bytes/event/flags/report count, generation, full nonzero source epoch and exact original/copy clocks. The source helper also requires the raw advertisement sequence to match the current valid original sequence. A newer malformed/incomplete original, including one observed in the same millisecond, cannot attach later response hints to an older raw copy. Response capture does not update original bytes, original time, RSSI or active-action eligibility.
 - `S3` and `LEGACY` entries use original-report sweep-peak RSSI, which need not describe the particular retained ADV bytes. C5 entries use latest original-ADV RSSI. The name, manufacturer and UUID remain aggregate peer hints, not a claim that every value occurred in that raw packet. An unavailable RSSI is 127 with its validity bit clear, for either RSSI kind.
 - `saved_uptime_ms` always describes the S3 save boot. For S3/LEGACY, valid exact source times satisfy `original <= ceiling <= saved`; zero is valid when explicitly marked valid. The copy ceiling is not a packet timestamp. Those receivers must have no C5 age bound or receiver boot ID.
 - C5 rows require a nonzero committed C5 boot ID and valid nonzero source epoch. Exact S3 source/copy times are zero and invalid. An optional conservative **upper bound on age at save** is stored separately; it may exceed S3 saved uptime and is never subtracted to invent an exact packet timestamp. Unknown bounds have a clear validity bit and value 0. A valid bound of 0 or `UINT64_MAX` is distinguishable from unknown through that bit.
-- `cerberus_ble_archive_age_at_save()` returns exact historical age for S3/LEGACY. `cerberus_ble_archive_age_upper_at_save()` returns the C5 historical upper bound. Both reject unavailable or invalid values without changing their output. Opening a file after reboot does not refresh either age; neither helper accepts the loading boot's clock. There is no UTC timestamp or claim of present freshness.
+- `cerberus_ble_archive_age_at_save()` returns exact historical original-ADV age for S3/LEGACY. `cerberus_ble_archive_age_upper_at_save()` returns the C5 historical upper bound. `cerberus_ble_archive_response_age_at_save()` returns the independent exact S3 response age when available. All reject unavailable or invalid values without changing their output. Opening a file after reboot does not refresh any age; none accepts the loading boot's clock. There is no UTC timestamp or claim of present freshness.
 - Scan epoch, generation, and original row index are historical source metadata. They are not an active scanner ownership token, an address identity, or an authorization binding.
 
 ## Header
@@ -32,10 +35,10 @@ All multibyte integers are unsigned little-endian. The format is independent of 
 | Offset | Bytes | Meaning |
 | --- | ---: | --- |
 | 0 | 8 | Magic bytes `43 42 4C 45 41 52 43 00` (`CBLEARC` followed by NUL) |
-| 8 | 2 | Version 1 or 2; encoder writes 2 |
+| 8 | 2 | Version 1, 2 or 3; encoder writes 3 |
 | 10 | 2 | Header size, exactly 32 |
-| 12 | 2 | Entry size 128 for v1, 144 for v2 |
-| 14 | 2 | Entry count 1..32 for v1, 1..64 for v2; v2 also limits each receiver to 32 |
+| 12 | 2 | Entry size 128 for v1, 144 for v2, 208 for v3 |
+| 14 | 2 | Entry count 1..32 for v1, 1..64 for v2/v3; each receiver is limited to 32 |
 | 16 | 4 | Total file length, exactly `32 + entry_size * count` |
 | 20 | 8 | Saved S3 uptime in milliseconds |
 | 28 | 4 | CRC-32/ISO-HDLC |
@@ -44,7 +47,7 @@ The CRC uses reflected polynomial `0xEDB88320`, initial value `0xFFFFFFFF`, and 
 
 ## Entry
 
-Offsets below are relative to the beginning of each entry. Bytes 0..127 retain their existing fields, with the explicitly versioned additions noted below; v2 appends 16 bytes.
+Offsets below are relative to the beginning of each entry. Bytes 0..127 retain their existing fields, with the explicitly versioned additions noted below; v2 appends 16 bytes and v3 appends a further 64 bytes. All v2 fields remain present in v3.
 
 | Offset | Bytes | Meaning |
 | --- | ---: | --- |
@@ -72,15 +75,32 @@ Offsets below are relative to the beginning of each entry. Bytes 0..127 retain t
 | 80 | 16 | UUID bytes; remaining bytes zero |
 | 96 | 31 | Retained original advertisement bytes; remaining bytes zero |
 | 127 | 1 | Reserved, zero |
-| 128 | 8 | v2 only: conservative age upper bound at save, zero if unavailable |
-| 136 | 8 | v2 only: nonzero C5 receiver boot ID; zero for S3/LEGACY |
+| 128 | 8 | v2/v3: conservative age upper bound at save, zero if unavailable |
+| 136 | 8 | v2/v3: nonzero C5 receiver boot ID; zero for S3/LEGACY |
+| 144 | 1 | v3: response state 0 UNKNOWN, 1 NONE, 2 PRESENT |
+| 145 | 1 | Retained response length, 1..31 when PRESENT |
+| 146 | 1 | Delivered response length, 1..255 when PRESENT |
+| 147 | 1 | Response event: 4 without SID; 0 or 3 with valid SID |
+| 148 | 1 | Response raw flags: bit 0 TRUNCATED iff delivered length exceeds retained length; other bits zero |
+| 149 | 1 | Response/original source SID, 0..15 when valid, otherwise zero |
+| 150 | 1 | Response validity: bit 0 SID, bit 1 exact response time; other bits zero |
+| 151 | 1 | Reserved, zero |
+| 152 | 4 | Original source sequence, nonzero for PRESENT |
+| 156 | 4 | Response source sequence, strictly greater than original sequence |
+| 160 | 4 | Original observed low32 source time in milliseconds |
+| 164 | 4 | Response observed low32 source time in milliseconds |
+| 168 | 8 | Exact response S3 source uptime, zero if unavailable |
+| 176 | 31 | Retained raw response bytes; remaining bytes zero |
+| 207 | 1 | Reserved, zero |
 
-The encoder ignores unused tails of the input model and writes canonical zero padding. It does not display-sanitize the name or advertisement. The decoder rejects noncanonical padding, unknown receiver/RSSI kind or container validity bits, unsupported lengths/version, per-receiver overflow, duplicate `(receiver, address type, address)` keys, invalid receiver/time combinations, truncated files and trailing bytes. Original source index remains 0..31 for every receiver; it is not the mixed report's row number. Unknown **advertisement** flags and event types remain valid evidence; they are distinct from reserved **container** validity bits.
+The encoder ignores unused legacy name/UUID/ADV tails and writes canonical zero padding. New response tails must already be zero, matching the admitted source's bounded copy. It does not display-sanitize either packet. The decoder rejects noncanonical padding, unknown receiver/RSSI kind or container validity bits, unsupported lengths/version, per-receiver overflow, duplicate `(receiver, address type, address)` keys, invalid receiver/time combinations, truncated files and trailing bytes. Original source index remains 0..31 for every receiver; it is not the mixed report's row number. Unknown **original advertisement** flags and event types remain valid evidence for UNKNOWN/NONE; they are distinct from reserved **container** validity bits.
+
+PRESENT requires an S3 receiver, valid nonzero scan epoch, an original event in 0..3, and original flags containing only TRUNCATED (which requires a full 31-byte retained prefix). The modular32 response-minus-original interval must be at most 2,000 ms. Retained response length equals `min(delivered_length, 31)`. Exact original time, when available, must match the original low32 field, and the response interval must fit within `ceiling - original` even if exact response time is unknown. That consistency check does not populate an unknown timestamp. Exact response time, when available, additionally requires exact original time and `original <= response <= ceiling <= saved`, the same full64 interval as the modular32 interval, and matching low32 response time. Genuine time zero is valid. The codec can represent PRESENT with explicitly unknown exact64 time; the current S3 capture mapper emits PRESENT only when both exact clocks are proved. These consistency checks do not authenticate a file's claimed radio provenance.
 
 ## Publication and validation
 
 Decode validates the complete header, exact length, CRC, every entry, and all typed address duplicates before changing the destination document. Failure preserves the previous document in full. A successful decode clears unused model rows. Input must remain immutable during the operation, and input/output memory must not overlap. This protects the model from partial replacement; it does not by itself guarantee SD durability or make a filesystem rename power-loss atomic.
 
-`tools/check_ble_archive.py` compiles the production codec and the pure C5 capture mapper. The codec fixture passes 2,724,148 assertions: an unchanged independent v1 golden vector, independent v2 LEGACY/C5 golden vectors, full 32-row v1 and 64-row v2 corruption, truncated files, CRC-correct hostile fields, canonical re-encoding, all receiver/RSSI-kind byte values, same-address observations on separate receivers, per-source 32-row limits, boundary timestamps/upper bounds, raw-byte preservation, immutable input, failed-decode atomicity and generated round trips. The mapper fixture checks copied full-width C5 provenance, raw/aggregate separation, unknown/backward/overflow timing and v2 round trips. These are host checks, not physical SD or BLE reception acceptance.
+`tools/check_ble_archive.py` compiles the production codec and pure S3/C5 capture mappers. The codec fixture passes 5,322,664 assertions: unchanged independent v1 and v2 LEGACY/C5 vectors, independent v3 UNKNOWN/PRESENT vectors, full 32-row v1 and 64-row v2/v3 corruption and truncation, CRC-correct hostile fields, canonical re-encoding of UNKNOWN and PRESENT, all receiver/RSSI-kind byte values, same-address observations on separate receivers, per-source limits, response states/SIDs/lengths/flags/sequence/time bounds, raw-byte separation, immutable input, failed-decode atomicity and generated round trips. The S3 capture fixture passes 2,523 assertions, including same-millisecond invalidation, typed-address/generation mismatch, missing epoch/clock, zero/wrapped/max times and bounded response lengths. The C5 fixture preserves frozen provenance, raw/aggregate separation and checked age bounds, and verifies canonical UNKNOWN response fields. These are host checks, not physical SD or BLE reception acceptance.
 
-The host model is 10,768 bytes per 64-row document and 168 bytes per row; these are native host C type sizes, not wire sizes or ESP32 measurements. The UI's retained/incoming documents and the worker's immutable copy remain bounded allocations. The storage and IO owners must use the 9,248-byte file limit and preserve ownership, cancellation, close/rename and immutable-copy guarantees separately from codec validation.
+The host model is 14,864 bytes per 64-row document and 232 bytes per row, an increase of 4,096 bytes per document over v2; these are native host C type sizes, not wire sizes or ESP32 measurements. The UI's retained/incoming documents and the worker's immutable copy remain bounded allocations. The storage and IO owners must use the 13,344-byte file limit and preserve ownership, cancellation, close/rename and immutable-copy guarantees separately from codec validation.

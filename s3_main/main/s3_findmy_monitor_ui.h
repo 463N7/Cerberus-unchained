@@ -237,6 +237,7 @@ static void ble_findmy_monitor_tap(uint16_t x, uint16_t y)
                     memcmp(record->peer.address, ble_findmy_row_address[row], 6U) == 0 &&
                     cerberus_findmy_monitor_copy(ble_findmy_monitor, i, &ble_findmy_selected)) {
                     ble_selected_original_time64_valid = false;
+                    ble_selected_scan_epoch = 0U;
                     ble_findmy_selection_is_monitor = true;
                     ble_findmy_request_stop(false, true);
                     break;
@@ -267,6 +268,7 @@ static void ble_findmy_monitor_tap(uint16_t x, uint16_t y)
 static void ble_select_frozen_live(const cerberus_findmy_monitor_record_t *record)
 {
     ble_selected_original_time64_valid = false;
+    ble_selected_scan_epoch = 0U;
     ble_findmy_selected = *record;
     ble_findmy_selection_is_monitor = false;
     ble_findmy_scan_owned = false;

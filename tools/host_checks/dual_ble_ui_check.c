@@ -92,6 +92,12 @@ static void check_list_controls(const char *prefix)
         r->raw_length=3;r->raw[0]=2;r->raw[1]=1;r->raw[2]=(uint8_t)i;
     }
     paint_list();assert(strstr(drawn,"SIGNAL >")&&strstr(drawn,"ALL AGES >"));
+    dual_ble_ui_store->inventory_known=false;
+    paint_list();assert(strstr(drawn,"BANK INVENTORY COUNTS UNAVAILABLE"));
+    dual_ble_ui_store->inventory_known=dual_ble_ui_store->inventory_replacement_enabled=true;
+    dual_ble_ui_store->inventory_replaced=UINT32_MAX;dual_ble_ui_store->inventory_dropped=UINT32_MAX;
+    paint_list();assert(strstr(drawn,"BANK REPLACED 4294967295 / DROPPED 4294967295"));
+    save(prefix,"inventory-counters");
     assert(!strcmp(dual_ble_ui_painted[0].name,"Peer 5"));
     assert(dual_ble_ui_tap(40,120)==DUAL_BLE_UI_REDRAW);paint_list();
     assert(dual_ble_ui_sort==CERBERUS_DUAL_BLE_SORT_NAME&&!strcmp(dual_ble_ui_painted[0].name,"Peer 0"));

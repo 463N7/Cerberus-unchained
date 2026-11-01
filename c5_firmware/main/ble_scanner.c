@@ -11,6 +11,7 @@
 #include "esp_timer.h"
 #include "esp_random.h"
 #include "dual_ble_protocol.h"
+#include "ble_inventory_admission.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "host/ble_hs.h"
@@ -97,12 +98,13 @@ static int32_t dual_error;
 static uint8_t dual_mode, dual_generation, dual_address[6], dual_address_type, dual_version;
 static int8_t dual_track_rssi;
 static bool dual_attached, dual_radio_active, dual_track_seen;
+static cerberus_ble_inventory_admission_t scan_inventory;
 typedef struct {
     cerberus_dual_ble_snapshot_row_t rows[CERBERUS_DUAL_BLE_CAPACITY];
     uint64_t counter, handle, epoch, request_id;
-    uint32_t job_id;
+    uint32_t job_id, replaced, dropped;
     uint8_t count, flags;
-    bool valid;
+    bool valid, inventory_enabled;
 } dual_snapshot_store_t;
 static dual_snapshot_store_t dual_snapshot;
 static void dual_expire_locked(void);
@@ -198,6 +200,8 @@ static void record_advertisement(const struct ble_gap_disc_desc *discovery,
     struct ble_hs_adv_fields fields = {0};
     const bool parsed = discovery->length_data == 0U ||
         ble_hs_adv_parse_fields(&fields, discovery->data, discovery->length_data) == 0;
+    const bool qualifying = parsed && discovery->event_type <= 3U &&
+        cerberus_ble_inventory_ad_valid(discovery->data, discovery->length_data);
 
     xSemaphoreTake(scanner_mutex, portMAX_DELAY);
     if (!epoch || epoch != scan_callback_epoch || scan_status.state != CERBERUS_BLE_SCAN_RUNNING) {
@@ -237,6 +241,8 @@ static void record_advertisement(const struct ble_gap_disc_desc *discovery,
     }
 
     int existing_index = find_record(&discovery->addr);
+    int admitted_index = cerberus_ble_inventory_admit(&scan_inventory,
+        scan_status.stored_count, existing_index, qualifying, callback_us);
     bool connectable = discovery->event_type == BLE_HCI_ADV_RPT_EVTYPE_ADV_IND ||
         discovery->event_type == BLE_HCI_ADV_RPT_EVTYPE_DIR_IND;
     cerberus_ble_record_t *record = NULL;
@@ -249,8 +255,9 @@ static void record_advertisement(const struct ble_gap_disc_desc *discovery,
             record->flags |= CERBERUS_BLE_RESULT_CONNECTABLE;
         }
     } else {
-        if (scan_status.stored_count < CERBERUS_BLE_SCAN_MAX_RESULTS) {
-            record = &scan_results[scan_status.stored_count++];
+        if (admitted_index >= 0) {
+            record = &scan_results[admitted_index];
+            if (admitted_index == scan_status.stored_count) ++scan_status.stored_count;
             memset(record, 0, sizeof(*record));
             memcpy(record->address, discovery->addr.val, sizeof(record->address));
             record->address_type = discovery->addr.type;
@@ -1007,7 +1014,11 @@ static esp_err_t start_scan(bool companion)
     scan_status.dropped_reports = 0;
     scan_status.error_code = 0;
     scan_cancelled = false;
-    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000LL);
+    const int64_t started_us = esp_timer_get_time();
+    uint32_t now_ms = (uint32_t)(started_us / 1000LL);
+    cerberus_ble_inventory_admission_begin(&scan_inventory,
+        companion && dual_attached && dual_version == CERBERUS_DUAL_BLE_VERSION &&
+            dual_mode == CERBERUS_DUAL_BLE_DISCOVERY, started_us);
     uint64_t epoch = watch_capture_epoch == UINT64_MAX ? 0U : ++watch_capture_epoch;
     cerberus_watch_capture_begin_with_epoch(&watch_capture, CERBERUS_WATCH_RADIO_BLE,
         scan_status.generation, now_ms, epoch);

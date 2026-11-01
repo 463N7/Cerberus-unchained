@@ -20,6 +20,10 @@ typedef struct {
     cerberus_dual_ble_snapshot_row_t frozen[CERBERUS_DUAL_BLE_CAPACITY];
     unsigned fault, busy_begin, busy_read;
     bool unknown_age;
+    bool inventory_supported;
+    unsigned inventory_queries, inventory_timeouts, inventory_fault;
+    uint32_t replacements, dropped;
+    cerberus_dual_ble_snapshot_inventory_t frozen_inventory;
 } peer_t;
 enum {
     BAD_BEGIN_BOOT=1, BAD_BEGIN_ZERO_HANDLE, BAD_BEGIN_COUNT, BAD_BEGIN_FLAGS,
@@ -49,6 +53,9 @@ static void snapshot_freeze(peer_t *p)
         .count=p->count,.flags=(p->owned?CERBERUS_DUAL_BLE_SNAPSHOT_RUNNING:CERBERUS_DUAL_BLE_SNAPSHOT_COMPLETE)|
             CERBERUS_DUAL_BLE_SNAPSHOT_EXTENDED};
     p->snapshot_clock_ms=p->now;
+    p->frozen_inventory=(cerberus_dual_ble_snapshot_inventory_t){.handle=p->snapshot.handle,
+        .replaced=p->replacements,.dropped=p->dropped,.count=p->count,
+        .flags=CERBERUS_DUAL_BLE_INVENTORY_REPLACEMENT};
     memset(p->frozen,0,sizeof(p->frozen));
     for (uint8_t i=0;i<p->count;++i) {
         cerberus_dual_ble_snapshot_row_t *r=&p->frozen[i];
@@ -149,6 +156,24 @@ static esp_err_t exchange(void *ctx, uint8_t cmd, const void *request,
     size_t request_size, void *reply, size_t reply_size)
 {
     peer_t *p=ctx; ++p->frames; p->now+=p->cost_ms;
+    if(cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_INVENTORY) {
+        ++p->inventory_queries;
+        if(!p->inventory_supported)return ESP_ERR_NOT_SUPPORTED;
+        assert(request_size==20&&reply_size==22);
+        const cerberus_dual_ble_snapshot_binding_t *r=request;
+        assert(r->binding.boot_id==p->boot&&r->binding.job_id==p->job&&r->handle==p->snapshot.handle&&p->attached);
+        if(p->inventory_timeouts){--p->inventory_timeouts;return ESP_ERR_TIMEOUT;}
+        cerberus_dual_ble_snapshot_inventory_t out=p->frozen_inventory;
+        switch(p->inventory_fault) {
+        case 1:--out.handle;break;
+        case 2:++out.count;break;
+        case 3:out.flags=0x80;break;
+        case 4:out.error_code=ESP_ERR_NOT_FOUND;break;
+        case 5:out.flags=0;out.replaced=1;break;
+        default:break;
+        }
+        memcpy(reply,&out,sizeof(out));return ESP_OK;
+    }
     if(cmd>=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_BEGIN&&cmd<=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_STATUS)
         return snapshot_exchange(p,cmd,request,request_size,reply,reply_size);
     if (cmd == CERBERUS_SPI_COMMAND_DUAL_BLE_INFO) {
@@ -238,7 +263,7 @@ static void drain(cerberus_dual_ble_scan_t *s, peer_t *p)
     assert(cerberus_dual_ble_released(s));assert(!p->owned && !p->attached);
 }
 static void init_live(cerberus_dual_ble_scan_t *s,peer_t *p)
-{init(s,p);p->version=2;p->snapshot_capability=true;}
+{init(s,p);p->version=2;p->snapshot_capability=true;p->inventory_supported=true;}
 static unsigned fast_tick(cerberus_dual_ble_scan_t *s,peer_t *p)
 {
     unsigned before=p->frames;cerberus_dual_ble_tick(s,p->now);
@@ -450,6 +475,51 @@ static void check_published_provenance(void)
     assert_provenance(&source,p.boot,p.epoch,p.generation,0);drain(&s,&p);
     puts("dual BLE publication provenance: v1/v2 full identities, generation wrap, retained/replaced/cancelled banks and lost-BEGIN anchor passed");
 }
+static void check_inventory_metadata(void)
+{
+    cerberus_dual_ble_scan_t s;peer_t p;init_live(&s,&p);p.count=32;p.replacements=7;p.dropped=11;
+    start(&s,&p);await_snapshots(&s,&p,1);
+    assert(s.inventory_known&&s.inventory_replacement_enabled&&s.inventory_replaced==7&&s.inventory_dropped==11);
+    cerberus_dual_ble_view_t view;cerberus_dual_ble_view(&s,&view);
+    assert(view.inventory_known&&view.inventory_replacement_enabled&&view.inventory_replaced==7&&view.inventory_dropped==11);
+    assert(p.inventory_queries==1&&p.snapshot_fences==1);
+    /* Counters freeze with BEGIN, not later READ/STATUS. Mutating the live peer
+     * during a download cannot attach newer counters to older frozen rows. */
+    p.replacements=13;p.dropped=17;p.cost_ms=9;
+    for(unsigned i=0;i<200&&p.snapshot_begins<2;++i)fast_tick(&s,&p);
+    assert(p.snapshot_begins==2);p.replacements=99;p.dropped=101;
+    while(p.inventory_queries<2)fast_tick(&s,&p);
+    assert(s.snapshots==1&&s.inventory_replaced==7&&s.inventory_dropped==11);
+    await_snapshots(&s,&p,2);
+    assert(s.inventory_known&&s.inventory_replaced==13&&s.inventory_dropped==17);
+    drain(&s,&p);
+    assert(s.inventory_known&&s.inventory_replaced==13);
+    assert(cerberus_dual_ble_begin(&s,0,NULL,0)==ESP_OK);tick(&s,&p);
+    assert(s.inventory_known&&s.inventory_replaced==13); /* Retained bank, not current START. */
+    drain(&s,&p);
+
+    init_live(&s,&p);p.inventory_supported=false;start(&s,&p);await_snapshots(&s,&p,1);
+    assert(!s.inventory_known&&!s.inventory_replacement_enabled&&!s.inventory_replaced&&!s.inventory_dropped);
+    assert(p.inventory_queries==1);await_snapshots(&s,&p,2);assert(p.inventory_queries==1);drain(&s,&p);
+    for(unsigned fault=1;fault<=5;++fault){
+        init_live(&s,&p);p.inventory_fault=fault;start(&s,&p);await_snapshots(&s,&p,1);
+        assert(!s.error&&!s.inventory_known&&p.inventory_queries==1&&p.snapshot_fences==1);drain(&s,&p);
+    }
+    init_live(&s,&p);p.inventory_timeouts=20;start(&s,&p);await_snapshots(&s,&p,1);
+    assert(!s.error&&!s.inventory_known&&p.inventory_queries==3&&p.snapshot_fences==1);drain(&s,&p);
+    init_live(&s,&p);p.inventory_timeouts=2;start(&s,&p);await_snapshots(&s,&p,1);
+    assert(s.inventory_known&&p.inventory_queries==3&&p.snapshot_fences==1);drain(&s,&p);
+    /* A good optional reply does not bypass a final stale-bank fence. */
+    init_live(&s,&p);p.fault=BAD_FENCE_HANDLE;start(&s,&p);
+    for(unsigned i=0;i<100&&!s.error;++i)fast_tick(&s,&p);
+    assert(s.error&&!s.snapshots&&!s.inventory_known&&p.inventory_queries==1);drain(&s,&p);
+    /* Stop after metadata but before final fence cannot publish either half. */
+    init_live(&s,&p);p.cost_ms=9;assert(cerberus_dual_ble_begin(&s,0,NULL,0)==ESP_OK);
+    for(unsigned i=0;i<100&&!p.inventory_queries;++i)fast_tick(&s,&p);
+    assert(p.inventory_queries==1&&!s.snapshots&&!p.snapshot_fences);
+    drain(&s,&p);assert(!s.snapshots&&!s.inventory_known&&!p.snapshot_fences);
+    puts("dual BLE frozen inventory stats: exact bank, optional old-peer/fault fallback, bounded BUSY, final fence and Stop publication passed");
+}
 int main(void)
 {
     cerberus_dual_ble_scan_t s;peer_t p;
@@ -501,7 +571,7 @@ int main(void)
     assert(cerberus_dual_ble_age_upper(UINT32_MAX-1,10,12)==UINT32_MAX);
     assert(cerberus_dual_ble_age_upper(2,10,9)==UINT32_MAX);
     assert(cerberus_dual_ble_age_upper(2,10,12)==4);
-    check_live_snapshots();check_snapshot_faults_and_stop();check_published_provenance();
+    check_live_snapshots();check_snapshot_faults_and_stop();check_published_provenance();check_inventory_metadata();
     printf("dual BLE reader: owner/replay/fence/lost-reply/age/typed-row checks passed; store=%zu bytes\n",sizeof(s));
     return 0;
 }

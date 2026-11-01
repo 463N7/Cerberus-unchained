@@ -101,6 +101,7 @@ static bool discovery_row_valid(const cerberus_s3_ble_record_t *record,
         (record->uuid_length == 0U || record->uuid_length == 2U ||
          record->uuid_length == 4U || record->uuid_length == 16U) &&
         record->advertisement_length <= CERBERUS_BLE_ADVERTISEMENT_MAX_LENGTH &&
+        cerberus_s3_ble_response_storage_valid(source) &&
         source->generation == meta->status.generation &&
         source->address_type == record->address_type &&
         memcmp(source->address, record->address, 6U) == 0 &&

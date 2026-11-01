@@ -16,6 +16,7 @@ enum { UI_BACK_Y=426, UI_BACK_HEIGHT=44 };
 static int file_mode;
 static bool ble_selection_valid, ble_selected_raw_frozen, ble_selected_original_time64_valid;
 static uint64_t ble_selected_original_ms64, ble_selected_source_ceiling_ms64;
+static uint64_t ble_selected_scan_epoch;
 static cerberus_c5_ble_result_t ble_selected_result;
 static cerberus_findmy_monitor_record_t ble_findmy_selected;
 typedef struct { cerberus_s3_ble_discovery_inventory_t inventory; } ble_discovery_live_store_t;
@@ -86,6 +87,7 @@ static void seed(void)
         .generation=r->generation,.index=r->index,.observed_ms=9000};
     ble_selected_result=r->peer;ble_selection_valid=ble_selected_raw_frozen=ble_selected_original_time64_valid=true;
     ble_selected_original_ms64=9000;ble_selected_source_ceiling_ms64=9500;
+    ble_selected_scan_epoch=0;
     current_page=UI_PAGE_BLE;ble_mode=UI_BLE_MODE_MENU;allocation_fails=false;start_error=copy_error=ESP_OK;
     io=(cerberus_ble_archive_io_status_t){0};privacy_mask=false;
     memset(&companion,0,sizeof(companion));dual_ble_ui_store=NULL;dual_ble_ui_detail=false;
@@ -97,6 +99,46 @@ static void seed(void)
 static void complete(void)
 { io.state=CERBERUS_BLE_ARCHIVE_IO_COMPLETE;io.worker_active=false;io.result_ready=true;
   strcpy(io.file_name,"B00001.BLE");ble_archive_tick(false); }
+static void seed_response(void)
+{
+    seed();
+    cerberus_s3_ble_discovery_record_t *r=&discovery.inventory.entries[0].record;
+    r->observed_ms=9000;
+    cerberus_s3_ble_discovery_evidence_t *e=&r->focus.discovery;
+    memcpy(e->address,r->peer.address,6);e->address_type=r->peer.address_type;e->generation=r->generation;
+    e->advertisement_sequence=e->raw_advertisement_sequence=1;e->scan_response_sequence=2;
+    e->advertisement_observed_ms=9000;e->scan_response_observed_ms=9100;
+    e->flags=CERBERUS_S3_BLE_EVIDENCE_ADV_COMPLETE|CERBERUS_S3_BLE_EVIDENCE_ADV_VALID|
+        CERBERUS_S3_BLE_EVIDENCE_RAW_COMPLETE|CERBERUS_S3_BLE_EVIDENCE_RESPONSE_VALID;
+    e->scan_response.length=e->scan_response.original_length=5;e->scan_response.event_type=4;
+    memcpy(e->scan_response.data,"\004\011RSP",5);
+    ble_findmy_selected.focus=r->focus;ble_selected_scan_epoch=discovery.inventory.entries[0].epoch;
+}
+static void test_response_capture(void)
+{
+    seed_response();ble_archive_open_menu();CHECK(ble_archive_capture(BLE_ARCHIVE_BOTH)==ESP_OK);
+    const cerberus_ble_archive_row_t *row=&ble_archive_view->incoming.rows[0];
+    CHECK(row->response_state==CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT&&row->response_source_uptime_ms==9100);
+    CHECK(row->original_source_uptime_ms==9000&&row->response_length==5&&!memcmp(row->response,"\004\011RSP",5));
+    CHECK(ble_archive_view->incoming.rows[1].response_state==CERBERUS_BLE_ARCHIVE_RESPONSE_UNKNOWN);
+    memset(&discovery.inventory.entries[0].record.focus,0,sizeof(discovery.inventory.entries[0].record.focus));
+    CHECK(ble_archive_capture(BLE_ARCHIVE_S3_SELECTED)==ESP_OK&&ble_archive_view->incoming.count==1);
+    CHECK(row->scan_epoch_valid&&row->scan_epoch==8&&row->response_state==CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT);
+    request_selected();CHECK(saved.rows[0].response_state==CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT);
+    CHECK(saved.rows[0].response_sequence==2&&saved.rows[0].response_source_uptime_ms==9100);
+    complete();CHECK(ble_archive_view->document.rows[0].response_length==5);
+    /* Missing full session provenance cannot be borrowed from a later list. */
+    seed_response();ble_archive_open_menu();ble_selected_scan_epoch=0;
+    CHECK(ble_archive_capture(BLE_ARCHIVE_S3_SELECTED)==ESP_OK&&
+        ble_archive_view->incoming.rows[0].response_state==CERBERUS_BLE_ARCHIVE_RESPONSE_UNKNOWN);
+    seed_response();ble_archive_open_menu();
+    ble_findmy_selected.focus.discovery.advertisement_sequence=3;
+    ble_findmy_selected.focus.discovery.scan_response_sequence=4;
+    CHECK(ble_archive_capture(BLE_ARCHIVE_S3_SELECTED)==ESP_OK&&
+        ble_archive_view->incoming.rows[0].response_state==CERBERUS_BLE_ARCHIVE_RESPONSE_UNKNOWN);
+    CHECK(ble_archive_view->incoming.rows[0].advertisement_length==3&&
+        !memcmp(ble_archive_view->incoming.rows[0].advertisement,"\002\001\006",3));
+}
 static void test_capture(void)
 {
     seed();ble_archive_open_menu();CHECK(ble_archive_view&&ble_archive_menu);CHECK(strstr(drawn,"SAVE BOTH RECEIVERS"));
@@ -271,7 +313,7 @@ static void test_release_wait(void)
 int main(void)
 {
     test_capture();test_jobs();test_accepted_job_rejected_by_view();test_complete_without_result();
-    test_both_and_c5_footer();test_release_wait();
+    test_both_and_c5_footer();test_release_wait();test_response_capture();
     ble_archive_dispose();CHECK(frees+1==allocations); /* One rejected allocation. */
     printf("%u archive capture/controller checks passed; saves=%u loads=%u copies=%u releases=%u.\n",checks,saves,loads,copies,releases);return 0;
 }

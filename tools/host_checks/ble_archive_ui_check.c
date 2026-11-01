@@ -213,7 +213,7 @@ static void test_raw(const char *directory)
     load(1);CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);CHECK(ble_archive_ui_tap(&viewer,8,150)==BLE_ARCHIVE_UI_REDRAW);
     CHECK(ble_archive_ui_tap(&viewer,64,374)==BLE_ARCHIVE_UI_REDRAW&&viewer.view==BLE_ARCHIVE_UI_RAW);
     clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
-    CHECK(strstr(drawn,"ORIGINAL ADV ONLY / NO RSP")&&strstr(drawn,"FLAGS")&&strstr(drawn,"UUID16 LIST"));
+    CHECK(strstr(drawn,"ADVERTISEMENT *")&&strstr(drawn,"RESPONSE")&&strstr(drawn,"FLAGS")&&strstr(drawn,"UUID16 LIST"));
     CHECK(strstr(drawn,"02 01 06 03 03 0F 18")&&strstr(drawn,"4 COMPLETE FIELDS / PAGE 1 OF 2"));
     preview(directory,"archive-raw");
     CHECK(ble_archive_ui_tap(&viewer,164,374)==BLE_ARCHIVE_UI_REDRAW&&viewer.raw_page==1);
@@ -244,9 +244,62 @@ static void test_raw(const char *directory)
     CHECK(ble_archive_ui_tap(&viewer,64,426)==BLE_ARCHIVE_UI_REDRAW&&viewer.view==BLE_ARCHIVE_UI_LIST);
     CHECK(ble_archive_ui_tap(&viewer,64,426)==BLE_ARCHIVE_UI_BACK);
 }
+static void test_response(const char *directory)
+{
+    seed(1);cerberus_ble_archive_row_t *r=&source.rows[0];
+    r->response_state=CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT;
+    r->response_length=r->response_original_length=5;r->response_event_type=4;
+    memcpy(r->response,"\004\011RSP",5);
+    r->response_original_sequence=11;r->response_sequence=12;
+    r->response_original_observed_ms=999000;r->response_observed_ms=999100;
+    r->response_time_valid=true;r->response_source_uptime_ms=999100;
+    CHECK(cerberus_ble_archive_validate(&source));
+    CHECK(ble_archive_ui_begin(&viewer,1,false)&&ble_archive_ui_complete(&viewer,1,&source,"with-response.BLE"));
+    CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK&&ble_archive_ui_tap(&viewer,8,150)==BLE_ARCHIVE_UI_REDRAW);
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+    CHECK(strstr(drawn,"MATCHED RESPONSE: 5 OF 5 BYTES")&&strstr(drawn,"RSP AGE AT SAVE: 900 ms"));
+    preview(directory,"archive-response-detail");
+    CHECK(ble_archive_ui_tap(&viewer,64,374)==BLE_ARCHIVE_UI_REDRAW&&!viewer.raw_response);
+    CHECK(ble_archive_ui_tap(&viewer,160,60)==BLE_ARCHIVE_UI_NONE);
+    CHECK(ble_archive_ui_tap(&viewer,164,54)==BLE_ARCHIVE_UI_REDRAW&&viewer.raw_response);
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+    CHECK(strstr(drawn,"SAVED RESPONSE")&&strstr(drawn,"04 09 52 53 50")&&strstr(drawn,"COMPLETE NAME"));
+    CHECK(!strstr(drawn,"02 01 06 03 03 0F 18"));preview(directory,"archive-response-raw");
+    memset(viewer.document.rows[0].response,0,sizeof(viewer.document.rows[0].response));
+    CHECK(ble_archive_ui_tap(&viewer,8,54)==BLE_ARCHIVE_UI_REDRAW&&!viewer.raw_response);
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK&&strstr(drawn,"02 01 06 03 03 0F 18"));
+    CHECK(ble_archive_ui_tap(&viewer,164,54)==BLE_ARCHIVE_UI_REDRAW);
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK&&strstr(drawn,"04 09 52 53 50"));
+    /* Frozen bytes survive a replacement of the underlying committed row. */
+    CHECK(viewer.selected.response_sequence==12&&viewer.selected.response_source_uptime_ms==999100);
+    viewer.selected.response_length=31;viewer.selected.response_original_length=255;
+    viewer.selected.response_flags=CERBERUS_BLE_ADVERTISEMENT_TRUNCATED;
+    memset(viewer.selected.response,0xA5,31);viewer.selected.response[0]=254;viewer.selected.response[1]=0xFF;
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK&&strstr(drawn,"31 OF 255 BYTES")&&
+        strstr(drawn,"MALFORMED OR CUT AD AT BYTE 0")&&strstr(drawn,"SOURCE: TRUNCATED"));
+    preview(directory,"archive-response-prefix");
+    CHECK(ble_archive_ui_tap(&viewer,64,426)==BLE_ARCHIVE_UI_REDRAW&&viewer.view==BLE_ARCHIVE_UI_DETAIL);
+    viewer.selected.response_source_uptime_ms=0;viewer.selected_saved_uptime_ms=UINT64_MAX;
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK&&strstr(drawn,"RSP AGE AT SAVE: 18446744073709551615 ms"));
+    preview(directory,"archive-response-max-age");
+    for(unsigned state=0;state<2;++state){
+        load(1);viewer.document.rows[0].response_state=(uint8_t)state;
+        CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK&&ble_archive_ui_tap(&viewer,8,150)==BLE_ARCHIVE_UI_REDRAW);
+        CHECK(ble_archive_ui_tap(&viewer,64,374)==BLE_ARCHIVE_UI_REDRAW);
+        CHECK(ble_archive_ui_tap(&viewer,164,54)==BLE_ARCHIVE_UI_REDRAW);
+        clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+        CHECK(strstr(drawn,state?"NO MATCHED RESPONSE RETAINED":"RESPONSE BYTES / CORRELATION UNAVAILABLE"));
+        CHECK(strstr(drawn,"THIS DOES NOT PROVE NO RESPONSE WAS SENT"));
+        CHECK(!strstr(drawn,"COMPLETE FIELDS")&&!strstr(drawn,"PREV FIELDS"));
+        CHECK(ble_archive_ui_tap(&viewer,164,374)==BLE_ARCHIVE_UI_NONE);
+        preview(directory,state?"archive-response-none":"archive-response-unknown");
+        CHECK(ble_archive_ui_tap(&viewer,64,426)==BLE_ARCHIVE_UI_REDRAW);
+        CHECK(ble_archive_ui_tap(&viewer,64,374)==BLE_ARCHIVE_UI_REDRAW&&!viewer.raw_response);
+    }
+}
 int main(int argc,char **argv)
 {
-    CHECK(argc==2);test_jobs(argv[1]);test_list(argv[1]);test_paint_and_privacy();test_raw(argv[1]);test_receivers(argv[1]);
+    CHECK(argc==2);test_jobs(argv[1]);test_list(argv[1]);test_paint_and_privacy();test_raw(argv[1]);test_receivers(argv[1]);test_response(argv[1]);
     printf("BLE archive UI PASS %u assertions; PSRAM model=%zu bytes; no clock, heap, SD, IO worker or radio linked\n",
         checks,sizeof(ble_archive_ui_store_t));
     return 0;

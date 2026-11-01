@@ -21,7 +21,7 @@ typedef struct {
     uint64_t job_id, painted_saved_uptime_ms, selected_saved_uptime_ms;
     uint64_t painted_age_ms[4], selected_age_ms;
     uint64_t release_started_ms;
-    bool painted_age_valid[4], selected_age_valid;
+    bool painted_age_valid[4], selected_age_valid, raw_response;
     bool job_pending, saving, has_document, paint_valid, selected_valid, release_pending;
     uint8_t page, raw_page, painted_count;
     ble_archive_ui_view_t view;
@@ -82,6 +82,7 @@ static inline bool ble_archive_ui_complete(ble_archive_ui_store_t *store,
     store->has_document = true;
     store->paint_valid = store->selected_valid = false;
     store->page = store->raw_page = 0U;
+    store->raw_response = false;
     store->error = ESP_OK;
     store->view = BLE_ARCHIVE_UI_LIST;
     return true;
@@ -236,9 +237,21 @@ static inline esp_err_t ble_archive_ui_detail(ble_archive_ui_store_t *store)
     ESP_RETURN_ON_ERROR(draw_centered(302, line, UI_MUTED, 1), TAG, "archive epoch");
     snprintf(line, sizeof(line), "GEN %u / INDEX %u / REPORTS %u", row->generation, row->index, row->reports_seen);
     ESP_RETURN_ON_ERROR(draw_centered(320, line, UI_MUTED, 1), TAG, "archive source counters");
-    ESP_RETURN_ON_ERROR(draw_centered(340, "HISTORICAL / NO CURRENT PRESENCE CLAIM", UI_MUTED, 1), TAG, "archive historical scope");
-    ESP_RETURN_ON_ERROR(draw_centered(356, "NO LOCATION OR WALL CLOCK RECORDED", UI_MUTED, 1), TAG, "archive no invented data");
-    ESP_RETURN_ON_ERROR(draw_button(64, 374, 192, 44, "RAW ADV + AD FIELDS"), TAG, "archive raw button");
+    if (row->response_state == CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT) {
+        snprintf(line, sizeof(line), "MATCHED RESPONSE: %u OF %u BYTES", row->response_length,
+            row->response_original_length);
+        ESP_RETURN_ON_ERROR(draw_centered(340, line, UI_TEXT, 1), TAG, "archive response size");
+        if (row->response_time_valid && store->selected_saved_uptime_ms >= row->response_source_uptime_ms)
+            snprintf(line, sizeof(line), "RSP AGE AT SAVE: %llu ms",
+                (unsigned long long)(store->selected_saved_uptime_ms - row->response_source_uptime_ms));
+        else snprintf(line, sizeof(line), "RSP AGE AT SAVE: UNKNOWN");
+    } else {
+        ESP_RETURN_ON_ERROR(draw_centered(340, "NO LOCATION OR WALL CLOCK RECORDED", UI_MUTED, 1), TAG, "archive location scope");
+        snprintf(line, sizeof(line), "%s", row->response_state == CERBERUS_BLE_ARCHIVE_RESPONSE_NONE ?
+            "NO MATCHED RESPONSE RETAINED" : "RESPONSE BYTES / CORRELATION UNAVAILABLE");
+    }
+    ESP_RETURN_ON_ERROR(draw_centered(356, line, UI_MUTED, 1), TAG, "archive response evidence");
+    ESP_RETURN_ON_ERROR(draw_button(64, 374, 192, 44, "RAW ADV / RESPONSE"), TAG, "archive raw button");
     return ble_archive_ui_back("BACK TO SNAPSHOT");
 }
 
@@ -264,19 +277,19 @@ static inline const char *ble_archive_ui_ad_name(uint8_t type)
 /* Structural TLV framing only; the type label does not assert valid field
  * semantics. Preserve malformed raw bytes, show complete preceding fields,
  * and never continue by guessing a length after an invalid boundary. */
-static inline uint8_t ble_archive_ui_fields(const cerberus_ble_archive_row_t *row,
+static inline uint8_t ble_archive_ui_payload_fields(const uint8_t *data, uint8_t size,
     uint8_t offsets[15], uint8_t *bad_offset)
 {
     uint8_t count = 0U, offset = 0U;
     *bad_offset = UINT8_MAX;
-    while (offset < row->advertisement_length) {
-        uint8_t length = row->advertisement[offset];
+    while (offset < size) {
+        uint8_t length = data[offset];
         if (!length) {
-            for (uint8_t i = offset + 1U; i < row->advertisement_length; ++i)
-                if (row->advertisement[i]) { *bad_offset = offset; break; }
+            for (uint8_t i = offset + 1U; i < size; ++i)
+                if (data[i]) { *bad_offset = offset; break; }
             break;
         }
-        if (length > row->advertisement_length - offset - 1U || count >= 15U) {
+        if (length > size - offset - 1U || count >= 15U) {
             *bad_offset = offset; break;
         }
         offsets[count++] = offset;
@@ -285,43 +298,62 @@ static inline uint8_t ble_archive_ui_fields(const cerberus_ble_archive_row_t *ro
     return count;
 }
 
+static inline uint8_t ble_archive_ui_fields(const cerberus_ble_archive_row_t *row,
+    uint8_t offsets[15], uint8_t *bad_offset)
+{ return ble_archive_ui_payload_fields(row->advertisement, row->advertisement_length, offsets, bad_offset); }
+
 static inline esp_err_t ble_archive_ui_raw(ble_archive_ui_store_t *store)
 {
     const cerberus_ble_archive_row_t *row = &store->selected;
+    const bool response = store->raw_response;
+    const bool available = !response || row->response_state == CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT;
+    const uint8_t *data = response ? row->response : row->advertisement;
+    const uint8_t size = !available ? 0U : response ? row->response_length : row->advertisement_length;
+    const uint8_t flags = response ? row->response_flags : row->advertisement_flags;
     uint8_t offsets[15], bad;
-    uint8_t count = ble_archive_ui_fields(row, offsets, &bad);
+    uint8_t count = ble_archive_ui_payload_fields(data, size, offsets, &bad);
     if ((unsigned)store->raw_page * 3U >= count) store->raw_page = 0U;
     char line[53];
-    ESP_RETURN_ON_ERROR(ble_archive_ui_clear("SAVED RAW ADV"), TAG, "archive raw");
-    ESP_RETURN_ON_ERROR(draw_centered(60, "HISTORICAL / ORIGINAL ADV ONLY / NO RSP", UI_MUTED, 1), TAG, "archive raw scope");
-    snprintf(line, sizeof(line), "%u BYTES / EVENT %u / RAW FLAGS %02X", row->advertisement_length,
-        row->advertisement_event_type, row->advertisement_flags);
-    ESP_RETURN_ON_ERROR(draw_centered(80, line, UI_TEXT, 1), TAG, "archive raw metadata");
+    ESP_RETURN_ON_ERROR(ble_archive_ui_clear(response ? "SAVED RESPONSE" : "SAVED RAW ADV"), TAG, "archive raw");
+    ESP_RETURN_ON_ERROR(draw_button(8, 54, 148, 28, response ? "ADVERTISEMENT" : "ADVERTISEMENT *"), TAG, "archive ADV selector");
+    ESP_RETURN_ON_ERROR(draw_button(164, 54, 148, 28, response ? "RESPONSE *" : "RESPONSE"), TAG, "archive RSP selector");
+    if (!available) {
+        ESP_RETURN_ON_ERROR(draw_centered(144, row->response_state == CERBERUS_BLE_ARCHIVE_RESPONSE_NONE ?
+            "NO MATCHED RESPONSE RETAINED" : "RESPONSE BYTES / CORRELATION UNAVAILABLE", UI_TEXT, 1), TAG, "archive absent response");
+        ESP_RETURN_ON_ERROR(draw_centered(176, "NO RESPONSE BYTES IN THIS SAVED OBSERVATION", UI_MUTED, 1), TAG, "archive absent payload");
+        ESP_RETURN_ON_ERROR(draw_centered(204, "THIS DOES NOT PROVE NO RESPONSE WAS SENT", UI_MUTED, 1), TAG, "archive absence scope");
+        return ble_archive_ui_back("BACK TO DETAILS");
+    }
+    if (response) snprintf(line, sizeof(line), "%u OF %u BYTES / EVENT %u / FLAGS %02X", size,
+        row->response_original_length, row->response_event_type, flags);
+    else snprintf(line, sizeof(line), "%u BYTES / EVENT %u / RAW FLAGS %02X", size,
+        row->advertisement_event_type, flags);
+    ESP_RETURN_ON_ERROR(draw_centered(90, line, UI_TEXT, 1), TAG, "archive raw metadata");
     if (bad != UINT8_MAX) snprintf(line, sizeof(line), "MALFORMED OR CUT AD AT BYTE %u", bad);
     else snprintf(line, sizeof(line), "AD BOUNDARIES VALID / FIELD VALUES UNVERIFIED");
-    ESP_RETURN_ON_ERROR(draw_centered(98, line, UI_MUTED, 1), TAG, "archive raw structure");
-    bool truncated = (row->advertisement_flags & CERBERUS_BLE_ADVERTISEMENT_TRUNCATED) != 0U;
-    bool malformed = (row->advertisement_flags & CERBERUS_BLE_ADVERTISEMENT_MALFORMED) != 0U;
+    ESP_RETURN_ON_ERROR(draw_centered(108, line, UI_MUTED, 1), TAG, "archive raw structure");
+    bool truncated = (flags & CERBERUS_BLE_ADVERTISEMENT_TRUNCATED) != 0U;
+    bool malformed = (flags & CERBERUS_BLE_ADVERTISEMENT_MALFORMED) != 0U;
     const char *limits = truncated && malformed ? "SOURCE: TRUNCATED + MALFORMED" : truncated ?
         "SOURCE: TRUNCATED / MISSING BYTES UNKNOWN" : malformed ?
         "SOURCE MARKED MALFORMED / RAW RETAINED" : "RAW FLAGS RETAINED / MISSING BYTES NOT FILLED";
-    ESP_RETURN_ON_ERROR(draw_centered(114, limits, UI_MUTED, 1), TAG, "archive raw limits");
+    ESP_RETURN_ON_ERROR(draw_centered(124, limits, UI_MUTED, 1), TAG, "archive raw limits");
     for (unsigned n = 0U; n < 2U; ++n) {
         size_t used = (size_t)snprintf(line, sizeof(line), "%02u: ", n * 16U);
-        for (unsigned i = n * 16U; i < (n + 1U) * 16U && i < row->advertisement_length; ++i)
-            used += (size_t)snprintf(line + used, sizeof(line) - used, "%02X%s", row->advertisement[i], i % 16U == 15U ? "" : " ");
-        ESP_RETURN_ON_ERROR(draw_centered(136U + n * 18U, line, UI_TEXT, 1), TAG, "archive hex bytes");
+        for (unsigned i = n * 16U; i < (n + 1U) * 16U && i < size; ++i)
+            used += (size_t)snprintf(line + used, sizeof(line) - used, "%02X%s", data[i], i % 16U == 15U ? "" : " ");
+        ESP_RETURN_ON_ERROR(draw_centered(144U + n * 18U, line, UI_TEXT, 1), TAG, "archive hex bytes");
     }
     for (unsigned n = 0U; n < 3U && (unsigned)store->raw_page * 3U + n < count; ++n) {
         unsigned index = (unsigned)store->raw_page * 3U + n;
-        uint8_t offset = offsets[index], length = row->advertisement[offset];
+        uint8_t offset = offsets[index], length = data[offset];
         snprintf(line, sizeof(line), "AD %u / %02X / %s", index + 1U,
-            row->advertisement[offset + 1U], ble_archive_ui_ad_name(row->advertisement[offset + 1U]));
+            data[offset + 1U], ble_archive_ui_ad_name(data[offset + 1U]));
         ESP_RETURN_ON_ERROR(draw_centered(184U + n * 56U, line, UI_TEXT, 1), TAG, "archive field type");
         for (unsigned part = 0U; part < 2U; ++part) {
             size_t used = 0U;
             for (unsigned i = part * 15U; i < (part + 1U) * 15U && i + 1U < length; ++i)
-                used += (size_t)snprintf(line + used, sizeof(line) - used, "%02X ", row->advertisement[offset + 2U + i]);
+                used += (size_t)snprintf(line + used, sizeof(line) - used, "%02X ", data[offset + 2U + i]);
             if (!used) snprintf(line, sizeof(line), "%s", part == 0U ? "[NO VALUE BYTES]" : "");
             ESP_RETURN_ON_ERROR(draw_centered(200U + n * 56U + part * 14U, line, UI_MUTED, 1), TAG, "archive field value");
         }
@@ -394,16 +426,26 @@ static inline ble_archive_ui_action_t ble_archive_ui_tap(ble_archive_ui_store_t 
             store->selected_age_ms = store->painted_age_ms[row];
             store->selected_age_valid = store->painted_age_valid[row];
             store->selected_valid = true; store->paint_valid = false;
-            store->raw_page = 0U; store->view = BLE_ARCHIVE_UI_DETAIL;
+            store->raw_page = 0U; store->raw_response = false; store->view = BLE_ARCHIVE_UI_DETAIL;
             return BLE_ARCHIVE_UI_REDRAW;
         }
     } else if (store->view == BLE_ARCHIVE_UI_DETAIL && store->selected_valid &&
         x >= 64U && x < 256U && y >= 374U && y < 418U) {
-        store->view = BLE_ARCHIVE_UI_RAW; store->raw_page = 0U; return BLE_ARCHIVE_UI_REDRAW;
+        store->view = BLE_ARCHIVE_UI_RAW; store->raw_page = 0U;
+        store->raw_response = false; return BLE_ARCHIVE_UI_REDRAW;
+    } else if (store->view == BLE_ARCHIVE_UI_RAW && store->selected_valid &&
+        y >= 54U && y < 82U && ((x >= 8U && x < 156U) || (x >= 164U && x < 312U))) {
+        store->raw_response = x >= 164U; store->raw_page = 0U; return BLE_ARCHIVE_UI_REDRAW;
     } else if (store->view == BLE_ARCHIVE_UI_RAW && store->selected_valid &&
         y >= 374U && y < 418U && ((x >= 8U && x < 156U) || (x >= 164U && x < 312U))) {
+        if (store->raw_response && store->selected.response_state != CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT)
+            return BLE_ARCHIVE_UI_NONE;
         uint8_t offsets[15], bad;
-        unsigned count = ble_archive_ui_fields(&store->selected, offsets, &bad);
+        unsigned count = store->raw_response ?
+            ble_archive_ui_payload_fields(store->selected.response,
+                store->selected.response_state == CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT ?
+                    store->selected.response_length : 0U, offsets, &bad) :
+            ble_archive_ui_fields(&store->selected, offsets, &bad);
         if (x < 156U) { if (store->raw_page) --store->raw_page; }
         else if (((unsigned)store->raw_page + 1U) * 3U < count) ++store->raw_page;
         return BLE_ARCHIVE_UI_REDRAW;

@@ -93,8 +93,11 @@ static esp_err_t ble_archive_capture(unsigned scope)
             return ESP_ERR_NOT_FOUND;
         if (!cerberus_ble_archive_capture_row(&out->rows[0], &ble_findmy_selected.peer,
                 &ble_findmy_selected.advertisement, ble_findmy_selected.generation,
-                ble_findmy_selected.index, 0U, false, ble_selected_original_ms64,
-                ble_selected_source_ceiling_ms64, ble_selected_original_time64_valid))
+                ble_findmy_selected.index, ble_selected_scan_epoch,
+                ble_selected_scan_epoch != 0U, ble_selected_original_ms64,
+                ble_selected_source_ceiling_ms64, ble_selected_original_time64_valid) ||
+            !cerberus_ble_archive_capture_response(&out->rows[0], &ble_findmy_selected.focus,
+                &ble_findmy_selected.advertisement, ble_findmy_selected.observed_ms))
             return ESP_ERR_INVALID_RESPONSE;
         out->count = 1U;
     } else if (scope == BLE_ARCHIVE_BOTH) {
@@ -109,7 +112,9 @@ static esp_err_t ble_archive_capture(unsigned scope)
             const cerberus_s3_ble_discovery_record_t *record = &entry->record;
             if (!cerberus_ble_archive_capture_row(&out->rows[i], &record->peer,
                     &record->advertisement, record->generation, record->index,
-                    entry->epoch, true, entry->original_source_ms, entry->source_now_ms, true))
+                    entry->epoch, true, entry->original_source_ms, entry->source_now_ms, true) ||
+                !cerberus_ble_archive_capture_response(&out->rows[i], &record->focus,
+                    &record->advertisement, record->observed_ms))
                 return ESP_ERR_INVALID_RESPONSE;
         }
         out->count = s3_count;
@@ -192,7 +197,7 @@ static esp_err_t ble_archive_draw(void)
     ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(0, 0, 320, 480, UI_BACKGROUND), TAG, "archive clear");
     ESP_RETURN_ON_ERROR(draw_header("BLE SD SNAPSHOTS"), TAG, "archive header");
     ESP_RETURN_ON_ERROR(draw_centered(78, "SAVE RETAINED OBSERVATIONS FOR LATER", UI_TEXT, 1), TAG, "archive scope");
-    ESP_RETURN_ON_ERROR(draw_centered(102, "NO GPS REQUIRED / ORIGINAL ADV BYTES", UI_MUTED, 1), TAG, "archive source");
+    ESP_RETURN_ON_ERROR(draw_centered(102, "ORIGINAL ADV + AVAILABLE MATCHED RESPONSE", UI_MUTED, 1), TAG, "archive source");
     ESP_RETURN_ON_ERROR(draw_button(24, 144, 272, 48, "SAVE BOTH RECEIVERS"), TAG, "archive list save");
     ESP_RETURN_ON_ERROR(draw_button(24, 208, 272, 48, "SAVE SELECTED S3 ROW"), TAG, "archive selected save");
     ESP_RETURN_ON_ERROR(draw_button(24, 272, 272, 48, "BROWSE SD FILES"), TAG, "archive browse");

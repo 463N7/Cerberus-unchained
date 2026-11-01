@@ -179,6 +179,10 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
         if (!dual_ble_ui_visible_count) ESP_RETURN_ON_ERROR(draw_centered(208, view.count ?
             "NO CONFIRMED RECENT C5 RESULTS" : view.live_updates ? "WAITING FOR C5 DISCOVERIES" :
             "WAITING FOR A COMPLETED C5 SWEEP", UI_MUTED, 1), TAG, "C5 BLE empty");
+        if (view.inventory_known) snprintf(line, sizeof(line), "BANK REPLACED %lu / DROPPED %lu",
+            (unsigned long)view.inventory_replaced, (unsigned long)view.inventory_dropped);
+        else snprintf(line, sizeof(line), "BANK INVENTORY COUNTS UNAVAILABLE");
+        ESP_RETURN_ON_ERROR(draw_centered(318, line, UI_MUTED, 1), TAG, "C5 BLE inventory");
         ESP_RETURN_ON_ERROR(draw_small_button(8, 326, 148, 32, "PREVIOUS"), TAG, "C5 BLE previous");
         ESP_RETURN_ON_ERROR(draw_small_button(164, 326, 148, 32, "NEXT"), TAG, "C5 BLE next");
         if (view.has_first_result) snprintf(line, sizeof(line), "FIRST RESULTS IN %lu ms", (unsigned long)view.first_result_ms);

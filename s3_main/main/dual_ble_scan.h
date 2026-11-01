@@ -39,6 +39,7 @@ typedef struct {
     /* One frozen wire row only; the existing staging bank remains the sole
      * unpublished inventory. No queued snapshots or additional full bank. */
     cerberus_dual_ble_snapshot_status_t snapshot;
+    cerberus_dual_ble_snapshot_inventory_t pending_inventory;
     cerberus_dual_ble_snapshot_row_t snapshot_row;
     uint64_t snapshot_request_id, snapshot_request_started_ms, next_snapshot_ms;
     uint64_t published_epoch, published_boot_id, track_request_ms, next_poll_ms, last_tick_ms;
@@ -47,11 +48,15 @@ typedef struct {
      * and latency to its first new nonempty C5 publication. Retained rows do
      * not set this metric; it is not an observation/RSSI timestamp. */
     uint32_t sweeps, snapshots, first_result_ms;
+    /* Counts from the exact last published frozen bank / RF sweep. Unknown
+     * is explicit; these are replacement/drop events, not unique devices. */
+    uint32_t inventory_replaced, inventory_dropped;
     uint64_t discovery_started_ms;
     esp_err_t error;
-    uint8_t phase, count, read_index, copied, retries, published_generation;
+    uint8_t phase, count, read_index, copied, retries, published_generation, inventory_retries;
     bool enabled, extended, has_track, stop_requested;
     bool has_first_result, live_updates, discovery_clock_valid, snapshot_anchor_valid, snapshots_capable;
+    bool inventory_known, inventory_replacement_enabled, pending_inventory_known, inventory_query_enabled;
 } cerberus_dual_ble_scan_t;
 typedef struct {
     bool enabled, attached, receiving, reading, stopping, extended;
@@ -59,6 +64,8 @@ typedef struct {
     uint32_t sweeps;
     uint32_t snapshots, first_result_ms;
     bool has_first_result, live_updates;
+    uint32_t inventory_replaced, inventory_dropped;
+    bool inventory_known, inventory_replacement_enabled;
     esp_err_t error;
 } cerberus_dual_ble_view_t;
 typedef struct {

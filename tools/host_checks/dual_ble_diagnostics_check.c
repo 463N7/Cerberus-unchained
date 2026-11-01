@@ -131,11 +131,18 @@ int main(void)
     assert(strstr(printed,"dual_ble_s3_rssi=-44")&&strstr(printed,"independent_received_reports"));
     cerberus_dual_ble_diagnostics_t input=out;input.c5_sweeps=123;
     input.c5_snapshots=UINT32_MAX;input.c5_first_result_ms=UINT32_MAX;input.c5_has_first_result=true;
+    input.c5_inventory_known=input.c5_inventory_replacement_enabled=true;
+    input.c5_inventory_replaced=UINT32_MAX;input.c5_inventory_dropped=123456;
     cerberus_dual_ble_diagnostics_publish(&input,200);input.c5_sweeps=999;
     cerberus_dual_ble_diagnostics_get(&out);assert(out.c5_sweeps==123);
     assert(out.c5_snapshots==UINT32_MAX&&out.c5_first_result_ms==UINT32_MAX);
+    assert(out.c5_inventory_known&&out.c5_inventory_replacement_enabled&&
+        out.c5_inventory_replaced==UINT32_MAX&&out.c5_inventory_dropped==123456);
     printed[0]=0;reads=scanner_reads+host_reads;print_dual_ble();assert(scanner_reads+host_reads==reads);
     assert(strstr(printed,"dual_ble_c5_snapshots=4294967295")&&strstr(printed,"dual_ble_c5_first_result_ms=4294967295"));
+    assert(strstr(printed,"dual_ble_c5_inventory_replaced=4294967295")&&
+        strstr(printed,"dual_ble_c5_inventory_dropped=123456")&&
+        strstr(printed,"last_published_bank_not_unique_devices_or_RF_loss"));
     published.sequence=UINT64_MAX-1;cerberus_dual_ble_diagnostics_publish(&input,201);
     cerberus_dual_ble_diagnostics_get(&out);assert(out.sequence==UINT64_MAX&&!out.sequence_saturated);
     cerberus_dual_ble_diagnostics_publish(NULL,-1);cerberus_dual_ble_diagnostics_get(&out);

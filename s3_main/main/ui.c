@@ -693,6 +693,7 @@ static cerberus_findmy_monitor_t *ble_findmy_monitor;
 static cerberus_findmy_monitor_record_t ble_findmy_selected;
 static bool ble_selected_from_monitor, ble_selected_raw_frozen;
 static bool ble_selected_original_time64_valid;
+static uint64_t ble_selected_scan_epoch;
 static uint64_t ble_selected_original_ms64;
 static uint64_t ble_selected_source_ceiling_ms64;
 static bool ble_findmy_running, ble_findmy_scan_owned, ble_findmy_stopping;
@@ -9622,6 +9623,7 @@ static void handle_ble_tap(uint16_t x, uint16_t y)
             ble_selected_from_monitor = false;
             ble_selected_raw_frozen = false;
             ble_selected_original_time64_valid = false;
+            ble_selected_scan_epoch = 0U;
             ble_selected_result = ble_results[row];
             ble_selected_focus = focus;
             ble_selected_scan_index = ble_result_indexes[row];

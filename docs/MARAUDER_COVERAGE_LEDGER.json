@@ -1,7 +1,7 @@
 {
   "format": 2,
-  "audit_checkpoint": "rev99-source-preparation",
-  "scope": "Editorial source/workflow status for the rev99 dual-receiver BLE archive candidate. Source/host checks do not establish installation, native performance or RF/SD acceptance. See DUAL_RADIO_REV99.md for current build/installation status, BLE_SD_SNAPSHOTS.md for the saved-report workflow, DUAL_RADIO_SCANNING.md for current development, and CONTRIBUTION_REV93.md for historical contribution scope.",
+  "audit_checkpoint": "rev100-source-preparation",
+  "scope": "Editorial source/workflow status for the rev100 passive BLE response-archive and bounded C5 retention candidate; rev99 is the preceding installed checkpoint. Source/host checks do not establish installation, native performance or RF/SD acceptance. See DUAL_RADIO_REV100.md for current build/installation evidence, BLE_SD_SNAPSHOTS.md for the saved-report workflow, BLE_RECEIVE_LIST_PARITY.md for receive limits, and CONTRIBUTION_REV93.md for historical contribution scope. Marauder develop was rechecked unchanged at 79cc6bcba1db6679baee1dab2b0c1ad5010e6363 on 2026-11-01.",
   "contribution_summary": "docs/CONTRIBUTION_REV93.md",
   "prior_public_contribution": "docs/CONTRIBUTION_REV81.md",
   "upstream": "https://github.com/justcallmekoko/ESP32Marauder",
@@ -317,9 +317,9 @@
       "family": "ble_general_scanning",
       "status": "partial",
       "cerberus_evidence": "docs/BLE_SD_SNAPSHOTS.md",
-      "next_gap": "Ordinary BLE discovery retains separate simultaneous S3/C5 banks with C5 sort/recent controls and rev98 live snapshot publication. Rev99 adds one source-aware SD report of up to 64 observations, copied C5 bank/selection provenance and v1 LEGACY compatibility. S3 sweep-peak/exact historical age and C5 latest-ADV/age-upper-bound evidence stay distinct; normal owner cleanup precedes the immutable file worker. Codec/mapper and worker host checks cover source collisions, corruption, age bounds and concurrent release, but physical save/reopen, live controls, real latency and repeated scan transitions remain open. Source filtering, longer history/session recording, complete raw/scan-response evidence, C5 family behavior, upstream suboptions and extended/coded receive acceptance remain incomplete or unverified; see DUAL_RADIO_REV99.md for current validation and installation status.",
-      "s3_role": "S3 owns live BLE discovery, family evidence, presentation and storage; it validates separate C5 snapshots, freezes each receiver's retained evidence and provenance into a bounded report, drains normal radio owners and submits an immutable SD worker copy.",
-      "c5_role": "C5 firmware 62 supplies passive live snapshots in BLE-only mode. Committed boot/epoch/generation/index metadata accompanies copied published or selected rows into the archive, with latest original-ADV bytes/RSSI and conservative age bounds distinct from aggregate peer hints. Mixed Recon/Wardriving retain C5 Wi-Fi plus S3 BLE.",
+      "next_gap": "Rev100 source preparation preserves separate simultaneous S3/C5 banks and adds bounded C5 protocol-v2 DISCOVERY replacement at 32 rows; firmware 63 exposes frozen per-sweep replaced/dropped counts, unavailable on older peers or failed optional reads. Existing live snapshot and sort/recent controls remain. V3 SD reports retain up to 64 source observations and separately bound S3 response prefixes (31 of up to 255 delivered bytes), original/response times and selected full epochs; old v1/v2 and C5 response state remain UNKNOWN. Physical dense retention, response-only discovery, save/reopen, controls, latency and repeated transitions remain pending. Full payload/history recording, C5 family/response evidence, upstream suboptions and extended/coded acceptance remain incomplete or unverified; see DUAL_RADIO_REV100.md. Rev99 is the preceding installed checkpoint.",
+      "s3_role": "S3 owns discovery, family evidence, presentation and storage; preserves admitted matching response bytes and original raw sequence through frozen history/selection, validates separate C5 snapshots and optional counters, and submits immutable v3 SD reports after normal radio-owner cleanup.",
+      "c5_role": "Firmware 63 adds bounded oldest-qualifying replacement only for protocol-v2 passive DISCOVERY and freezes replaced/dropped counts with rows; TRACK, v1 and other scan owners keep prior capacity behavior. C5 retains latest original-ADV bytes/RSSI, copied full-width provenance and conservative age bounds, without scan responses or borrowed S3 family eligibility. Mixed Recon/Wardriving retain C5 Wi-Fi plus S3 BLE.",
       "related_menu_entries": [],
       "related_cli_commands": [],
       "cerberus_code": [
@@ -1070,7 +1070,7 @@
       "family": "ble_tag_and_device_scanning",
       "status": "partial",
       "cerberus_evidence": "docs/WATCH_SIGNATURES.md",
-      "next_gap": "Selected or retained typed BLE rows can be saved as independent .BLE archives and reopened for historical raw-ADV inspection. Physical save/reboot/reopen acceptance, Marauder JSON compatibility, raw response persistence and full receive/tracking parity remain open. Loaded rows never become live action targets.",
+      "next_gap": "Selected or retained typed S3/C5 BLE observations can be saved as independent .BLE archives. Rev100 v3 separately preserves an admitted matched S3 response prefix and its source time when frozen raw identity, sequence, full epoch and clock proof match; old v1/v2 and C5 response availability remain UNKNOWN. Physical response formats, selected/both-bank save/reboot/reopen, Marauder JSON compatibility and full receive/tracking parity remain open. Loaded rows never become live action targets. See BLE_SD_SNAPSHOTS.md and DUAL_RADIO_REV100.md; rev99 remains the preceding installed checkpoint.",
       "s3_role": "S3 receives BLE broadcasts and applies typed classifiers, evidence display and sessions.",
       "c5_role": "C5 can survey Wi-Fi concurrently; it does not supply the current BLE inventory.",
       "related_menu_entries": [],
@@ -2316,7 +2316,7 @@
         56,
         57
       ],
-      "next_gap": "Rev99 extends the earlier BLE snapshot workflow to one report of up to 64 source observations, 32 per receiver, or one frozen S3/C5 selection. The existing browser reads new v2 reports and old v1 files labelled LEGACY; source, RSSI semantics and historical exact/upper-bound ages remain explicit. Loaded rows never enter live scan/active lists. Physical save/reopen, source filters, broader history/session recording, Marauder AirTag JSON import, AP/SSID editing/persistence, MAC controls and profile parity remain open. See BLE_SD_SNAPSHOTS.md and DUAL_RADIO_REV99.md; earlier physical evidence retains its original scope."
+      "next_gap": "Rev100 source preparation extends the existing 64-row dual-receiver .BLE report with separately bound S3 matching-response prefixes (up to 31 of 255 delivered bytes), preserved selected full epochs and independent original/response historical times. Existing v1/v2 files remain readable with response UNKNOWN; C5 retains original-ADV-only evidence. C5 v2 DISCOVERY gains bounded replacement and frozen bank counters from firmware 63. Loaded rows never enter live scan/active lists. Physical dense retention/save/reopen, source filters, broader history/session recording, full payloads, Marauder AirTag JSON import, AP/SSID editing/persistence, MAC controls and profile parity remain open. See BLE_SD_SNAPSHOTS.md and DUAL_RADIO_REV100.md; rev99 installation and earlier physical evidence retain their original scope."
     },
     {
       "name": "storage_and_transfer",
@@ -2350,7 +2350,7 @@
         11,
         14
       ],
-      "next_gap": "Rev99 retains asynchronous immutable-PSRAM BLE save/open with the v2 maximum of 9248 encoded bytes and v1 compatibility. Normal radio owners drain before save submission; completed-document reader pins keep large copies outside the interrupt-disabled lock and defer release/new jobs safely. Exclusive .TMP creation, full write/flush/sync/close before .BLE publication and complete-file validation remain. Host faults do not establish physical SD save/reopen, native memory/stack headroom, power-loss or prolonged-use acceptance. Broader export/upload, AP/SSID persistence and backup/restore parity remain open; see BLE_SD_SNAPSHOTS.md and DUAL_RADIO_REV99.md, while older file-tool evidence retains its original scope."
+      "next_gap": "Rev100 source preparation extends asynchronous immutable-PSRAM BLE save/open to v3, at most 13,344 encoded bytes, while preserving v1/v2 readers and explicit old-file response UNKNOWN. Separate S3 ADV/response bytes, correlation provenance and independent historical times remain read-only evidence; C5 response data is unavailable. Normal owners drain before worker submission, reader pins keep large copies outside the critical section, and exclusive .TMP/write/flush/sync/close/validated .BLE publication remain. Host faults do not establish physical SD save/reopen, native peak memory/stack headroom, power-loss or prolonged-use acceptance. Broader export/upload, AP/SSID persistence and backup/restore parity remain open; see BLE_SD_SNAPSHOTS.md and DUAL_RADIO_REV100.md. Rev99 is the preceding installed checkpoint."
     },
     {
       "name": "settings_and_device_control",

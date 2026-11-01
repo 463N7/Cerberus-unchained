@@ -20,6 +20,10 @@ static void dual_ble_publish_diagnostics(uint64_t now, bool asleep)
      * number, freshness or arrival time of over-the-air advertisements. */
     out.c5_snapshots = view.snapshots; out.c5_live_updates = view.live_updates;
     out.c5_first_result_ms = view.first_result_ms; out.c5_has_first_result = view.has_first_result;
+    out.c5_inventory_known = view.inventory_known;
+    out.c5_inventory_replacement_enabled = view.inventory_replacement_enabled;
+    out.c5_inventory_replaced = view.inventory_replaced;
+    out.c5_inventory_dropped = view.inventory_dropped;
     if (dual_ble_ui_store) {
         out.c5_phase = dual_ble_ui_store->phase;
         out.c5_state = dual_ble_ui_store->remote.state;

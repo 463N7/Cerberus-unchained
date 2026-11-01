@@ -1,5 +1,6 @@
 #undef NDEBUG
 #include "cerberus_watch_capture.h"
+#include "../../c5_firmware/main/ble_inventory_admission.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -47,7 +48,8 @@ static uint32_t scan_callback_epoch;
  * scanner admission and callback branches compiled; companion lifecycle and
  * typed-target behavior are exercised by check_dual_ble.py. */
 static bool dual_attached,dual_radio_active,dual_track_seen;
-static uint8_t dual_mode,dual_address[6],dual_address_type,dual_generation;
+static uint8_t dual_mode,dual_address[6],dual_address_type,dual_generation,dual_version;
+static cerberus_ble_inventory_admission_t scan_inventory;
 static uint32_t dual_track_ms,dual_track_reports;
 static int8_t dual_track_rssi;
 static void dual_expire_locked(void){CHECK(locked&&!dual_attached);}

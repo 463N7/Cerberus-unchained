@@ -19,6 +19,12 @@ static const cerberus_dual_ble_provenance_t provenance={
 static void assert_exact_times_unknown(const cerberus_ble_archive_row_t *row)
 {
     assert(!row->source_time_valid && !row->original_source_uptime_ms && !row->copy_ceiling_ms);
+    assert(row->response_state==CERBERUS_BLE_ARCHIVE_RESPONSE_UNKNOWN);
+    assert(!row->response_length && !row->response_original_length && !row->response_event_type &&
+        !row->response_flags && !row->response_sid && !row->response_sid_valid && !row->response_time_valid &&
+        !row->response_original_sequence && !row->response_sequence && !row->response_original_observed_ms &&
+        !row->response_observed_ms && !row->response_source_uptime_ms);
+    for(unsigned i=0;i<sizeof(row->response);++i)assert(!row->response[i]);
 }
 static void reject_unchanged(const cerberus_dual_ble_row_t *source,
     const cerberus_dual_ble_provenance_t *identity)
@@ -65,6 +71,7 @@ int main(void)
     assert(decoded.rows[0].receiver_boot_id==provenance.boot_id && decoded.rows[0].scan_epoch==provenance.epoch);
     assert(decoded.rows[0].advertisement_flags==source.raw_flags && !memcmp(decoded.rows[0].advertisement,source.raw,31));
     assert(cerberus_ble_archive_age_upper_at_save(&decoded,0,&age) && age==7400);
+    assert_exact_times_unknown(&decoded.rows[0]);
 
     source=observation();source.request_started_ms=0;source.callback_age_ms=0;
     assert(cerberus_dual_ble_archive_capture_row(&row,&source,&provenance,0));
@@ -105,6 +112,6 @@ int main(void)
     source.name[32]=0;
     assert(cerberus_dual_ble_archive_capture_row(&row,&source,&provenance,500));
     assert(strlen(row.name)==32);
-    puts("C5 archive capture: frozen identity, raw/aggregate separation, v2 round-trip, checked age bounds and transactional rejection passed");
+    puts("C5 archive capture: frozen identity, raw/aggregate separation, v3 round-trip with UNKNOWN response, checked age bounds and transactional rejection passed");
     return 0;
 }

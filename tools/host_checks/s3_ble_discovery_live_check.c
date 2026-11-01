@@ -127,6 +127,7 @@ static void first_results_and_frozen_tap(const char *prefix)
     CHECK(ble_selected_result.address[0]==11&&ble_selected_result.address_type==0);
     CHECK(!memcmp(&ble_selected_result,&selected.record.peer,sizeof(ble_selected_result)));
     CHECK(ble_selected_original_time64_valid&&ble_selected_original_ms64==1050);
+    CHECK(ble_selected_scan_epoch==selected.epoch&&ble_selected_scan_epoch!=0);
     CHECK(ble_selected_source_ceiling_ms64==selected.source_now_ms&&ble_selected_source_ceiling_ms64==1050);
     CHECK(discovery_native.start==1&&live_commands==0&&starts==0);
     CHECK(discovery_ui_allocations==1);

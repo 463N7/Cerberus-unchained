@@ -137,6 +137,31 @@ int main(void)
     s.enabled=false;
     for(unsigned tick=0;tick<20U&&!cerberus_dual_ble_released(&s);++tick)integration_tick(&i,&s);
     assert(cerberus_dual_ble_released(&s)&&!dual_attached&&starts==1&&!stops);
+    /* Dense reports run through the actual C5 callback/admission policy and
+     * frozen wire commands. A later replacement during the download cannot
+     * alter either the published rows or their published counter cohort. */
+    integration_reset(&i,&s,false);
+    for(unsigned tick=0;tick<20U&&!i.rf_started_ms;++tick)integration_tick(&i,&s);
+    uint8_t raw[]={2,1,6};
+    struct ble_gap_disc_desc dense={.addr={{2,2,3,4,5,6},1},.rssi=-70,.event_type=0,
+        .data=raw,.length_data=sizeof(raw)};
+    for(unsigned address=2;address<=33;++address){
+        dense.addr.val[0]=(uint8_t)address;++now_ms;
+        record_advertisement(&dense,scan_callback_epoch,(int64_t)now_ms*1000LL);
+    }
+    assert(scan_status.stored_count==32&&scan_inventory.replaced==1);
+    for(unsigned tick=0;tick<700U&&!s.snapshots;++tick)integration_tick(&i,&s);
+    assert(s.snapshots==1&&s.count==32&&s.inventory_known&&s.inventory_replacement_enabled);
+    assert(s.inventory_replaced==1&&!s.inventory_dropped&&scan_inventory.replaced==2);
+    cerberus_dual_ble_row_t painted;cerberus_dual_ble_provenance_t painted_source;
+    assert(cerberus_dual_ble_copy_row(&s,1,&painted,&painted_source)&&painted.address[0]==2);
+    for(unsigned tick=0;tick<700U&&s.snapshots<2;++tick)integration_tick(&i,&s);
+    assert(s.snapshots==2&&s.inventory_known&&s.inventory_replaced==2);
+    assert(cerberus_dual_ble_copy_row(&s,1,&row,&source)&&row.address[0]==1);
+    assert(painted.address[0]==2&&painted_source.boot_id==source.boot_id&&painted_source.epoch==source.epoch);
+    cerberus_dual_ble_stop(&s);
+    for(unsigned tick=0;tick<50U&&!cerberus_dual_ble_released(&s);++tick)integration_tick(&i,&s);
+    assert(cerberus_dual_ble_released(&s)&&!dual_attached);
     puts("Actual C5 service/callback + S3 coordinator: live immutable readout, lost-BEGIN age, final 8s sweep, Stop and v1 completed-bank fallback passed");
     return 0;
 }

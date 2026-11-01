@@ -9,7 +9,8 @@
  * This is a saved snapshot, not a callback stream or a live scanner bank. */
 enum {
     CERBERUS_BLE_ARCHIVE_LEGACY_VERSION = 1,
-    CERBERUS_BLE_ARCHIVE_VERSION = 2,
+    CERBERUS_BLE_ARCHIVE_V2_VERSION = 2,
+    CERBERUS_BLE_ARCHIVE_VERSION = 3,
     CERBERUS_BLE_ARCHIVE_MAX_ROWS_PER_RECEIVER = 32,
     CERBERUS_BLE_ARCHIVE_MAX_ROWS = 64,
     CERBERUS_BLE_ARCHIVE_NAME_MAX = 32,
@@ -18,8 +19,10 @@ enum {
     CERBERUS_BLE_ARCHIVE_HEADER_SIZE = 32,
     CERBERUS_BLE_ARCHIVE_LEGACY_ROW_SIZE = 128,
     CERBERUS_BLE_ARCHIVE_LEGACY_MAX_SIZE = 4128,
-    CERBERUS_BLE_ARCHIVE_ROW_SIZE = 144,
-    CERBERUS_BLE_ARCHIVE_MAX_SIZE = 9248,
+    CERBERUS_BLE_ARCHIVE_V2_ROW_SIZE = 144,
+    CERBERUS_BLE_ARCHIVE_V2_MAX_SIZE = 9248,
+    CERBERUS_BLE_ARCHIVE_ROW_SIZE = 208,
+    CERBERUS_BLE_ARCHIVE_MAX_SIZE = 13344,
     CERBERUS_BLE_ARCHIVE_RSSI_UNAVAILABLE = 127,
 };
 enum {
@@ -30,6 +33,11 @@ enum {
 enum {
     CERBERUS_BLE_ARCHIVE_RSSI_SWEEP_PEAK = 0,
     CERBERUS_BLE_ARCHIVE_RSSI_LATEST_ADV = 1,
+};
+enum {
+    CERBERUS_BLE_ARCHIVE_RESPONSE_UNKNOWN = 0,
+    CERBERUS_BLE_ARCHIVE_RESPONSE_NONE = 1,
+    CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT = 2,
 };
 
 typedef struct {
@@ -46,7 +54,7 @@ typedef struct {
     uint8_t peer_flags;
     uint8_t uuid_length, uuid[CERBERUS_BLE_ARCHIVE_UUID_MAX];
     /* Original retained ADV only. Malformed/truncated/unknown bytes and flag
-     * bits remain evidence. No raw scan-response bytes are available here. */
+     * bits remain evidence. A matched response is stored separately below. */
     uint8_t advertisement_length, advertisement[CERBERUS_BLE_ARCHIVE_ADV_MAX];
     uint8_t advertisement_event_type, advertisement_flags;
     uint16_t reports_seen;
@@ -67,6 +75,18 @@ typedef struct {
     uint8_t receiver, rssi_kind;
     uint64_t age_upper_at_save_ms, receiver_boot_id;
     bool age_upper_valid;
+    /* UNKNOWN includes old files, C5/LEGACY and unavailable correlation proof.
+     * NONE means this frozen S3 original has no admitted matched response.
+     * PRESENT is bound to this row's typed address/generation and the original
+     * sequence/time below. Original/response bytes and source clocks never
+     * replace each other. Non-PRESENT fields are all zero. */
+    uint8_t response_state, response_length, response_original_length;
+    uint8_t response_event_type, response_flags, response_sid;
+    bool response_sid_valid, response_time_valid;
+    uint32_t response_original_sequence, response_sequence;
+    uint32_t response_original_observed_ms, response_observed_ms;
+    uint64_t response_source_uptime_ms;
+    uint8_t response[CERBERUS_BLE_ARCHIVE_ADV_MAX];
 } cerberus_ble_archive_row_t;
 
 typedef struct {
@@ -77,8 +97,10 @@ typedef struct {
 
 bool cerberus_ble_archive_validate(const cerberus_ble_archive_t *document);
 
-/* Encode v2: header32 + count*row144. Decode also accepts v1 row128/count<=32
- * and maps its unspecified source to LEGACY. Little-endian integers, zero padding
+/* Encode v3: header32 + count*row208. Decode also accepts v2 row144 and
+ * v1 row128/count<=32, mapping v1's unspecified source to LEGACY. Old rows
+ * have UNKNOWN response availability, never a fabricated sequence or time.
+ * Little-endian integers, zero padding
  * and reserved bytes. CRC-32/ISO-HDLC covers ALL encoded bytes, treating the
  * header CRC field as zero. This detects corruption, not authenticity.
  * Encode failure leaves output bytes unchanged and sets *written=0 when given
@@ -101,4 +123,8 @@ bool cerberus_ble_archive_age_at_save(const cerberus_ble_archive_t *document,
  * helper above rejects C5; this helper rejects S3/LEGACY and unknown bounds.
  * Neither helper uses the loading boot's clock. Failure leaves output intact. */
 bool cerberus_ble_archive_age_upper_at_save(const cerberus_ble_archive_t *document,
+    size_t index, uint64_t *age_ms);
+/* Exact historical age of a PRESENT S3 response with a valid independent
+ * source time. Rejects unavailable response/time; leaves output untouched. */
+bool cerberus_ble_archive_response_age_at_save(const cerberus_ble_archive_t *document,
     size_t index, uint64_t *age_ms);
