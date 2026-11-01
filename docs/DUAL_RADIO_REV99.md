@@ -3,8 +3,9 @@
 Rev99 extends the existing passive BLE SD archive to observations from both
 processors. All 120 host suites and five native targets pass on matching,
 unchanged inputs. Full Marauder parity and physical SD/receive acceptance remain
-open. The installed rev98 checkpoint remains distinct from the current
-candidate until installation evidence is added below.
+open. The matched rev99 package is installed on the identified local board with
+verified images and application boot; that evidence is distinct from the
+pending physical feature checks below.
 
 ## Behavior and provenance
 
@@ -84,8 +85,35 @@ retained under `artifacts/rev99-final-native-evidence`. The matched package is
 application hashes match the full-matrix images. Package hashes, chip headers,
 partitions and image bounds pass verification, and the firmware source digest is
 `f9c164b9695af09cb489cc9c337e651f299355e4b9670e19848167071ac18c6a`.
-Installation is pending; expansion builds do not establish expansion-board
-hardware acceptance.
+Expansion builds do not establish expansion-board hardware acceptance.
+
+## Local installation and boot
+
+Implementation commit `d21ad0b989eb2dc2c6df8e0e5f06dbd7b5b1d469` is installed.
+Fresh first-2-MiB S3 and C5 backups were compared with the previously installed
+rev98 images and verified against device flash before the corresponding writes.
+They cover every sector this update writes; higher flash was preserved. The
+temporary bridge, C5 and final S3 each completed three image writes with matching
+hashes and exact chip/MAC checks. No release or PR was published.
+
+The application reports S3 `0.1.0-dev.rev99`, onboard C5 protocol firmware 62,
+an active display buffer, mounted SD, inactive USB storage and no previous-reset
+fault. Settled S3 internal free memory is 134,524 bytes, with a 94,208-byte
+largest block, 1,428,324 bytes of free PSRAM and ten tasks. The read-only command
+sequence, including `ble_archive`, observed 652 remaining console-stack bytes;
+this is not an exhaustive stack bound or directly comparable to a shorter
+command sequence. C5 reports 59 KiB free and a 54 KiB minimum at startup.
+
+Startup SPI reports four initial READY timeouts and four legacy fallbacks,
+with zero mutex timeouts and driver errors. These are retained as observed
+startup counters, not a zero-contention claim. The existing 26,240-byte crash
+record predates this update and remains preserved; it is not a new rev99 fault.
+Radio owners and the archive worker are idle after the read-only checks.
+
+Evidence is in `artifacts/device-rev99/installation-receipt.json`,
+`boot-confirmed.txt`, `settled-boot.txt`, `final-idle.txt`, image-write logs and verified backup
+receipts. This establishes recoverable installation and boot, not touchscreen,
+RF, real-card save/reopen or sustained-operation acceptance.
 
 ## Deferred physical checks
 
@@ -96,7 +124,28 @@ hardware acceptance.
 - Use Back while waiting for receiver release, then run a split Wi-Fi scan.
 - Reboot and reopen a saved report; its historical age must not become current
   age. An older v1 archive should remain readable as LEGACY.
+- Rev98 live C5 updates, corrected CHANGE AP / SCAN return routing and cached
+  C5 AP handoff still need physical acceptance on the current installation.
 
 No GPS or expansion board is required for this workflow. Native builds and
 host fault injection do not establish SD durability, real-card recovery,
 physical response time, sustained coexistence or full upstream parity.
+
+## Next bounded receive work
+
+A read-only audit identified three remaining improvements; none is implemented
+or accepted by this checkpoint:
+
+- Retain the S3 raw scan response already admitted by the existing typed-address,
+  generation, sequence, completeness and SID checks. Preserve its original-report
+  binding and independent receive time through selection and archive. C5 response
+  availability must remain explicit; its current passive callbacks discard responses.
+- Improve C5 full-bank admission. The current first-32 policy drops new typed
+  identities until the next sweep. A bounded replacement policy and honest
+  overflow counters need validation with actual callback/snapshot fixtures and
+  later controlled dense-advertiser testing.
+- Preserve C5 extended-report metadata before increasing every raw payload.
+  SID, PHY, original length and data-status provenance are currently lost during
+  legacy-style projection. Expanding both 32-row producer/snapshot banks from
+  31 to 255 raw bytes alone would add 14,336 C5 internal bytes before metadata;
+  smaller envelope records or selected-record storage need measurement first.

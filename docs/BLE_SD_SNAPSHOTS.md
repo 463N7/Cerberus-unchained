@@ -1,6 +1,6 @@
 # BLE SD snapshots and offline analysis
 
-This guide describes the rev99 source candidate. [The rev99 checkpoint](DUAL_RADIO_REV99.md) records current build, installation and acceptance status separately. Earlier contribution evidence remains in [CONTRIBUTION_REV93.md](CONTRIBUTION_REV93.md); it does not establish physical acceptance of the new dual-receiver report.
+This guide describes rev99. [The rev99 checkpoint](DUAL_RADIO_REV99.md) records the completed build/installation checks and pending physical acceptance separately. Earlier contribution evidence remains in [CONTRIBUTION_REV93.md](CONTRIBUTION_REV93.md); it does not establish physical acceptance of the new dual-receiver report.
 
 Cerberus can save retained S3 and C5 Bluetooth observations in one SD report and reopen them for analysis after leaving the scan or rebooting. It supports the persistence outcome of saving received BLE evidence, including a selected Find My observation. It does not establish full Marauder Save/Load Airtags parity: Cerberus uses its own versioned `.BLE` format, does not import Marauder's JSON files, and never loads saved observations into live targeting, GATT or sound actions.
 

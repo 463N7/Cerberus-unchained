@@ -9,7 +9,7 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev99` (candidate), paired with onboard
+**Current source version: `0.1.0-dev.rev99`, paired with onboard
 C5 protocol firmware revision 62. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -47,7 +47,11 @@ versus C5 latest-ADV RSSI, and exact historical time versus conservative age
 bounds. Old v1 files remain readable as LEGACY. Save freezes selected evidence
 and waits for normal receiver cleanup before starting the SD worker; larger
 result copies run outside the interrupt-disabled critical section. All 120 host
-suites and five native targets pass on matching unchanged inputs. See
+suites and five native targets pass on matching unchanged inputs. The matched
+package is installed with verified images, both chips online and SD mounted.
+Linked fixed RAM increases by 128 S3 bytes and zero C5 bytes; the larger report
+buffers use optional PSRAM. Physical save/reopen and navigation acceptance remain
+pending. See
 [the rev99 checkpoint](docs/DUAL_RADIO_REV99.md)
 for current build, installation and acceptance evidence.
 
@@ -57,7 +61,7 @@ C5 continues receiving, with separate update/sweep counters and first-result
 reader timing. The existing completed-sweep path remains for older C5 peers.
 It also fixes CHANGE AP / SCAN returning a dual-origin AP to the legacy C5-only
 list. All 120 host suites and five native targets pass on matching unchanged
-inputs. The matched package is installed with verified images, both chips online,
+inputs. That matched package was installed with verified images, both chips online,
 display buffer active and SD mounted. S3 linked internal memory is unchanged;
 the BLE coordinator adds 176 bytes in PSRAM and C5 static RAM grows by 3,312
 bytes. Live-result latency, corrected navigation and repeated radio transitions
