@@ -51,8 +51,10 @@ The separate C5 Bluetooth list gains signal/name/scan-order sorting, a
 conservative recent filter and visible age bounds/unknown timing. These presentation
 controls retain copied device identities and do not restart either radio.
 All 120 host suites and five native targets pass on matching unchanged inputs.
-The linked internal-memory increase is 528 bytes. Package verification and
-on-device acceptance are being recorded in the
+The linked internal-memory increase is 528 bytes. The matched rev97 package
+is installed with all image hashes verified, both chips online, display ready
+and SD mounted. Settled internal free RAM is 134,652 bytes before new scans.
+Touchscreen checks of the new controls and handoff remain pending. Evidence is in the
 [rev97 checkpoint](docs/DUAL_RADIO_REV97.md).
 
 Rev96 moves the three CPU-only directory-list banks to lazy, stable PSRAM

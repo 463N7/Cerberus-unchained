@@ -2,8 +2,8 @@
 
 This checkpoint improves passive discovery and selected-result navigation.
 It does not establish full Marauder parity or hardware acceptance of every
-feature. Rev96 remains the installed build until the installation evidence
-below is updated.
+feature. The matched rev97 package is installed with the boot evidence below;
+new touchscreen and RF acceptance remain pending.
 
 ## Behavior
 
@@ -63,6 +63,33 @@ snapshot at 88 bytes (rev96: 80). The measured subset of the console call
 chain uses 2,896 of 4,096 bytes, leaving 1,200 bytes; this is not a whole-SDK
 or interrupt-stack bound. Evidence is under `artifacts/device-rev97` and
 `artifacts/integration/s3-console-stack.json`.
+
+## Installed package
+
+The paired development package is
+`cerberus-unchained-0.1.0-dev.rev97-20261101T051146Z`, built from source commit
+`f010fbaf4967b501cc385395225ce7e172b154b0` with firmware source SHA-256
+`c8890c5bb7d672cfbbd1542de82d26c152bdbb71c703d45b491acb763a25f557`.
+Package hashes, chip headers, partitions and image bounds pass verification.
+All three onboard application hashes match the full native-matrix builds.
+
+Verified first-2-MiB backups of the installed rev96 S3 and C5 were retained;
+they cover every region this update writes. The older complete S3 backup is
+also retained. The bridge, C5 and S3 each verified all three image writes, with
+the expected ROM/stub chip identity checked before writing. Rev97 then booted
+with C5 protocol firmware 61 online, the display buffer active and SD mounted.
+USB storage was inactive and the boot reported no previous reset fault. The
+existing 26,240-byte main crash record predates this update and was preserved.
+
+Initial internal free RAM was 134,740 bytes. A settled display/console read
+showed 134,652 bytes free, a 94,208-byte largest block, 1,428,324 bytes of free
+PSRAM and ten tasks. The console stack low-water mark was 1,100 bytes. Startup
+SPI telemetry recorded four initial READY timeouts with four legacy fallbacks,
+zero mutex timeouts and zero driver errors; these are startup observations,
+not a zero-contention or sustained-load claim. No scan had run at this baseline.
+Backups, write logs, package/native checks and both boot captures are retained
+under `artifacts/device-rev97`, with `installation-receipt.json` summarizing
+their scope. No new PR or public binary release was created for this checkpoint.
 
 ## Physical acceptance still needed
 

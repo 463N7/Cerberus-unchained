@@ -2,9 +2,11 @@
 
 The rev97 source milestone extends the two-radio scanning introduced in rev94
 after the rev93 contribution. It retains onboard C5 protocol firmware 61.
-Rev97's cached C5 handoff and BLE list controls have source review and focused
-host checks; their native-build, installation and physical acceptance are
-separate. The historical rev94-rev96 results below keep their original scope.
+Rev97's cached C5 handoff and BLE list controls pass all 120 host suites and
+five native targets. The matched package is installed and both applications
+boot; the new touchscreen controls and handoff still need physical acceptance.
+The [rev97 checkpoint](DUAL_RADIO_REV97.md) records the exact build, memory and
+installation evidence. The historical rev94-rev96 results below keep their original scope.
 No comparison of speed, coverage or full Marauder parity is claimed.
 
 ## Using the views

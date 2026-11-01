@@ -40,8 +40,10 @@ typed-address collisions, stable ties, inclusive age boundaries, unknown or
 rewound clocks, expiration, publication between paint and tap, privacy and
 pagination shrinkage. Rendered normal, sorted, uncertain-age and empty-filter
 views were inspected. Sorting/filtering calls no SPI or scanner operations.
-The change adds no heap allocation or task. These are source/host checks;
-rev97 native-build, installation and physical control acceptance are separate.
+The change adds no heap allocation or task. The complete rev97 checkpoint
+also passes 120 host suites and five native targets, and the matched firmware
+is installed with both applications booting. Physical control acceptance is
+still pending; see the [rev97 evidence](DUAL_RADIO_REV97.md).
 
 S3 native extended advertisement reception remains disabled. The C5 has an
 extended 1M/coded receive path, but controlled extended-advertiser acceptance
