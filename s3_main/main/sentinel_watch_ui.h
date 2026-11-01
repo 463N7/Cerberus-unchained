@@ -20,6 +20,7 @@ static bool watch_initialized, watch_paused, watch_capture_failed[2];
 static bool watch_recording_context;
 static uint8_t watch_demo_scene, watch_history_page, watch_filters_page;
 static uint32_t watch_seen_capture[2], watch_last_draw, watch_last_read[2];
+static uint64_t watch_seen_ble_epoch;
 static uint16_t watch_last_count[2];
 static bool watch_limited_capture[2];
 static bool watch_capture_waiting[2];
@@ -156,9 +157,13 @@ static esp_err_t watch_stage_extra(sentinel_scan_tool_t tool, uint8_t generation
     memset(&watch_activity_sample, 0, sizeof(watch_activity_sample));
     watch_extra_unavailable[slot] = !watch_extra_supported(tool);
     watch_activity_available = false;
+    if (tool == SENTINEL_SCAN_BLE) {
+        esp_err_t error = live_ble_capture_validate();
+        if (error != ESP_OK) return error;
+    }
     if (watch_extra_supported(tool)) {
         esp_err_t err = tool == SENTINEL_SCAN_BLE ?
-            cerberus_s3_ble_scanner_get_watch_status(generation, &watch_extra_status) :
+            cerberus_s3_ble_scanner_passive_get_watch_status(live_ble_capture_epoch, &watch_extra_status) :
             c5_spi_link_get_watch_status(radio, generation, &watch_extra_status);
         if (err != ESP_OK) return err;
         if (watch_extra_status.radio != radio || watch_extra_status.generation != generation ||
@@ -168,25 +173,25 @@ static esp_err_t watch_stage_extra(sentinel_scan_tool_t tool, uint8_t generation
         if (watch_extra_unavailable[slot] && watch_extra_status.stored_count) return ESP_ERR_INVALID_RESPONSE;
         for (uint8_t i = 0; i < watch_extra_status.stored_count; ++i) {
             err = tool == SENTINEL_SCAN_BLE ?
-                cerberus_s3_ble_scanner_get_watch_result(generation, i, &watch_extra[i]) :
+                cerberus_s3_ble_scanner_passive_get_watch_result(live_ble_capture_epoch, i, &watch_extra[i]) :
                 c5_spi_link_get_watch_result(radio, generation, i, &watch_extra[i]);
             if (err != ESP_OK) return err;
         }
         cerberus_watch_scan_status_payload_t end = {0};
         err = tool == SENTINEL_SCAN_BLE ?
-            cerberus_s3_ble_scanner_get_watch_status(generation, &end) :
+            cerberus_s3_ble_scanner_passive_get_watch_status(live_ble_capture_epoch, &end) :
             c5_spi_link_get_watch_status(radio, generation, &end);
         if (err != ESP_OK) return err;
         if (memcmp(&end, &watch_extra_status, sizeof(end)) != 0) return ESP_ERR_INVALID_STATE;
     }
     if (tool == SENTINEL_SCAN_BLE && watch_activity_supported()) {
-        esp_err_t err = cerberus_s3_ble_scanner_get_activity(generation, &watch_activity_sample);
+        esp_err_t err = cerberus_s3_ble_scanner_passive_get_activity(live_ble_capture_epoch, &watch_activity_sample);
         if (err != ESP_OK) return err;
         if (watch_activity_sample.generation != generation || watch_activity_sample.state != CERBERUS_WATCH_COMPLETE)
             return ESP_ERR_INVALID_RESPONSE;
         watch_activity_available = (watch_activity_sample.flags & CERBERUS_BLE_ACTIVITY_COUNTER_SATURATED) == 0;
     }
-    return ESP_OK;
+    return tool == SENTINEL_SCAN_BLE ? live_ble_capture_validate() : ESP_OK;
 }
 
 static bool watch_extra_has_drone(const uint8_t address[6], uint8_t address_type)
@@ -356,7 +361,9 @@ static bool watch_consume_radio(sentinel_scan_tool_t tool, uint32_t now)
         return false;
     }
     live_scan_record_t *record = &live_records[tool];
-    if (!record->captured || record->captured_ms == watch_seen_capture[slot] ||
+    bool already_consumed = tool == SENTINEL_SCAN_BLE ?
+        live_ble_capture_epoch == watch_seen_ble_epoch : record->captured_ms == watch_seen_capture[slot];
+    if (!record->captured || already_consumed ||
         !record->valid || record->state != SENTINEL_SCAN_COMPLETE || record->saved_generation != record->generation) {
         /* The radio can finish before its ordinary records can be copied.
          * live_observe retries that copy; give it a bounded recovery window
@@ -375,20 +382,20 @@ static bool watch_consume_radio(sentinel_scan_tool_t tool, uint32_t now)
     if ((uint32_t)(now - watch_last_read[slot]) < 1000U) return false;
     watch_last_read[slot] = now;
 
-    /* Stage all raw packets, then confirm the generation before accepting any
-     * matches. A transport failure cannot yield a mixed-generation alert. */
+    /* Stage only the original raw bytes frozen with the accepted S3 rows.
+     * A full native lease fence precedes these copies and all Watch extras. */
     if (tool == SENTINEL_SCAN_BLE && watch_raw_supported()) {
-        esp_err_t err = ESP_OK;
+        esp_err_t err = live_ble_capture_validate();
+        if (err == ESP_OK && record->count && !live_ble_evidence) err = ESP_ERR_INVALID_STATE;
         for (uint16_t i = 0; i < record->count && err == ESP_OK; ++i) {
-            err = cerberus_s3_ble_scanner_get_advertisement(record->saved_generation, i,
-                &watch_advertisements[i]);
-            if (err == ESP_OK && (watch_advertisements[i].address_type != live_store->ble[i].address_type ||
-                memcmp(watch_advertisements[i].address, live_store->ble[i].address, 6) != 0)) err = ESP_ERR_INVALID_RESPONSE;
+            const cerberus_findmy_monitor_record_t *frozen = &live_ble_evidence[i];
+            watch_advertisements[i] = frozen->advertisement;
+            if (frozen->generation != record->saved_generation || frozen->index != i ||
+                frozen->peer.address_type != live_store->ble[i].address_type ||
+                memcmp(frozen->peer.address, live_store->ble[i].address, 6U) ||
+                watch_advertisements[i].address_type != live_store->ble[i].address_type ||
+                memcmp(watch_advertisements[i].address, live_store->ble[i].address, 6U)) err = ESP_ERR_INVALID_RESPONSE;
         }
-        cerberus_ble_scan_status_payload_t end = {0};
-        if (err == ESP_OK) err = cerberus_s3_ble_scanner_get_status(&end);
-        if (err == ESP_OK && (end.state != CERBERUS_BLE_SCAN_COMPLETE ||
-            end.generation != record->saved_generation || end.stored_count != record->count)) err = ESP_ERR_INVALID_STATE;
         if (err != ESP_OK) {
             watch_capture_failed[slot] = true;
             watch_inventory_set_error(slot, err);
@@ -470,6 +477,7 @@ static bool watch_consume_radio(sentinel_scan_tool_t tool, uint32_t now)
     watch_consume_extra(tool, now);
     if (watch_state.sweeps < UINT32_MAX) ++watch_state.sweeps;
     watch_seen_capture[slot] = record->captured_ms;
+    if (tool == SENTINEL_SCAN_BLE) watch_seen_ble_epoch = live_ble_capture_epoch;
     /* Each radio rearms after its own complete generation has been consumed.
      * A delayed C5 sweep cannot hold the S3 BLE observer idle, or vice versa. */
     sentinel_scan_session_pause(session, false);
@@ -677,6 +685,29 @@ static esp_err_t watch_draw_why(void)
 }
 
 #include "recon_controls_ui.h"
+static const char *watch_ble_phase(void)
+{
+    /* Render only the last exact-lease observation. Admission/cleanup can be
+     * pending while the scheduler has no active tool or the SDK is not yet
+     * receiving; neither condition is evidence of a running radio sweep. */
+    if (!live_ble_recon_released() && (live_ble_stop_pending ||
+        live_ble_lease_state.stopping || live_ble_sleeping ||
+        live_ble_session.desired == SENTINEL_SCAN_NONE || live_ble_session.paused))
+        return "STOPPING";
+    if (live_ble_session.faulted || watch_capture_failed[1] || live_ble_lease_error ||
+        live_ble_lease_state.error) return "ERROR";
+    if (live_ble_lease_epoch && live_ble_lease_state.attached &&
+        live_ble_lease_state.epoch == live_ble_lease_epoch) {
+        if (live_ble_lease_state.owned)
+            return live_ble_lease_state.receiving ? "SCANNING" : "WAITING";
+        if (live_ble_lease_state.scan.state == CERBERUS_BLE_SCAN_COMPLETE) return "READY";
+    }
+    if (live_ble_session.active == SENTINEL_SCAN_BLE ||
+        (live_ble_session.desired == SENTINEL_SCAN_BLE && !live_ble_session.completed))
+        return "WAITING";
+    return live_records[SENTINEL_SCAN_BLE].valid ? "READY" : "OFF";
+}
+
 static esp_err_t watch_draw(uint32_t now, bool full)
 {
     if (watch_page == WATCH_INVENTORY) return recon_draw_inventory(watch_inventory_now());
@@ -692,6 +723,10 @@ static esp_err_t watch_draw(uint32_t now, bool full)
     memset(&watch_view, 0, sizeof(watch_view));
     watch_view.demo = watch_page == WATCH_DEMO;
     watch_view.paused = watch_paused;
+    watch_view.releasing = watch_paused && (live_session.active != SENTINEL_SCAN_NONE ||
+        live_ble_session.active != SENTINEL_SCAN_NONE ||
+        live_session.pending.kind != SENTINEL_SCAN_COMMAND_NONE ||
+        live_ble_session.pending.kind != SENTINEL_SCAN_COMMAND_NONE || !live_ble_recon_released());
     watch_view.radio_online = c5_online || live_records[SENTINEL_SCAN_BLE].valid;
     watch_view.observation_count = watch_last_count[0] + watch_last_count[1];
     watch_view.match_count = watch_state.matches > UINT16_MAX ? UINT16_MAX : watch_state.matches;
@@ -699,7 +734,7 @@ static esp_err_t watch_draw(uint32_t now, bool full)
         watch_view.scene = (sentinel_watch_scene_t)watch_demo_scene;
         watch_view.paused = false;
         watch_view.phase = live_session.active != SENTINEL_SCAN_NONE ||
-            live_ble_session.active != SENTINEL_SCAN_NONE ?
+            live_ble_session.active != SENTINEL_SCAN_NONE || !live_ble_recon_released() ?
             "DEMO GALLERY / STOPPING RADIO SCAN" : "DEMO GALLERY / RADIO SCANS STOPPED";
         watch_view.evidence = "ART PREVIEW / NO DEVICE WAS DETECTED";
         watch_view.detail = "NEXT: SEE ANOTHER CERBERUS SCENE";
@@ -707,13 +742,13 @@ static esp_err_t watch_draw(uint32_t now, bool full)
     } else {
         bool wifi_ready = c5_online &&
             (c5_status.capabilities & CERBERUS_C5_CAP_WIFI_2_4_GHZ) != 0;
-        bool ble_ready = live_records[SENTINEL_SCAN_BLE].valid;
-        if (watch_paused) snprintf(watch_phase_text, sizeof(watch_phase_text), "C5 WI-FI + S3 BLE PAUSED / TAP RESUME");
+        if (watch_paused) snprintf(watch_phase_text, sizeof(watch_phase_text), "%s",
+            watch_view.releasing ?
+                "PAUSING / WAITING FOR RADIO RELEASE" : "C5 WI-FI + S3 BLE PAUSED / TAP RESUME");
         else snprintf(watch_phase_text, sizeof(watch_phase_text), "C5 WI-FI %s / S3 BLE %s",
             !wifi_ready ? "OFF" : live_session.faulted || watch_capture_failed[0] ? "ERROR" :
                 live_session.active == SENTINEL_SCAN_WIFI ? "SCANNING" : live_radio_busy ? "WAITING" : "READY",
-            !ble_ready ? "OFF" : live_ble_session.faulted || watch_capture_failed[1] ? "ERROR" :
-                live_ble_session.active == SENTINEL_SCAN_BLE ? "SCANNING" : "READY");
+            watch_ble_phase());
         cerberus_recon_recorder_status_t recording;
         cerberus_recon_recorder_get_status(&recording);
         const char *save_hint = recording.state == CERBERUS_RECON_RECORDER_RECORDING ? " / SD REC" :
@@ -769,6 +804,7 @@ static void watch_open(uint32_t now)
     memset(watch_last_count, 0, sizeof(watch_last_count));
     watch_seen_capture[0] = live_records[SENTINEL_SCAN_WIFI].captured_ms;
     watch_seen_capture[1] = live_records[SENTINEL_SCAN_BLE].captured_ms;
+    watch_seen_ble_epoch = live_ble_capture_epoch;
     sentinel_scan_session_select(&live_session, SENTINEL_SCAN_NONE);
     if (!live_ble_session_initialized) {
         sentinel_scan_session_init(&live_ble_session);

@@ -1,7 +1,7 @@
 {
   "format": 2,
-  "audit_checkpoint": "rev117-source",
-  "scope": "Source/workflow status through the local rev114–117 candidates: shared dual-receiver Find My monitoring, independent ordinary BLE discovery and retries, exact S3 Analyzer ownership, and exact S3 Fox Hunt ownership. These candidates are not installed; rev113/C5 firmware68 remains the verified installed baseline (writes, paired boot and SD mount only). See DUAL_RADIO_REV114.md through DUAL_RADIO_REV117.md for separately retained source/build/package evidence and acceptance limits. All physical RF, touchscreen transitions, recovery, storage and loaded-memory acceptance remain distinct from host/native checks. Full Marauder parity is incomplete. A read-only GitHub comparison at 2026-11-01 16:21:17 UTC found develop identical to 79cc6bcba1db6679baee1dab2b0c1ad5010e6363. RECEIVE_REMAINING_GAPS.md records the current receiver, GPS, storage and device-info audit.",
+  "audit_checkpoint": "rev118-source",
+  "scope": "Source/workflow status through the local rev114–118 candidates: shared dual-receiver Find My monitoring, independent ordinary BLE discovery and retries, exact S3 Analyzer and Fox Hunt ownership, and accepted passive S3 Recon ownership/evidence. These candidates are not installed; rev113/C5 firmware68 remains the verified installed baseline (writes, paired boot and SD mount only). See DUAL_RADIO_REV114.md through DUAL_RADIO_REV118.md for separately retained source/build/package evidence and acceptance limits. All physical RF, touchscreen transitions, recovery, storage and loaded-memory acceptance remain distinct from host/native checks. Full Marauder parity is incomplete. A read-only GitHub comparison at 2026-11-01 16:21:17 UTC found develop identical to 79cc6bcba1db6679baee1dab2b0c1ad5010e6363. RECEIVE_REMAINING_GAPS.md records the current receiver, GPS, storage and device-info audit.",
   "contribution_summary": "docs/CONTRIBUTION_REV93.md",
   "prior_public_contribution": "docs/CONTRIBUTION_REV81.md",
   "upstream": "https://github.com/justcallmekoko/ESP32Marauder",
@@ -93,7 +93,7 @@
       "family": "navigation_and_connection",
       "status": "needs_review",
       "cerberus_evidence": "docs/MARAUDER_AP_MENU.md",
-      "next_gap": "Control state, not a distinct RF feature. Rev114–117 improve specific BLE owner boundaries, but whole-device Stop parity is unproven. Recon's definite local Start rejection must not use remote-command ambiguity to adopt a foreign scan, and Wardriving still needs full S3 binding. See RECEIVE_REMAINING_GAPS.md; active jobs and all navigation paths require separate audit.",
+      "next_gap": "Control state, not a distinct RF feature. Local rev114–118 improve specific BLE owner boundaries. Rev118 separates definite local Recon Start rejection from ambiguous C5 delivery and binds S3 status, completed evidence and cleanup to an accepted passive lease. Whole-device Stop parity and physical acceptance remain unproven; Wardriving still needs full S3 binding. See DUAL_RADIO_REV118.md and RECEIVE_REMAINING_GAPS.md; active jobs and all navigation paths require separate audit.",
       "s3_role": "S3 owns the picker, profile state and connection controls.",
       "c5_role": "C5 supplies AP inventory and the associated IP session.",
       "related_menu_entries": [],

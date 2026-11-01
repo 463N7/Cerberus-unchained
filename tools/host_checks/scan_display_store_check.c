@@ -26,6 +26,7 @@ static unsigned current_page, wifi_mode, ble_mode;
 static live_scan_record_t live_records[SENTINEL_SCAN_TOOL_COUNT];
 static uint32_t live_capture_pending;
 static sentinel_scan_session_t live_session;
+static sentinel_scan_session_t live_ble_session;
 static void live_wifi_capture_reset(void);
 static void live_wifi_capture_reset_as(cerberus_wifi_readout_cancel_reason_t reason);
 static esp_err_t live_wifi_capture_error(void);
@@ -80,6 +81,12 @@ static uint16_t wifi_defense_loaded_count;
 static cerberus_ieee802154_energy_scan_result_payload_t ieee802154_scan_result;
 static cerberus_wifi_scan_status_payload_t wifi_scan_status, wifi_end;
 static cerberus_ble_scan_status_payload_t ble_scan_status, ble_end;
+static cerberus_s3_ble_passive_state_t passive_source;
+static uint64_t passive_next_epoch;
+static unsigned passive_fence_fault;
+static bool passive_fault_at_row;
+static bool ble_scan_checked;
+static esp_err_t ble_scan_error;
 static cerberus_ieee802154_beacon_scan_status_payload_t ieee802154_beacon_status, beacon_end;
 
 static struct { void *pointer; size_t bytes; bool live; } allocations[128];
@@ -255,41 +262,61 @@ esp_err_t c5_spi_link_get_wifi_scan_status_once(uint32_t deadline, cerberus_wifi
     if (failure == FAIL_WIFI_END) { failure_expected_terminal_us = clock_peek(); return ESP_FAIL; }
     *out = wifi_end; return ESP_OK;
 }
-esp_err_t cerberus_s3_ble_scanner_get_result(uint8_t generation, uint8_t index,
-    cerberus_c5_ble_result_t *out)
+/* Model only the exact native boundary. Production capture/final fencing and
+ * allocation/publication are compiled below; actual scanner copies and mutex
+ * ownership have independent SDK-event tests. No generic BLE getter exists in
+ * this fixture, so an accidental unscoped fallback fails to link. */
+static void mutate_passive_fence(cerberus_s3_ble_passive_state_t *state)
 {
-    assert(generation == ble_scan_status.generation && index < ble_scan_status.stored_count);
+    switch (passive_fence_fault) {
+    case 1U: state->epoch ^= UINT64_C(1) << 48U; break;
+    case 2U: ++state->scan_epoch; break;
+    case 3U: ++state->host_epoch; break;
+    case 4U: ++state->started_ms; break;
+    case 5U: state->owned = true; break;
+    case 6U: state->stopping = true; break;
+    case 7U: state->error = ESP_ERR_INVALID_STATE; break;
+    case 8U: state->scan.state = CERBERUS_BLE_SCAN_RUNNING; break;
+    default: break;
+    }
+}
+esp_err_t cerberus_s3_ble_scanner_passive_copy_row(uint64_t epoch, uint8_t index,
+    cerberus_s3_ble_discovery_record_t *row, cerberus_s3_ble_passive_state_t *state)
+{
+    assert(row && state);
+    memset(row, 0, sizeof(*row)); memset(state, 0, sizeof(*state));
+    if (!epoch || epoch != passive_source.epoch) return ESP_ERR_NOT_FOUND;
+    assert(index < ble_scan_status.stored_count);
     ++result_calls;
-    if (failure == FAIL_BLE_RESULT && index == failure_index) return ESP_FAIL;
-    *out = ble_source[index]; return ESP_OK;
+    if (index == failure_index && (failure == FAIL_BLE_RESULT || failure == FAIL_BLE_FOCUS ||
+        failure == FAIL_BLE_ADV || failure == FAIL_BLE_TIME)) return ESP_FAIL;
+    row->peer = ble_source[index]; row->focus = focus_source[index];
+    row->advertisement = advertisement_source[index]; row->observed_ms = observation_source[index];
+    row->generation = ble_scan_status.generation; row->index = index;
+    *state = passive_source;
+    if (passive_fault_at_row && index == 1U) mutate_passive_fence(state);
+    return ESP_OK;
 }
-esp_err_t cerberus_s3_ble_scanner_get_focus(uint8_t generation, uint8_t index,
-    cerberus_s3_ble_focus_t *out)
+esp_err_t cerberus_s3_ble_scanner_passive_get_state(uint64_t epoch,
+    cerberus_s3_ble_passive_state_t *state)
 {
-    assert(generation == ble_scan_status.generation && index < ble_scan_status.stored_count);
-    if (failure == FAIL_BLE_FOCUS && index == failure_index) return ESP_FAIL;
-    *out = focus_source[index]; return ESP_OK;
-}
-esp_err_t cerberus_s3_ble_scanner_get_advertisement(uint8_t generation, uint8_t index,
-    cerberus_c5_ble_advertisement_t *out)
-{
-    assert(generation == ble_scan_status.generation && index < ble_scan_status.stored_count);
-    if (failure == FAIL_BLE_ADV && index == failure_index) return ESP_FAIL;
-    *out = advertisement_source[index]; return ESP_OK;
-}
-esp_err_t cerberus_s3_ble_scanner_get_advertisement_time(uint8_t generation,
-    uint8_t index, uint32_t *out)
-{
-    assert(generation == ble_scan_status.generation && index < ble_scan_status.stored_count);
-    if (failure == FAIL_BLE_TIME && index == failure_index) return ESP_FAIL;
-    *out = observation_source[index]; return ESP_OK;
-}
-esp_err_t cerberus_s3_ble_scanner_get_status(cerberus_ble_scan_status_payload_t *out)
-{
-    ++end_status_calls;
+    assert(state); memset(state, 0, sizeof(*state)); ++end_status_calls;
     if (failure == FAIL_BLE_END) return ESP_FAIL;
-    *out = ble_end; return ESP_OK;
+    if (!epoch || epoch != passive_source.epoch) return ESP_ERR_NOT_FOUND;
+    *state = passive_source; state->scan = ble_end;
+    if (!passive_fault_at_row) mutate_passive_fence(state);
+    return ESP_OK;
 }
+#ifndef CERBERUS_SCAN_STORE_EXTERNAL_PASSIVE_CONTROL
+esp_err_t cerberus_s3_ble_scanner_passive_start(uint64_t previous,
+    cerberus_s3_ble_passive_state_t *state)
+{ (void)previous; (void)state; assert(!"snapshot fixture must not start BLE"); return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t cerberus_s3_ble_scanner_passive_stop(uint64_t epoch,
+    cerberus_s3_ble_passive_state_t *state)
+{ (void)epoch; (void)state; assert(!"snapshot fixture must not stop BLE"); return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t cerberus_s3_ble_scanner_passive_release(uint64_t epoch)
+{ (void)epoch; assert(!"snapshot fixture must not release BLE"); return ESP_ERR_NOT_SUPPORTED; }
+#endif
 esp_err_t c5_spi_link_get_ieee802154_beacon_scan_result(uint8_t generation,
     uint8_t index, cerberus_ieee802154_beacon_scan_result_payload_t *out)
 {
@@ -346,7 +373,6 @@ static bool capture_all(sentinel_scan_tool_t tool, uint32_t now)
 /* Actual scheduler/session integration. Only UI painting, RF command delivery
  * and the polling adapter are simulated; the production transfer, command
  * scheduling, cancellation and ownership decisions run unchanged. */
-static sentinel_scan_session_t live_ble_session;
 static bool live_ble_session_initialized, ui_capability_blocked, wifi_selection_valid;
 static bool live_scan_observation_valid = true, live_ble_observation_valid = true;
 static bool live_radio_busy, c5_online = true;
@@ -397,6 +423,15 @@ static void reset(void)
     live_wifi_capture_reset(); live_wifi_worked = false;
     memset(&live_session, 0, sizeof(live_session));
     memset(&live_ble_session, 0, sizeof(live_ble_session));
+    live_ble_forget_lease();
+    assert(live_ble_recon_released());
+    live_ble_sleeping = false;
+    live_ble_capture_epoch = 0U; memset(&live_ble_capture_state, 0, sizeof(live_ble_capture_state));
+    live_ble_lease_error = ESP_OK;
+    memset(&passive_source, 0, sizeof(passive_source));
+    passive_next_epoch = UINT64_C(0x1234567800000000);
+    passive_fence_fault = 0U; passive_fault_at_row = false;
+    ble_scan_checked = false; ble_scan_error = ESP_OK;
     live_ble_session_initialized = false;
     live_last_poll = live_frame = start_commands = stop_commands = 0;
     ui_capability_blocked = wifi_selection_valid = live_radio_busy = false;
@@ -462,6 +497,15 @@ static void prepare(sentinel_scan_tool_t tool, uint8_t generation, uint8_t count
         ble_scan_status = (cerberus_ble_scan_status_payload_t){
             .generation = generation, .state = CERBERUS_BLE_SCAN_COMPLETE, .stored_count = count};
         ble_end = ble_scan_status;
+        ++passive_next_epoch;
+        passive_source = (cerberus_s3_ble_passive_state_t){
+            .epoch = passive_next_epoch, .started_ms = UINT64_C(4294967296),
+            .source_now_ms = UINT64_C(4294967296) + 10000U,
+            .scan = ble_scan_status, .scan_epoch = (uint32_t)passive_next_epoch,
+            .host_epoch = 17U, .attached = true};
+        live_ble_lease_epoch = passive_source.epoch;
+        live_ble_lease_state = passive_source;
+        live_ble_stop_pending = false;
         for (size_t i = 0U; i < CERBERUS_BLE_SCAN_MAX_RESULTS; ++i) {
             memset(&ble_source[i], 0, sizeof(ble_source[i]));
             ble_source[i].address[0] = generation; ble_source[i].address[1] = (uint8_t)i;
@@ -641,6 +685,37 @@ static void check_failed_capture_retains_published(void)
             if (evidence_pointer) assert(memcmp(evidence, evidence_pointer, sizeof(evidence)) == 0);
         }
     }
+}
+
+static void check_exact_ble_publication_fence(void)
+{
+    /* A source can be replaced/reset between row copies or just before commit,
+     * even while the public generation still matches. Nothing from a partial
+     * bank may replace the prior published evidence or its capture identity. */
+    for (unsigned phase = 0U; phase < 2U; ++phase) {
+        for (unsigned fault = 1U; fault <= 8U; ++fault) {
+            reset(); prepare(SENTINEL_SCAN_BLE, 7U, 2U); clock_ms = 1000;
+            assert(capture_all(SENTINEL_SCAN_BLE, 1000U));
+            const uint64_t saved_epoch = live_ble_capture_epoch;
+            const cerberus_s3_ble_passive_state_t saved_state = live_ble_capture_state;
+            cerberus_findmy_monitor_record_t *saved = live_ble_evidence;
+            cerberus_findmy_monitor_record_t contents[2]; memcpy(contents, saved, sizeof(contents));
+            cerberus_c5_ble_result_t rows[2]; memcpy(rows, live_store->ble, sizeof(rows));
+            prepare(SENTINEL_SCAN_BLE, 7U, 3U);
+            live_capture_pending |= UINT32_C(1) << SENTINEL_SCAN_BLE;
+            assert(live_ble_lease_epoch != saved_epoch);
+            passive_fence_fault = fault; passive_fault_at_row = phase == 0U; clock_ms = 2000;
+            assert(!capture_all(SENTINEL_SCAN_BLE, 2000U));
+            assert(live_records[SENTINEL_SCAN_BLE].error == ESP_ERR_INVALID_STATE);
+            assert(live_ble_capture_epoch == saved_epoch && live_ble_evidence == saved);
+            assert(!memcmp(&live_ble_capture_state, &saved_state, sizeof(saved_state)));
+            assert(!memcmp(saved, contents, sizeof(contents)));
+            assert(!memcmp(live_store->ble, rows, sizeof(rows)));
+            assert(live_ble_published_ms == 1000 && live_records[SENTINEL_SCAN_BLE].captured_ms == 1000U);
+            assert(live_allocations == 2U && live_records[SENTINEL_SCAN_BLE].count == 2U);
+        }
+    }
+    printf("Exact BLE publication: 16 mid-copy/final-fence faults retain the previous bank and full capture identity\n");
 }
 
 static void check_same_generation_cycle(void)
@@ -1276,10 +1351,14 @@ static void check_capture_readout(void)
 
 int main(void)
 {
+    /* Lifecycle is exercised by the actual Recon composite; this suite keeps
+     * all helper bodies compilable while testing atomic publication. */
+    (void)live_ble_observe; (void)live_ble_execute; (void)live_ble_capture_validate;
     check_first_and_reuse();
     check_empty_and_limits();
     check_allocation_failures();
     check_failed_capture_retains_published();
+    check_exact_ble_publication_fence();
     check_same_generation_cycle();
     check_relation_binding_publication();
     check_incremental_isolation_and_cancel();

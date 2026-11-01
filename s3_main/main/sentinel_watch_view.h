@@ -35,6 +35,7 @@ typedef struct {
     sentinel_watch_confidence_t confidence;
     bool demo;
     bool paused;
+    bool releasing; /* Paused intent still owns cleanup; badge only, not controls. */
     bool radio_online;
     bool has_details;
     uint16_t observation_count;

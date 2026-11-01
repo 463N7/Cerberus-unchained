@@ -40,6 +40,7 @@ static uint8_t wifi_selected_index, wifi_analysis_generation;
 static esp_err_t wifi_analysis_error, wifi_trust_error, wifi_connection_error;
 static cerberus_wifi_connection_status_payload_t wifi_connection_status;
 static bool readout_busy, companion_released, store_fail, proof_valid;
+static uint64_t recon_lease_epoch;
 static unsigned rebind_calls, copy_calls, publish_calls, bind_calls, launcher_calls;
 static esp_err_t rebind_error, copy_error;
 static unsigned corrupt_export;
@@ -48,6 +49,7 @@ static cerberus_dual_wifi_handoff_t export_handoff, imported_handoff;
 static int64_t mock_time_us;
 
 static bool live_wifi_capture_busy(void) { return readout_busy; }
+static bool live_ble_recon_released(void) { return recon_lease_epoch == 0U; }
 static bool cerberus_ble_discovery_session_released(const mock_discovery_session_t *s)
 { return s->released; }
 static bool dual_ble_ui_released(void) { return companion_released; }
@@ -156,6 +158,7 @@ static void bridge_reset(void)
     memset(&wifi_scan_status, 0, sizeof(wifi_scan_status));
     ble_discovery_live = NULL;
     companion_released = proof_valid = true;
+    recon_lease_epoch = 0U;
     readout_busy = store_fail = wifi_relation_exhausted = false;
     rebind_error = copy_error = ESP_OK; corrupt_export = 0U;
     rebind_calls = copy_calls = publish_calls = bind_calls = launcher_calls = 0U;
@@ -203,7 +206,18 @@ static void released_admission(void)
     discovery_store.session.released = true;
     live_session.stop_requested = true; dual_wifi_live_tick(6, false); assert(!start_calls);
     live_session.stop_requested = false; live_session.waiting = true;
-    dual_wifi_live_tick(7, false); assert(start_calls == 1); /* Backoff cannot deadlock idle. */
+    /* A completed native Recon attachment outlives scheduler.active. Opening
+     * split Wi-Fi must wait for that exact attachment, without an early Start
+     * failure or any retry that consumes the pending user request. */
+    recon_lease_epoch = UINT64_C(0x100000100);
+    assert(live_ble_session.active == SENTINEL_SCAN_NONE);
+    for (unsigned now = 7U; now < 20U; ++now) {
+        dual_wifi_live_tick(now, false);
+        assert(!start_calls && !rebind_calls && !dual_wifi_live_released());
+    }
+    recon_lease_epoch = 0U;
+    dual_wifi_live_tick(20, false); assert(start_calls == 1); /* Backoff cannot deadlock idle. */
+    dual_wifi_live_tick(21, false); assert(start_calls == 1);
 }
 static void publication(void)
 {

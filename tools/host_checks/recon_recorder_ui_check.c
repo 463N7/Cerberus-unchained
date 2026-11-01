@@ -26,17 +26,26 @@ static unsigned allocation_calls, free_calls;
 static bool allocation_fail;
 static void *heap_caps_calloc(size_t count, size_t size, unsigned capabilities)
 {
+#ifdef CERBERUS_RECON_LIVE_TEST
+    ++allocation_calls;CHECK(capabilities==(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+    return allocation_fail?NULL:calloc(count,size);
+#else
     ++allocation_calls; CHECK(!inventory_allocation);
     CHECK(capabilities == (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (allocation_fail) return NULL;
     inventory_allocation = calloc(count, size); CHECK(inventory_allocation); return inventory_allocation;
+#endif
 }
 static void heap_caps_free(void *pointer)
 {
+#ifdef CERBERUS_RECON_LIVE_TEST
+    if(pointer){++free_calls;free(pointer);}
+#else
     CHECK(pointer && pointer == inventory_allocation); ++free_calls;
     free(pointer); inventory_allocation = NULL;
+#endif
 }
-enum { UI_PAGE_MENU, UI_PAGE_WATCH };
+enum { UI_PAGE_MENU, UI_PAGE_WATCH, UI_PAGE_WIFI, UI_PAGE_BLE, UI_PAGE_IEEE802154, UI_PAGE_FIELD_MENU };
 static int current_page;
 static bool ui_capability_blocked, c5_online, live_ble_session_initialized, live_radio_busy;
 static const char *ui_capability_blocked_reason;
@@ -57,6 +66,7 @@ static unsigned raw_calls, status_calls, c5_calls, extra_calls, notifications;
 static esp_err_t raw_error, extra_error;
 static unsigned raw_fail_index;
 static bool raw_identity_bad, raw_final_bad, extra_final_bad, extra_drone;
+static bool recon_lifecycle_active;
 static char drawn[16384];
 static size_t drawn_size;
 static cerberus_recon_record_t offered[256];
@@ -148,6 +158,7 @@ const char *sentinel_watch_confidence_name(sentinel_watch_confidence_t confidenc
 esp_err_t cerberus_s3_ble_scanner_get_advertisement(uint8_t generation, uint8_t index,
     cerberus_c5_ble_advertisement_t *out)
 {
+    CHECK(!recon_lifecycle_active);
     ++raw_calls; CHECK(generation == live_records[SENTINEL_SCAN_BLE].saved_generation);
     if (raw_error != ESP_OK && index == raw_fail_index) return raw_error;
     *out = evidence[index].advertisement;
@@ -157,6 +168,7 @@ esp_err_t cerberus_s3_ble_scanner_get_advertisement(uint8_t generation, uint8_t 
 }
 esp_err_t cerberus_s3_ble_scanner_get_status(cerberus_ble_scan_status_payload_t *out)
 {
+    CHECK(!recon_lifecycle_active);
     ++status_calls; *out = ble_scan_status;
     if (raw_final_bad) ++out->generation;
     return ESP_OK;
@@ -173,11 +185,12 @@ static esp_err_t extra_status(uint8_t radio, uint8_t generation, cerberus_watch_
 esp_err_t c5_spi_link_get_watch_status(uint8_t radio, uint8_t generation, cerberus_watch_scan_status_payload_t *out)
 { ++c5_calls; return extra_status(radio, generation, out); }
 esp_err_t cerberus_s3_ble_scanner_get_watch_status(uint8_t generation, cerberus_watch_scan_status_payload_t *out)
-{ return extra_status(CERBERUS_WATCH_RADIO_BLE, generation, out); }
+{ CHECK(!recon_lifecycle_active);return extra_status(CERBERUS_WATCH_RADIO_BLE, generation, out); }
 esp_err_t c5_spi_link_get_watch_result(uint8_t radio, uint8_t generation, uint8_t index, cerberus_watch_observation_t *out)
 { (void)radio; (void)generation; (void)index; (void)out; ++c5_calls; CHECK(false); return ESP_FAIL; }
 esp_err_t cerberus_s3_ble_scanner_get_watch_result(uint8_t generation, uint8_t index, cerberus_watch_observation_t *out)
 {
+    CHECK(!recon_lifecycle_active);
     CHECK(extra_drone && index == 0 && generation == ble_scan_status.generation);
     *out = (cerberus_watch_observation_t){.kind = SENTINEL_WATCH_PROTOCOL_DRONE,
         .transport = SENTINEL_WATCH_TRANSPORT_BLE, .address_type = store.ble[0].address_type, .rssi = -60};
@@ -185,6 +198,7 @@ esp_err_t cerberus_s3_ble_scanner_get_watch_result(uint8_t generation, uint8_t i
 }
 esp_err_t cerberus_s3_ble_scanner_get_activity(uint8_t generation, cerberus_ble_activity_payload_t *out)
 {
+    CHECK(!recon_lifecycle_active);
     *out = (cerberus_ble_activity_payload_t){.generation = generation, .state = CERBERUS_WATCH_COMPLETE,
         .duration_ms = 8000}; return ESP_OK;
 }
@@ -201,6 +215,12 @@ bool cerberus_recon_recorder_offer(const cerberus_recon_record_t *record)
     return !reject_offer;
 }
 
+#include "recon_passive_boundary.h"
+#ifdef CERBERUS_RECON_LIVE_TEST
+#include "recon_live_setup.h"
+#else
+#include "recon_capture_owner_impl.h"
+#endif
 #include "sentinel_watch_ui.h"
 
 static bool screen_asleep;
@@ -217,6 +237,13 @@ esp_err_t cerberus_display_set_brightness(uint8_t value)
 
 static void seed(void)
 {
+    CHECK(!recon_lifecycle_active);
+    memset(&recon_native,0,sizeof(recon_native));
+    live_ble_lease_epoch=live_ble_capture_epoch=0U;
+    CHECK(live_ble_recon_released());
+    memset(&live_ble_lease_state,0,sizeof(live_ble_lease_state));
+    memset(&live_ble_capture_state,0,sizeof(live_ble_capture_state));
+    live_ble_stop_pending=false;live_ble_lease_error=ESP_OK;watch_seen_ble_epoch=0U;
     watch_inventory_release(); allocation_calls = free_calls = 0; allocation_fail = false;
     memset(&store, 0, sizeof(store)); memset(evidence, 0, sizeof(evidence));
     memset(live_records, 0, sizeof(live_records));
@@ -266,10 +293,17 @@ static void bank(sentinel_scan_tool_t tool, uint16_t count)
     } else {
         ble_scan_status = (cerberus_ble_scan_status_payload_t){.state = CERBERUS_BLE_SCAN_COMPLETE,
             .generation = 7, .stored_count = count};
+        live_ble_capture_epoch=live_ble_capture_epoch?live_ble_capture_epoch+1U:UINT64_C(0x100000007);
+        live_ble_lease_epoch=live_ble_capture_epoch;
+        live_ble_lease_state=live_ble_capture_state=(cerberus_s3_ble_passive_state_t){
+            .epoch=live_ble_capture_epoch,.scan=ble_scan_status,.scan_epoch=17,.host_epoch=3,.attached=true};
         for (unsigned i = 0; i < count; ++i) {
             strcpy(store.ble[i].name, i ? "ordinary BLE" : "Hint BLE");
             store.ble[i].address[5] = i + 1U; store.ble[i].address_type = i % 4U; store.ble[i].rssi = -55;
             evidence[i].peer = store.ble[i]; evidence[i].generation = 7;
+            evidence[i].index=(uint8_t)i;
+            memcpy(evidence[i].advertisement.address,store.ble[i].address,6U);
+            evidence[i].advertisement.address_type=store.ble[i].address_type;
             cerberus_s3_ble_discovery_evidence_t *source = &evidence[i].focus.discovery;
             memcpy(source->address, store.ble[i].address, 6); source->address_type = store.ble[i].address_type;
             source->generation = 7; source->flags = CERBERUS_S3_BLE_EVIDENCE_ADV_COMPLETE | CERBERUS_S3_BLE_EVIDENCE_ADV_VALID;
@@ -292,11 +326,16 @@ static void test_accepted_banks(void)
         CHECK(offered[0].session_id == 0 && offered[0].sequence == 0 && offered[0].consumed_us == (uint64_t)clock_us);
         CHECK(!watch_consume_radio(tool, 6000) && offer_count == 3);
         live_session_for(tool)->completed = true; live_records[tool].captured_ms = 6000;
+        if(radio){
+            CHECK(!watch_consume_radio(tool,6500)); /* Receipt time cannot invent a new S3 bank. */
+            live_ble_capture_state.epoch=live_ble_lease_state.epoch=++live_ble_capture_epoch;
+            live_ble_lease_epoch=live_ble_capture_epoch;
+        }
         CHECK(watch_consume_radio(tool, 7000) && offer_count == 6);
         CHECK(offered[3].alert_state == CERBERUS_RECON_ALERT_NOT_QUEUED);
         CHECK(offered[3].source_time == offered[0].source_time);
         if (radio) {
-            CHECK(c5_calls == 0 && raw_calls == 6 && status_calls == 2);
+            CHECK(c5_calls == 0 && raw_calls == 0 && status_calls == 12);
             CHECK(offered[0].source_kind == CERBERUS_RECON_SOURCE_S3_ADV_MS32);
             CHECK(offered[0].source_time == 0 && offered[0].source_sequence == 1);
             CHECK(offered[2].address_type == 2 && !offered[2].channel_valid);
@@ -327,8 +366,8 @@ static void test_rejected_banks(void)
         case 3: live_ble_session.active = SENTINEL_SCAN_BLE; break;
         case 4: live_records[SENTINEL_SCAN_BLE].saved_generation++; break;
         case 5: live_records[SENTINEL_SCAN_BLE].valid = false; break;
-        case 6: raw_error = ESP_ERR_TIMEOUT; raw_fail_index = 1; break;
-        case 7: raw_identity_bad = true; break;
+        case 6: live_ble_capture_state.host_epoch++; break;
+        case 7: evidence[1].advertisement.address_type ^= 1U; break;
         case 8: raw_final_bad = true; break;
         case 9: extra_error = ESP_ERR_INVALID_RESPONSE; break;
         case 10: extra_final_bad = true; break;
@@ -566,6 +605,7 @@ static void test_inventory_integration(void)
     for (unsigned i = 0; i < 2; ++i) {
         evidence[i].peer = store.ble[i];
         memcpy(evidence[i].focus.discovery.address, store.ble[i].address, 6);
+        memcpy(evidence[i].advertisement.address,store.ble[i].address,6);
     }
     CHECK(watch_consume(5000));
     CHECK(recon_inventory_ui->model.count[0] == 2 && recon_inventory_ui->model.count[1] == 2);
@@ -578,12 +618,15 @@ static void test_inventory_integration(void)
     CHECK(!watch_consume(6000)); CHECK(!memcmp(&before, &recon_inventory_ui->model, sizeof(before)));
 
     live_ble_session.completed = true; live_records[SENTINEL_SCAN_BLE].captured_ms = 4000;
-    clock_us = 6000000; raw_error = ESP_ERR_TIMEOUT; raw_fail_index = 1;
+    live_ble_capture_state.epoch=live_ble_lease_state.epoch=++live_ble_capture_epoch;
+    live_ble_lease_epoch=live_ble_capture_epoch;
+    clock_us = 6000000; recon_native.query_error=ESP_ERR_TIMEOUT;
     CHECK(!watch_consume_radio(SENTINEL_SCAN_BLE, 6000));
     CHECK(!memcmp(&before, &recon_inventory_ui->model, sizeof(before)) && offer_count == 4);
-    raw_error = ESP_OK; clock_us = 7000000;
+    recon_native.query_error=ESP_OK; clock_us = 7000000;
     store.ble[1].address_type = store.ble[0].address_type; /* Duplicate after validated staging poisons whole batch. */
     evidence[1].peer = store.ble[1]; evidence[1].focus.discovery.address_type = store.ble[1].address_type;
+    evidence[1].advertisement.address_type=store.ble[1].address_type;
     CHECK(watch_consume_radio(SENTINEL_SCAN_BLE, 7000));
     CHECK(recon_inventory_error == ESP_ERR_INVALID_RESPONSE && !recon_inventory_ui->model.batch_active);
     CHECK(!memcmp(before.entries, recon_inventory_ui->model.entries, sizeof(before.entries)));
@@ -603,6 +646,8 @@ static void test_inventory_integration(void)
     seed(); watch_inventory_open(); bank(SENTINEL_SCAN_BLE, 3);
     CHECK(watch_consume_radio(SENTINEL_SCAN_BLE, 5000)); before = recon_inventory_ui->model;
     live_ble_session.completed = true; live_records[SENTINEL_SCAN_BLE].captured_ms = 6000;
+    live_ble_capture_state.epoch=live_ble_lease_state.epoch=++live_ble_capture_epoch;
+    live_ble_lease_epoch=live_ble_capture_epoch;
     clock_us = UINT64_C(130000000); /* A good later end cannot rescue the bad middle timestamp. */
     clock_script[0] = clock_script[1] = clock_script[3] = clock_us;
     clock_script[2] = -1; clock_script_count = 4;

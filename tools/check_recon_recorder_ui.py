@@ -21,10 +21,21 @@ end = display.index("\nesp_err_t ", start)
 (out / "display_font.h").write_text(display[start:end], encoding="utf-8")
 framebuffer = (root / "tools/host_checks/recon_render.c").read_text(encoding="utf-8").split(
     "/* Exercise the real private controls", 1)[0]
+framebuffer = framebuffer.replace("static unsigned calls;",
+    "static unsigned calls, painted_paused, painted_pausing, painted_resume;")
+framebuffer = framebuffer.replace("    if(!*text)return ESP_OK;",
+    '    if(!strcmp(text,"PAUSED"))++painted_paused;\n'
+    '    if(!strcmp(text,"PAUSING"))++painted_pausing;\n'
+    '    if(!strcmp(text,"RESUME"))++painted_resume;\n'
+    "    if(!*text)return ESP_OK;")
 (out / "recon_framebuffer.h").write_text(framebuffer, encoding="utf-8")
 live = (root / "s3_main/main/sentinel_live_ui.h").read_text(encoding="utf-8")
 end = live.index("} live_scan_record_t;") + len("} live_scan_record_t;")
 (out / "recon_live_types.h").write_text(live[live.rindex("typedef struct", 0, end):end], encoding="utf-8")
+owner = (root / "s3_main/main/recon_ble_live_ui.h").read_text(encoding="utf-8")
+owner_start = owner.index("static uint64_t live_ble_lease_epoch")
+owner_end = owner.index("static void live_ble_forget_lease(")
+(out / "recon_capture_owner_impl.h").write_text(owner[owner_start:owner_end], encoding="utf-8")
 ui = (root / "s3_main/main/ui.c").read_text(encoding="utf-8")
 marker = "if (sleep_err == ESP_OK) {"
 assert ui.count(marker) == 1

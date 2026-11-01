@@ -62,7 +62,7 @@ static bool dual_ble_live_prepare_fox(uint32_t now, bool asleep)
     /* Stop keeps ticking the shared barrier and any acquired source until
      * release; it never enters the attachment path below. */
     if (ble_fox_hunt_exit_pending) return true;
-    if (!dual_ble_live_discovery_released() || !dual_ble_ui_released() ||
+    if (!dual_ble_live_discovery_released() || !live_ble_recon_released() || !dual_ble_ui_released() ||
         cerberus_s3_ble_host_owner() != CERBERUS_S3_BLE_OWNER_NONE) {
         if ((uint32_t)(now - ble_fox_hunt_start_requested_ms) >= 12000U) {
             ble_fox_hunt_barrier_error = ESP_ERR_TIMEOUT;
@@ -124,7 +124,7 @@ static void dual_ble_live_tick(uint64_t now, bool asleep)
     bool ready = live_session.active == SENTINEL_SCAN_NONE &&
         live_session.pending.kind == SENTINEL_SCAN_COMMAND_NONE &&
         live_ble_session.active == SENTINEL_SCAN_NONE &&
-        live_ble_session.pending.kind == SENTINEL_SCAN_COMMAND_NONE;
+        live_ble_session.pending.kind == SENTINEL_SCAN_COMMAND_NONE && live_ble_recon_released();
     cerberus_dual_wifi_status_t wifi;
     cerberus_dual_wifi_scan_get_status(&wifi);
     ready = ready && !dual_wifi_ui_busy(&wifi);

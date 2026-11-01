@@ -18,7 +18,7 @@ end = targets.index("static void wifi_target_open_attacks(void)", start)
 env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(out / "zig-global"),
            ZIG_LOCAL_CACHE_DIR=str(out / "zig-local"))
 exe = out / "dual-wifi-live-check.exe"
-subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1",
+subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-UNDEBUG",
     "-Wall", "-Wextra", "-Werror", "-I", str(out),
     "-I", str(root / "s3_main/main"), "-I", str(root / "shared"),
     str(root / "tools/host_checks/dual_wifi_live_check.c"),

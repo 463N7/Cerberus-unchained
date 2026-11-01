@@ -11370,6 +11370,7 @@ static bool recon_sessions_idle_for_takeover(void)
         live_ble_session.desired == SENTINEL_SCAN_NONE &&
         live_ble_session.active == SENTINEL_SCAN_NONE &&
         live_ble_session.pending.kind == SENTINEL_SCAN_COMMAND_NONE &&
+        !live_ble_lease_epoch &&
         (!ble_discovery_live || cerberus_ble_discovery_session_released(&ble_discovery_live->session));
 }
 

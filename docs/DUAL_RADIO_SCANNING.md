@@ -2,6 +2,10 @@
 
 ## Current local checkpoint
 
+[Rev118](DUAL_RADIO_REV118.md) develops exact S3 passive scan ownership for
+Recon acquisition, evidence and cleanup. C5 Wi-Fi retains its independent
+scheduler. This is a local candidate; rev113 remains installed.
+
 [Rev117](DUAL_RADIO_REV117.md) adds exact S3 Fox Hunt scan ownership while
 preserving independent C5 tracking. The coverage ledger has been reconciled
 through these local candidates; [the remaining-work audit](RECEIVE_REMAINING_GAPS.md)

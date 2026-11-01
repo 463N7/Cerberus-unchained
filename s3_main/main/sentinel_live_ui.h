@@ -6,6 +6,7 @@
 #include "s3_ble_recent.h"
 #include "s3_wifi_list.h"
 static bool watch_ble_requested(void);
+static bool live_ble_recon_released(void);
 
 typedef struct {
     bool valid, captured;
@@ -287,11 +288,13 @@ static bool live_store_acquire(void)
 }
 
 #include "wifi_scan_capture_ui.h"
+#include "recon_ble_live_ui.h"
 
 static bool live_capture(sentinel_scan_tool_t tool, uint32_t now)
 {
     if (tool == SENTINEL_SCAN_BLE && ble_discovery_live && ble_discovery_live->session.epoch)
         return false;
+    if (tool == SENTINEL_SCAN_BLE && (!live_ble_lease_epoch || live_ble_stop_pending)) return false;
     live_scan_record_t *record = &live_records[tool];
     if (!record->valid || record->state != SENTINEL_SCAN_COMPLETE ||
         (record->captured && record->saved_generation == record->generation &&
@@ -302,7 +305,13 @@ static bool live_capture(sentinel_scan_tool_t tool, uint32_t now)
     if (tool == SENTINEL_SCAN_WIFI) {
         return live_wifi_capture_begin(now);
     } else if (tool == SENTINEL_SCAN_BLE) {
-        count = ble_scan_status.stored_count;
+        const cerberus_s3_ble_passive_state_t source = live_ble_lease_state;
+        if (source.epoch != live_ble_lease_epoch || source.scan.generation != gen ||
+            !live_ble_fence_equal(&source, &source)) {
+            record->error = ESP_ERR_INVALID_STATE;
+            return false;
+        }
+        count = source.scan.stored_count;
         if (count > CERBERUS_BLE_SCAN_MAX_RESULTS) { record->error = ESP_ERR_INVALID_RESPONSE; return false; }
         if (count && !live_store_acquire()) {
             record->error = ESP_ERR_NO_MEM;
@@ -313,20 +322,23 @@ static bool live_capture(sentinel_scan_tool_t tool, uint32_t now)
         if (count && !evidence) { record->error = ESP_ERR_NO_MEM; return false; }
         uint8_t focus_bits[CERBERUS_BLE_SCAN_MAX_RESULTS] = {0};
         for (uint16_t i = 0; i < count && err == ESP_OK; ++i) {
-            err = cerberus_s3_ble_scanner_get_result(gen, i, &live_store->staging.ble[i]);
-            cerberus_s3_ble_focus_t focus;
-            if (err == ESP_OK) err = cerberus_s3_ble_scanner_get_focus(gen, i, &focus);
-            if (err == ESP_OK) focus_bits[i] = focus.category_bits;
-            if (err == ESP_OK) err = cerberus_s3_ble_scanner_get_advertisement(gen, i, &evidence[i].advertisement);
-            if (err == ESP_OK) err = cerberus_s3_ble_scanner_get_advertisement_time(gen, i, &evidence[i].observed_ms);
+            cerberus_s3_ble_discovery_record_t row;
+            cerberus_s3_ble_passive_state_t copied;
+            err = cerberus_s3_ble_scanner_passive_copy_row(source.epoch, (uint8_t)i, &row, &copied);
+            if (err == ESP_OK && (!live_ble_fence_equal(&source, &copied) ||
+                row.generation != gen || row.index != i)) err = ESP_ERR_INVALID_STATE;
             if (err == ESP_OK) {
-                evidence[i].peer = live_store->staging.ble[i]; evidence[i].focus = focus;
+                live_store->staging.ble[i] = row.peer;
+                evidence[i].peer = row.peer; evidence[i].focus = row.focus;
+                evidence[i].advertisement = row.advertisement;
+                evidence[i].observed_ms = row.observed_ms;
+                focus_bits[i] = row.focus.category_bits;
                 evidence[i].generation = gen; evidence[i].index = (uint8_t)i;
             }
         }
-        cerberus_ble_scan_status_payload_t end;
-        if (err == ESP_OK) err = cerberus_s3_ble_scanner_get_status(&end);
-        if (err == ESP_OK && (end.state != CERBERUS_BLE_SCAN_COMPLETE || end.generation != gen || end.stored_count != count)) err = ESP_ERR_INVALID_STATE;
+        cerberus_s3_ble_passive_state_t end;
+        if (err == ESP_OK) err = cerberus_s3_ble_scanner_passive_get_state(source.epoch, &end);
+        if (err == ESP_OK && !live_ble_fence_equal(&source, &end)) err = ESP_ERR_INVALID_STATE;
         if (err == ESP_OK) {
             if (count) memcpy(live_store->ble, live_store->staging.ble, count * sizeof(live_store->ble[0]));
             memcpy(live_ble_focus_bits, focus_bits, sizeof(focus_bits));
@@ -335,6 +347,8 @@ static bool live_capture(sentinel_scan_tool_t tool, uint32_t now)
             evidence = NULL;
             live_ble_published_ms = esp_timer_get_time() / 1000LL;
             live_ble_order_dirty = true;
+            live_ble_capture_epoch = source.epoch;
+            live_ble_capture_state = source;
         }
         heap_caps_free(evidence);
     } else if (tool == SENTINEL_SCAN_ENERGY) {
@@ -421,8 +435,7 @@ static bool live_observe(uint32_t now)
             c5_online && live_supported(SENTINEL_SCAN_WIFI) ? c5_spi_link_get_wifi_scan_status(&wifi_scan_status) : ESP_ERR_NOT_SUPPORTED;
         live_status(SENTINEL_SCAN_WIFI, wifi_scan_error, wifi_scan_status.state, wifi_scan_status.generation, 0, wifi_scan_status.error_code);
     }
-    ble_scan_error = cerberus_s3_ble_scanner_get_status(&ble_scan_status);
-    live_status(SENTINEL_SCAN_BLE, ble_scan_error, ble_scan_status.state, ble_scan_status.generation, 0, ble_scan_status.error_code);
+    live_ble_observe();
     if (owned_wifi) {
         bool changed = false;
         if (!defer_c5) changed = live_capture(SENTINEL_SCAN_WIFI, now);
@@ -489,10 +502,7 @@ static esp_err_t live_execute(sentinel_scan_command_t command)
     switch (command.tool) {
     case SENTINEL_SCAN_WIFI: return start ? c5_spi_link_start_wifi_scan(&wifi_scan_status) : c5_spi_link_stop_wifi_scan(&wifi_scan_status);
     case SENTINEL_SCAN_BLE:
-        if (!start) return cerberus_s3_ble_scanner_stop(&ble_scan_status);
-        return current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_LIST ?
-            cerberus_s3_ble_scanner_start_active(&ble_scan_status) :
-            cerberus_s3_ble_scanner_start(&ble_scan_status);
+        return live_ble_execute(start);
     case SENTINEL_SCAN_ENERGY: return start ? c5_spi_link_start_ieee802154_energy_scan(&ieee802154_scan_status) : ESP_ERR_NOT_SUPPORTED;
     case SENTINEL_SCAN_BEACON: return start ? c5_spi_link_start_ieee802154_beacon_scan(&ieee802154_beacon_status) : ESP_ERR_NOT_SUPPORTED;
     case SENTINEL_SCAN_ACTIVITY: return start ? c5_spi_link_start_ieee802154_activity_scan(&ieee802154_activity_status) : ESP_ERR_NOT_SUPPORTED;
@@ -919,6 +929,7 @@ static esp_err_t draw_live_scan(void)
 
 static void live_scan_tick(uint32_t now, bool asleep)
 {
+    live_ble_sleeping = asleep;
     if (!live_ble_session_initialized) {
         sentinel_scan_session_init(&live_ble_session);
         live_ble_session_initialized = true;
@@ -974,7 +985,8 @@ static void live_scan_tick(uint32_t now, bool asleep)
         live_session.completed && live_ble_session.completed ? 1000U : 500U;
     if (!changed && (uint32_t)(now - live_last_poll) < poll_ms) return;
     if (desired == SENTINEL_SCAN_NONE && live_session.active == SENTINEL_SCAN_NONE &&
-        ble_desired == SENTINEL_SCAN_NONE && live_ble_session.active == SENTINEL_SCAN_NONE) return;
+        ble_desired == SENTINEL_SCAN_NONE && live_ble_session.active == SENTINEL_SCAN_NONE &&
+        !live_ble_lease_epoch) return;
     live_last_poll = now;
     changed = live_observe(now) || changed;
     if (c5_online && !live_wifi_capture_defers_c5()) {
@@ -1008,9 +1020,11 @@ static void live_scan_tick(uint32_t now, bool asleep)
     changed |= ble_was_complete != live_ble_session.completed;
     if (ble_command.kind != SENTINEL_SCAN_COMMAND_NONE) {
         esp_err_t err = live_execute(ble_command);
-        sentinel_scan_session_ack(&live_ble_session, ble_command,
-            err == ESP_OK ? SENTINEL_SCAN_ACCEPTED :
-            err == ESP_ERR_INVALID_STATE ? SENTINEL_SCAN_BUSY : SENTINEL_SCAN_FAILED, now);
+        sentinel_scan_result_t result = err == ESP_OK ? SENTINEL_SCAN_ACCEPTED :
+            err == ESP_ERR_INVALID_STATE ? SENTINEL_SCAN_BUSY : SENTINEL_SCAN_FAILED;
+        if (ble_command.kind == SENTINEL_SCAN_COMMAND_START && err != ESP_OK && !live_ble_lease_epoch)
+            sentinel_scan_session_ack_local(&live_ble_session, ble_command, result, now);
+        else sentinel_scan_session_ack(&live_ble_session, ble_command, result, now);
         live_records[SENTINEL_SCAN_BLE].error = err;
         if (err == ESP_OK && ble_command.kind == SENTINEL_SCAN_COMMAND_START) {
             live_records[SENTINEL_SCAN_BLE].state = SENTINEL_SCAN_RUNNING;

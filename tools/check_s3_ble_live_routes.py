@@ -1,4 +1,4 @@
-"""Run the actual BLE/live tap dispatch and scan-start context gate on the host."""
+"""Run actual BLE/live tap dispatch and passive scheduler delegation on the host."""
 from pathlib import Path
 import subprocess
 import sys

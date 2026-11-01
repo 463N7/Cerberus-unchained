@@ -49,7 +49,7 @@ static int stripe_y;
 typedef struct {
     sentinel_watch_scene_t scene;
     sentinel_watch_confidence_t confidence;
-    bool demo,paused,online,details;
+    bool demo,paused,releasing,online,details;
     uint16_t observations,matches;
     uint8_t frame;
     char phase[49],title[25],evidence[49],detail[49];
@@ -797,10 +797,11 @@ static snapshot_t snapshot(const sentinel_watch_view_t *v,uint32_t now)
 {
     snapshot_t s={0};s.scene=v->scene;s.confidence=v->confidence;s.demo=v->demo;
     s.paused=v->paused;s.online=v->radio_online;s.details=v->has_details;
+    s.releasing=v->paused && !v->demo && v->releasing;
     s.observations=v->observation_count;s.matches=v->match_count;
     s.frame=(v->paused || !v->radio_online) && !v->demo?0:(uint8_t)((now/400U)%20U);
     copy_text(s.phase,sizeof(s.phase),v->demo?"SCENE GALLERY / NO LIVE DETECTION":v->phase);
-    if(!s.phase[0])copy_text(s.phase,sizeof(s.phase),v->paused?"WATCH PAUSED":v->radio_online?"READY TO WATCH":"RADIO OFFLINE");
+    if(!s.phase[0])copy_text(s.phase,sizeof(s.phase),s.releasing?"PAUSING / WAITING FOR RADIO RELEASE":v->paused?"WATCH PAUSED":v->radio_online?"READY TO WATCH":"RADIO OFFLINE");
     copy_text(s.title,sizeof(s.title),v->title && v->title[0]?v->title:scene_title(v->scene));
     copy_text(s.evidence,sizeof(s.evidence),v->evidence);
     copy_text(s.detail,sizeof(s.detail),v->detail);
@@ -817,7 +818,7 @@ static esp_err_t draw_header(const snapshot_t *s)
     char linebuf[52];uint16_t a=accent(s->scene);
     TRY(cerberus_display_fill_rect(0,0,320,88,BG));
     TRY(text(12,12,"CERBERUS",WHITE,BG,2));TRY(text(13,32,"FIELD KIT / RECON",MUTED,BG,1));
-    const char *badge=s->demo?"DEMO":s->paused?"PAUSED":s->online?"RECON":"OFFLINE";
+    const char *badge=s->demo?"DEMO":s->releasing?"PAUSING":s->paused?"PAUSED":s->online?"RECON":"OFFLINE";
     TRY(cerberus_display_fill_rect(238,20,70,18,PANEL));
     TRY(text(273-(int)strlen(badge)*3,25,badge,s->demo?LILAC:s->online?a:AMBER,PANEL,1));
     TRY(cerberus_display_fill_rect(12,48,296,37,PANEL));
@@ -871,7 +872,7 @@ esp_err_t sentinel_watch_view_update(const sentinel_watch_view_t *v,uint32_t now
     if(!previous_valid)return sentinel_watch_view_draw(v,now_ms);
     if(memcmp(&s,&previous,sizeof(s))==0)return ESP_OK;
     previous_valid=false;
-    if(s.scene!=previous.scene || s.demo!=previous.demo || s.paused!=previous.paused || s.online!=previous.online ||
+    if(s.scene!=previous.scene || s.demo!=previous.demo || s.paused!=previous.paused || s.releasing!=previous.releasing || s.online!=previous.online ||
         s.observations!=previous.observations || s.matches!=previous.matches || strcmp(s.phase,previous.phase))TRY(draw_header(&s));
     if(s.scene!=previous.scene || s.frame!=previous.frame || s.demo!=previous.demo ||
         s.paused!=previous.paused || s.online!=previous.online)TRY(draw_art(&s));

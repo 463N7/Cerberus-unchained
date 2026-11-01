@@ -19,6 +19,48 @@ esp_err_t cerberus_s3_ble_scanner_start(cerberus_ble_scan_status_payload_t *stat
 esp_err_t cerberus_s3_ble_scanner_start_active(cerberus_ble_scan_status_payload_t *status);
 esp_err_t cerberus_s3_ble_scanner_stop(cerberus_ble_scan_status_payload_t *status);
 esp_err_t cerberus_s3_ble_scanner_get_status(cerberus_ble_scan_status_payload_t *status);
+/* Reusable explicit passive lease for Recon. epoch is the never-reused full
+ * capture identity; callback and host epochs also gate its native ownership.
+ * Source clocks are S3 uptime, not a replacement for any row observation time. */
+typedef struct {
+    uint64_t epoch, started_ms, source_now_ms;
+    cerberus_ble_scan_status_payload_t scan;
+    uint32_t scan_epoch;
+    unsigned host_epoch;
+    int32_t error;
+    bool attached, owned, receiving, stopping;
+} cerberus_s3_ble_passive_state_t;
+
+/* 0 attaches a new finite passive sweep. Exact prior epoch rearms only after
+ * its prior RF/queues released. A rejected valid-token rearm returns the old
+ * attachment; non-OK never means a new sweep was accepted.
+ * Non-OK + attached output may describe the prior completed lease or an
+ * acquisition whose cleanup still owns resources: retain its token until
+ * release/retry. Empty failure output claims no NEW
+ * accepted/held lease; it never authorizes adoption of a global scanner. */
+esp_err_t cerberus_s3_ble_scanner_passive_start(uint64_t expected_previous_epoch,
+    cerberus_s3_ble_passive_state_t *state);
+/* Matching faulted/reset attachments still return ESP_OK plus their error and
+ * exact owned state; wrong/absent tokens return NOT_FOUND with cleared output. */
+esp_err_t cerberus_s3_ble_scanner_passive_get_state(uint64_t epoch,
+    cerberus_s3_ble_passive_state_t *state);
+esp_err_t cerberus_s3_ble_scanner_passive_stop(uint64_t epoch,
+    cerberus_s3_ble_passive_state_t *state);
+esp_err_t cerberus_s3_ble_scanner_passive_release(uint64_t epoch);
+/* COMPLETE-only scoped copies. Wrong tokens return NOT_FOUND; invalid data,
+ * reset/replacement or clocks return INVALID_STATE. Outputs clear together on
+ * failure. No allocation/RF and no private bank; each operation holds one lock. */
+esp_err_t cerberus_s3_ble_scanner_passive_copy_row(uint64_t epoch, uint8_t index,
+    cerberus_s3_ble_discovery_record_t *row, cerberus_s3_ble_passive_state_t *state);
+esp_err_t cerberus_s3_ble_scanner_passive_get_watch_status(uint64_t epoch,
+    cerberus_watch_scan_status_payload_t *status);
+esp_err_t cerberus_s3_ble_scanner_passive_get_watch_result(uint64_t epoch, uint8_t index,
+    cerberus_watch_observation_t *result);
+esp_err_t cerberus_s3_ble_scanner_passive_get_watch_detailed_result(uint64_t epoch,
+    uint8_t index, cerberus_watch_observation_t *result, cerberus_watch_receive_timing_t *timing,
+    sentinel_watch_motion_t *motion, cerberus_watch_receive_timing_t *motion_timing);
+esp_err_t cerberus_s3_ble_scanner_passive_get_activity(uint64_t epoch,
+    cerberus_ble_activity_payload_t *status);
 /* Atomic COMPLETE-bank status and local replacement count for this exact
  * generation. Both outputs are mandatory and cleared on failure. Replacement
  * discards retained inventory, while dropped_reports counts rejected reports;

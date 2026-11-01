@@ -1543,6 +1543,29 @@ static void ordinary_direct_c5_frozen_handoff(void)
     }
 }
 
+static void recon_lease_blocks_new_discovery(void)
+{
+    seed_native(CERBERUS_S3_BLE_FILTER_ALL);
+    /* Recon's scheduler can already be NONE while its exact lease drains.
+     * Both subsequent observers must honor the separate release predicate. */
+    live_ble_session.active=SENTINEL_SCAN_NONE;
+    live_ble_lease_epoch=UINT64_C(0x100000007);
+    native_tick(1000,false);dual_ble_live_tick(1000,false);
+    native_tick(2000,false);dual_ble_live_tick(2000,false);
+    CHECK(discovery_native.start==0U&&companion_requested_mode==-1&&ble_discovery_requested());
+    live_ble_lease_epoch=0U;native_tick(2500,false);dual_ble_live_tick(2500,false);
+    CHECK(discovery_native.start==1U&&companion_requested_mode==CERBERUS_DUAL_BLE_DISCOVERY);
+    stop_and_release(3000);clean_live();
+
+    fox_seed();cerberus_c5_ble_result_t target=fox_target();
+    live_ble_lease_epoch=UINT64_C(0x100000007);ble_fox_hunt_open_peer(&target,false);
+    fox_step(1100,false);fox_step(1400,false);
+    CHECK(ble_fox_hunt_start_pending&&!track_begins&&companion_requested_mode==-1);
+    live_ble_lease_epoch=0U;fox_step(1700,false);fox_step(2000,false);
+    CHECK(ble_fox_hunt_s3_started&&companion_requested_mode==CERBERUS_DUAL_BLE_TRACK);
+    fox_finish(2300);
+}
+
 int main(int argc,char **argv)
 {
     CHECK(argc==2);
@@ -1576,6 +1599,7 @@ int main(int argc,char **argv)
     fox_back_sleep_and_pending_stop();
     shared_monitor_acquisition_and_frozen_selection();
     shared_monitor_independent_intent_and_sleep();
+    recon_lease_blocks_new_discovery();
     printf("Ordinary BLE live UI: %u checks passed; active updates, frozen painted selection, scoped cleanup and C5 independence\n",live_checks);
     return 0;
 }

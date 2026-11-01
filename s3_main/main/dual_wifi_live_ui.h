@@ -23,7 +23,7 @@ static bool dual_wifi_live_session_released(const sentinel_scan_session_t *sessi
 static bool dual_wifi_live_released(void)
 {
     return dual_wifi_live_session_released(&live_session) &&
-        dual_wifi_live_session_released(&live_ble_session) && !live_wifi_capture_busy() &&
+        dual_wifi_live_session_released(&live_ble_session) && live_ble_recon_released() && !live_wifi_capture_busy() &&
         (!ble_discovery_live || cerberus_ble_discovery_session_released(&ble_discovery_live->session)) &&
         dual_ble_ui_released();
 }

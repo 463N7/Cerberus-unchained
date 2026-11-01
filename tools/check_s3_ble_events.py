@@ -175,7 +175,43 @@ int main(void)
         cerberus_s3_ble_scanner_track_get_state(NULL)!=ESP_ERR_INVALID_ARG ||
         cerberus_s3_ble_scanner_track_stop(NULL)!=ESP_ERR_INVALID_ARG ||
         cerberus_s3_ble_scanner_track_release()!=ESP_ERR_NOT_SUPPORTED) return 19;
-    puts("Disabled inventory diagnostics: canonical empty output, explicit unsupported, no host dependencies passed.");
+    cerberus_s3_ble_passive_state_t passive,empty_passive={0};
+    cerberus_s3_ble_discovery_record_t row,empty_row={0};
+    cerberus_watch_scan_status_payload_t watch,empty_watch={0};
+    cerberus_watch_observation_t result,empty_result={0};
+    cerberus_watch_receive_timing_t timing,motion_timing,empty_timing={0};
+    sentinel_watch_motion_t motion,empty_motion={0};
+    cerberus_ble_activity_payload_t activity,empty_activity={0};
+    memset(&passive,0xa5,sizeof(passive));
+    if(cerberus_s3_ble_scanner_passive_start(0,&passive)!=ESP_ERR_NOT_SUPPORTED ||
+        memcmp(&passive,&empty_passive,sizeof(passive)))return 20;
+    memset(&passive,0xa5,sizeof(passive));
+    if(cerberus_s3_ble_scanner_passive_get_state(1,&passive)!=ESP_ERR_NOT_SUPPORTED ||
+        memcmp(&passive,&empty_passive,sizeof(passive)))return 21;
+    memset(&passive,0xa5,sizeof(passive));
+    if(cerberus_s3_ble_scanner_passive_stop(1,&passive)!=ESP_ERR_NOT_SUPPORTED ||
+        memcmp(&passive,&empty_passive,sizeof(passive)))return 22;
+    if(cerberus_s3_ble_scanner_passive_start(0,NULL)!=ESP_ERR_INVALID_ARG ||
+        cerberus_s3_ble_scanner_passive_get_state(0,&passive)!=ESP_ERR_INVALID_ARG ||
+        cerberus_s3_ble_scanner_passive_stop(1,NULL)!=ESP_ERR_INVALID_ARG ||
+        cerberus_s3_ble_scanner_passive_release(1)!=ESP_ERR_NOT_SUPPORTED)return 23;
+    memset(&passive,0xa5,sizeof(passive));memset(&row,0xa5,sizeof(row));
+    if(cerberus_s3_ble_scanner_passive_copy_row(1,0,&row,&passive)!=ESP_ERR_NOT_SUPPORTED ||
+        memcmp(&row,&empty_row,sizeof(row)) || memcmp(&passive,&empty_passive,sizeof(passive)))return 24;
+    memset(&watch,0xa5,sizeof(watch));memset(&result,0xa5,sizeof(result));
+    if(cerberus_s3_ble_scanner_passive_get_watch_status(1,&watch)!=ESP_ERR_NOT_SUPPORTED ||
+        memcmp(&watch,&empty_watch,sizeof(watch)) ||
+        cerberus_s3_ble_scanner_passive_get_watch_result(1,0,&result)!=ESP_ERR_NOT_SUPPORTED ||
+        memcmp(&result,&empty_result,sizeof(result)))return 25;
+    memset(&result,0xa5,sizeof(result));memset(&timing,0xa5,sizeof(timing));
+    memset(&motion,0xa5,sizeof(motion));memset(&motion_timing,0xa5,sizeof(motion_timing));
+    if(cerberus_s3_ble_scanner_passive_get_watch_detailed_result(1,0,&result,&timing,&motion,&motion_timing)!=ESP_ERR_NOT_SUPPORTED ||
+        memcmp(&result,&empty_result,sizeof(result)) || memcmp(&timing,&empty_timing,sizeof(timing)) ||
+        memcmp(&motion,&empty_motion,sizeof(motion)) || memcmp(&motion_timing,&empty_timing,sizeof(motion_timing)))return 26;
+    memset(&activity,0xa5,sizeof(activity));
+    if(cerberus_s3_ble_scanner_passive_get_activity(1,&activity)!=ESP_ERR_NOT_SUPPORTED ||
+        memcmp(&activity,&empty_activity,sizeof(activity)))return 27;
+    puts("Disabled scanner diagnostics and passive leases: canonical empty output, explicit unsupported, no host dependencies passed.");
     return 0;
 }
 ''')

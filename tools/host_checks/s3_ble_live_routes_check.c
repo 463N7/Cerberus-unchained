@@ -54,7 +54,6 @@ static const char *ble_filter_name(cerberus_s3_ble_filter_t f){(void)f;return "F
 static sentinel_scan_session_t session;
 static sentinel_view_action_t action;
 static unsigned monitor_opened,monitor_tapped,selected_count,active_starts,passive_starts,stop_count;
-static cerberus_ble_scan_status_payload_t ble_scan_status;
 static sentinel_scan_tool_t live_page_tool(void) {return SENTINEL_SCAN_BLE;}
 static void live_make_view(void);
 static sentinel_scan_session_t *live_session_for(sentinel_scan_tool_t t){(void)t;return &session;}
@@ -78,9 +77,9 @@ static void wifi_relation_bind_selection(bool ordinary)
 #define wifi_target_toggle_selection(...) true
 #define wifi_target_finish_selection() ((void)0)
 #define c5_spi_link_get_wifi_connection_status(...) ESP_OK
-static esp_err_t cerberus_s3_ble_scanner_start_active(cerberus_ble_scan_status_payload_t*s){(void)s;++active_starts;return ESP_OK;}
-static esp_err_t cerberus_s3_ble_scanner_start(cerberus_ble_scan_status_payload_t*s){(void)s;++passive_starts;return ESP_OK;}
-static esp_err_t cerberus_s3_ble_scanner_stop(cerberus_ble_scan_status_payload_t*s){(void)s;++stop_count;return ESP_OK;}
+/* Legacy scheduler acquisition now delegates to the exact passive lease.
+ * Ordinary active discovery is owned/tested by its separate live controller. */
+static esp_err_t live_ble_execute(bool start){if(start)++passive_starts;else ++stop_count;return ESP_OK;}
 /* This fixture exercises only the legacy retained completed-bank route, with
  * the ordinary discovery facade disabled. It does not model S3 store OOM:
  * discovery-live covers that empty shell, both receivers and global ticks.
@@ -166,12 +165,12 @@ int main(void)
     live_view.state=SENTINEL_VIEW_LIVE;action=SENTINEL_VIEW_PAUSE;handle_ble_tap(250,380);
     assert(session.paused&&session.desired==SENTINEL_SCAN_BLE);
     assert(active_starts==0&&passive_starts==0&&stop_count==0);
-    assert(actual_ble_start(true)==ESP_OK && active_starts==1);
-    current_page=UI_PAGE_WATCH;assert(actual_ble_start(true)==ESP_OK && passive_starts==1);
+    assert(actual_ble_start(true)==ESP_OK && passive_starts==1 && active_starts==0);
+    current_page=UI_PAGE_WATCH;assert(actual_ble_start(true)==ESP_OK && passive_starts==2);
     assert(actual_ble_start(false)==ESP_OK && stop_count==1);
     assert(live_wifi_sort==CERBERUS_S3_WIFI_SORT_NAME_ASC && live_wifi_band==CERBERUS_S3_WIFI_BAND_5_GHZ);
     assert(wifi_relation_publication==UINT64_C(0x1234567800000042) && wifi_relation_generation==9);
     assert(!memcmp(&wifi_built_before,&live_wifi_built,sizeof(live_wifi_built)));
     assert(!memcmp(&wifi_painted_before,&live_wifi_painted,sizeof(live_wifi_painted)));
-    puts("Actual BLE live dispatch: filters, Monitor entry, mapped frozen selection, pagination, sorted/focused original indexes, original timestamp, active-list/passive-Watch scan gate passed");
+    puts("Actual BLE live dispatch: filters, Monitor entry, mapped frozen selection, pagination, sorted/focused original indexes, original timestamp, exact passive-lease scheduler delegation passed");
 }

@@ -43,7 +43,7 @@ static int32_t mac_local_reserve(void *context,uint8_t radio,cerberus_mac_bindin
     if(!m || !out || radio!=CERBERUS_MAC_BLE)return ESP_ERR_INVALID_ARG;
     esp_err_t error=ensure_mutex();if(error)return error;
     xSemaphoreTake(scan_mutex,portMAX_DELAY);reconcile_host_locked();
-    bool busy=mac_monitor || discovery_attached || snapshot->status.state==CERBERUS_BLE_SCAN_RUNNING ||
+    bool busy=mac_monitor || discovery_attached || passive_state.attached || snapshot->status.state==CERBERUS_BLE_SCAN_RUNNING ||
         stop_event_pending || start_event_pending || tracker.enabled || (analyzer && analyzer->active) ||
         cerberus_s3_ble_host_owner()!=CERBERUS_S3_BLE_OWNER_NONE ||
         cerberus_s3_wifi_owner()==CERBERUS_S3_WIFI_RECEIVER;

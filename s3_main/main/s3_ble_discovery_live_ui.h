@@ -446,7 +446,7 @@ static void ble_discovery_tick(uint64_t now_ms, bool asleep)
     store->visible = visible;
     /* First drain any legacy Watch sweep. Local discovery does not require a
      * successful C5 poll, and it never adopts a generic scanner's claim. */
-    if (store->session.epoch || live_ble_session.active == SENTINEL_SCAN_NONE)
+    if (store->session.epoch || (live_ble_session.active == SENTINEL_SCAN_NONE && live_ble_recon_released()))
         cerberus_ble_discovery_session_tick(&store->session, now_ms, &store->ops);
     store->presentation.valid = true;
     store->presentation.error = store->session.error;

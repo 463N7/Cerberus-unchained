@@ -13,6 +13,9 @@ static unsigned tick, held, host_epoch;
 static unsigned mutex_takes, allocations;
 static unsigned frees, host_releases;
 static bool fail_host_release;
+static size_t available_internal = 128U * 1024U;
+static cerberus_s3_wifi_owner_t simulated_wifi_owner;
+static void (*claim_before)(void), (*claim_after)(void);
 static bool fail_discovery_lock, fail_discovery_allocation;
 static bool discovery_clock_rollback;
 static unsigned clock_reads;
@@ -47,19 +50,21 @@ int64_t esp_timer_get_time(void)
     }
     return value;
 }
-size_t heap_caps_get_free_size(unsigned caps) { (void)caps; return 128U * 1024U; }
+size_t heap_caps_get_free_size(unsigned caps) { (void)caps; return available_internal; }
 void *heap_caps_calloc(size_t n, size_t size, unsigned caps)
 { (void)caps; ++allocations;
   if (fail_discovery_allocation) { fail_discovery_allocation=false; return NULL; }
   return calloc(n, size); }
 void heap_caps_free(void *pointer) { if (pointer) ++frees; free(pointer); }
 const char *esp_err_to_name(esp_err_t err) { (void)err; return "mock"; }
-cerberus_s3_wifi_owner_t cerberus_s3_wifi_owner(void) { return CERBERUS_S3_WIFI_NONE; }
+cerberus_s3_wifi_owner_t cerberus_s3_wifi_owner(void) { return simulated_wifi_owner; }
 cerberus_s3_ble_owner_t cerberus_s3_ble_host_owner(void) { return owner; }
 bool cerberus_s3_ble_host_initialized(void) { return true; }
 unsigned cerberus_s3_ble_host_epoch(void) { return host_epoch; }
 esp_err_t cerberus_s3_ble_host_claim(cerberus_s3_ble_owner_t requested)
-{ if (owner) return ESP_ERR_INVALID_STATE; owner = requested; return ESP_OK; }
+{ if (claim_before) claim_before();
+  if (owner) return ESP_ERR_INVALID_STATE; owner = requested;
+  if (claim_after) claim_after(); return ESP_OK; }
 esp_err_t cerberus_s3_ble_host_release(cerberus_s3_ble_owner_t requested)
 { ++host_releases; if (owner != requested) return ESP_ERR_INVALID_STATE;
   if (fail_host_release) return ESP_ERR_TIMEOUT;
@@ -645,6 +650,7 @@ static void check_watch_timing_callbacks(void)
 
 #include "s3_ble_analyzer_binding_check.h"
 #include "s3_ble_track_binding_check.h"
+#include "s3_ble_passive_binding_check.h"
 
 int main(void)
 {
@@ -961,5 +967,6 @@ int main(void)
     check_discovery_native();
     check_analyzer_binding();
     check_track_binding();
+    check_passive_binding();
     puts("S3 BLE event checks passed: finite duration, stale callbacks, reset reconciliation, 256-start byte wrap with fresh records, and safe rearm.");
 }

@@ -8,7 +8,9 @@
 #define c5_spi_link_get_wifi_scan_status_once fixture_status_once
 #define c5_spi_link_get_ieee802154_beacon_scan_status fixture_beacon_status
 #define c5_spi_link_get_ieee802154_activity_scan_status fixture_activity_status
+#define CERBERUS_SCAN_STORE_EXTERNAL_PASSIVE_CONTROL 1
 #include "scan_display_store_check.c"
+#undef CERBERUS_SCAN_STORE_EXTERNAL_PASSIVE_CONTROL
 #undef main
 #undef live_observe
 #undef live_execute
@@ -55,15 +57,40 @@ esp_err_t c5_spi_link_get_wifi_defense_status(cerberus_wifi_defense_status_paylo
 esp_err_t c5_spi_link_get_wifi_connection_status(cerberus_wifi_connection_status_payload_t *out)
 { ++connection_polls; memset(out, 0, sizeof(*out)); out->state = connection_state; return connection_error; }
 
+/* Exact S3 boundary for the independent-BLE cases below. Capture and state
+ * reads retain the imported bank/fence implementation; controls bind its full
+ * token instead of fabricating a global generation-only RUNNING status. */
+esp_err_t cerberus_s3_ble_scanner_passive_start(uint64_t previous,cerberus_s3_ble_passive_state_t *out)
+{
+    memset(out,0,sizeof(*out));
+    if(passive_source.attached&&(!previous||previous!=passive_source.epoch||passive_source.owned))
+        return ESP_ERR_INVALID_STATE;
+    ++ble_starts;++ble_end.generation;ble_end.state=SENTINEL_SCAN_RUNNING;
+    passive_source=(cerberus_s3_ble_passive_state_t){.epoch=++passive_next_epoch,
+        .scan=ble_end,.scan_epoch=ble_starts,.host_epoch=1U,.attached=true,.owned=true,.receiving=true};
+    *out=passive_source;return ESP_OK;
+}
+esp_err_t cerberus_s3_ble_scanner_passive_stop(uint64_t epoch,cerberus_s3_ble_passive_state_t *out)
+{
+    memset(out,0,sizeof(*out));
+    if(!epoch||epoch!=passive_source.epoch||!passive_source.attached)return ESP_ERR_NOT_FOUND;
+    ++ble_stops;ble_end.state=SENTINEL_SCAN_IDLE;passive_source.scan=ble_end;
+    passive_source.owned=passive_source.receiving=passive_source.stopping=false;
+    *out=passive_source;return ESP_OK;
+}
+esp_err_t cerberus_s3_ble_scanner_passive_release(uint64_t epoch)
+{
+    if(!epoch||epoch!=passive_source.epoch||!passive_source.attached)return ESP_ERR_NOT_FOUND;
+    if(passive_source.owned)return ESP_ERR_INVALID_STATE;
+    memset(&passive_source,0,sizeof(passive_source));return ESP_OK;
+}
+
 #include "wifi_owned_observe_impl.h"
 
 static esp_err_t live_execute(sentinel_scan_command_t command)
 {
     if (command.tool == SENTINEL_SCAN_BLE) {
-        if (command.kind == SENTINEL_SCAN_COMMAND_START) {
-            ++ble_starts; ble_end.state = SENTINEL_SCAN_RUNNING;
-        } else { ++ble_stops; ble_end.state = SENTINEL_SCAN_IDLE; }
-        return ESP_OK;
+        return live_ble_execute(command.kind==SENTINEL_SCAN_COMMAND_START);
     }
     if (command.kind == SENTINEL_SCAN_COMMAND_START) {
         ++start_commands;
@@ -126,7 +153,7 @@ static void owned_status_and_clock(void)
         CHECK(!live_scan_observation_valid && live_records[SENTINEL_SCAN_WIFI].error!=ESP_OK);
         CHECK(!wifi_scan_status.state && !wifi_scan_status.generation && !live_wifi_capture_busy());
         CHECK(live_session.active==SENTINEL_SCAN_WIFI && !live_session.completed);
-        CHECK(end_status_calls==1 && !foreign_polls && !full_polls && !connection_polls);
+        CHECK(end_status_calls==0 && !foreign_polls && !full_polls && !connection_polls);
         CHECK(owned_polls==(kind<2));
     }
 }
@@ -189,6 +216,7 @@ static void capture_and_ble(void)
 {
     seed(); prepare(SENTINEL_SCAN_WIFI,7,2); remote_wifi=wifi_scan_status;
     prepare(SENTINEL_SCAN_BLE,9,2);
+    live_ble_session.desired=SENTINEL_SCAN_BLE;live_ble_session.completed=true;
     (void)live_observe(1000);
     CHECK(live_wifi_capture_busy() && live_records[SENTINEL_SCAN_BLE].captured);
     CHECK(!memcmp(live_store->ble,ble_source,2*sizeof(ble_source[0])));

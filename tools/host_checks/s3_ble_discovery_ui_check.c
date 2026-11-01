@@ -194,6 +194,9 @@ static int companion_requested_mode;
 static uint8_t companion_requested_family;
 static uint64_t companion_sync_clock;
 static bool dual_ble_live_discovery_released(void);
+static uint64_t live_ble_lease_epoch;
+static bool live_ble_sleeping;
+static bool live_ble_recon_released(void){return live_ble_lease_epoch==0U;}
 static bool dual_ble_live_c5_retryable(void);
 static bool ble_discovery_s3_retryable(void);
 static bool dual_ble_ui_released(void);
@@ -413,6 +416,7 @@ static const char *view_error_name(esp_err_t error)
 
 static void seed_list(void)
 {
+    live_ble_lease_epoch=0U;live_ble_sleeping=false;
     memset(&track_native,0,sizeof(track_native));
     (void)cerberus_s3_ble_scanner_track_end;(void)track_native_callback;
     (void)cerberus_s3_ble_scanner_analyzer_end;

@@ -135,7 +135,7 @@ static void ble_analyzer_tick(uint32_t now_ms, bool asleep)
     ble_analyzer_last_tick_ms = now_ms;
 
     if (ble_analyzer_start_pending) {
-        bool previous_released = dual_ble_live_discovery_released() && dual_ble_ui_released() &&
+        bool previous_released = dual_ble_live_discovery_released() && live_ble_recon_released() && dual_ble_ui_released() &&
             live_session.active == SENTINEL_SCAN_NONE && live_session.pending.kind == SENTINEL_SCAN_COMMAND_NONE &&
             live_ble_session.active == SENTINEL_SCAN_NONE && live_ble_session.pending.kind == SENTINEL_SCAN_COMMAND_NONE &&
             cerberus_s3_ble_host_owner() == CERBERUS_S3_BLE_OWNER_NONE;

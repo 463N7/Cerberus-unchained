@@ -1,4 +1,4 @@
-# Remaining receive and device-workflow gaps after rev116
+# Remaining receive and device-workflow gaps
 
 This source audit used Cerberus `41b65fdec1f2dc1ccdb01d73e56887dee5d9194e`
 and the clean pinned Marauder develop checkout
@@ -19,10 +19,14 @@ source check, not proof of complete porting or physical acceptance.
 - **Recon:** `sentinel_scan_session.c` has a remote-command ambiguity path that
   can accept a later RUNNING observation after a failed START. The S3 local
   call has a definite admission result: `ESP_ERR_INVALID_STATE` must not grant
-  ownership of an already-running foreign scanner. The BLE glue in
-  `sentinel_live_ui.h` currently supplies no foreign-radio busy gate. Accepted
-  full local binding and actual-scanner admission/Stop tests remain needed;
-  the pure parallel scheduler fixture alone does not prove that boundary.
+  ownership of an already-running foreign scanner. The local rev118 candidate
+  adds an explicit local-rejection acknowledgement and exact passive lease
+  binding across S3 acquisition, completed row/Watch evidence and cleanup.
+  It retains C5's separate transport scheduler. See
+  [the rev118 milestone](DUAL_RADIO_REV118.md) for validation and remaining
+  physical acceptance; the pure parallel scheduler fixture alone does not
+  prove the native boundary. Whole-device/C5 ownership parity remains a
+  separate audit, not a claim made by this S3 change.
 - **Wardriving:** S3 capture and cleanup use the generation byte without a full
   host/callback binding. Its worker also deliberately ends both receivers on a
   terminal source error. Exact local binding and a deliberate degraded-mode
