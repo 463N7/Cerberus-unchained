@@ -68,8 +68,8 @@ Bluetooth-disabled configurations, missing PSRAM and repeated claims,
 ownership races, scan lifecycle, immutable target publication, cached snapshot
 coherence, clock/sequence limits, console formatting, and firmware-cache
 recovery. All 119 suites passed with no changed source/configuration inputs
-in the full rev95 run; the receipt and logs are retained under
-`artifacts/host-checks/rev95-full-run`. Synthetic console checks
+in the full rev95 run; the final receipt and logs are retained under
+`artifacts/host-checks/rev95-final-full-run`. Synthetic console checks
 validate the stack-checker's parser contract, not native stack frames.
 
 All five native targets pass with unchanged inputs. The generated S3 config
@@ -84,6 +84,19 @@ The matched development package
 chip header, partition and image-bound verification. It contains S3, onboard
 C5 and the temporary USB bridge. The two expansion targets are compile-tested
 separately; no expansion hardware is attached or accepted.
+
+The paired rev95 package is now installed on the development board. Each of
+the three images for the bridge, C5 and S3 passed flash hash verification.
+Verified backups cover every updated region; the earlier full S3 backup is
+also retained. Both chips returned online, the display initialized, SD mounted,
+and `wifi_dual`, `dual_ble` and `ble_memory` returned normally. Local installation
+evidence is retained under `artifacts/device-rev95`.
+
+The settled pre-BLE baseline is 113,524 bytes free internal RAM (69,632-byte
+largest block) and 1,428,324 bytes free PSRAM. BLE has not initialized at this
+baseline; it does not demonstrate warm-memory recovery. The current boot
+reports no preceding reset fault. An older stored crash record remains and
+is not counted as a new crash.
 
 Hardware must still measure the recovered warm internal RAM, scan completion, both receiver
 counts and cleanup across repeated transitions. Full Marauder parity, active

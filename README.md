@@ -48,8 +48,9 @@ PSRAM is absent. It also adds cached per-radio/lifecycle diagnostics and bounded
 recovery from an unknown C5 firmware cache. All 119 host suites and all five
 native targets pass on stable inputs. The matched onboard package also passes
 image, partition, source and console-stack checks. The repeated
-BLE-to-split-Wi-Fi device check remains pending. The
-development board is still running rev94. See
+BLE-to-split-Wi-Fi device check remains pending. The paired rev95 build is
+installed: both chips are online, SD is mounted, and all three new diagnostic
+commands respond. Cold S3 internal free RAM is 113,524 bytes. See
 [radio memory recovery](docs/RADIO_MEMORY_RECOVERY.md).
 
 Rev94 adds adaptive dual-radio scanning: Wi-Fi-only scans use S3 for 2.4 GHz
@@ -57,7 +58,7 @@ and C5 for 5 GHz when both are available; ordinary BLE discovery and fox hunting
 gain a separate C5 receiver alongside S3. Mixed Recon and Wardriving keep C5
 Wi-Fi plus S3 BLE. Receiver provenance, bounded memory, Stop/Back recovery and
 fresh AP selection checks are part of the implementation. The paired rev94
-build is installed on the development board; the owner confirmed completed
+build was installed on the development board; the owner confirmed completed
 split Wi-Fi scans, Wi-Fi Stop/restart/Back and activity on both BLE receivers.
 Diagnostics confirm repeated C5 5 GHz sweeps and active S3 BLE discovery.
 A confirmed limitation remains: after BLE use, the initialized S3 Bluetooth
