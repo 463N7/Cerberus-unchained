@@ -68,3 +68,21 @@ Physical SD save/open, filtering, selection, Stop/Back and return-to-scan
 acceptance remain separate. Complete Marauder option parity, full
 payload/history retention, AirTag JSON interoperability, GPS and expansion
 acceptance remain open.
+
+## Local matched package
+
+Implementation commit `ceb9cb72ed722d75214186aec33fad66cba90ce2` is retained
+locally. Package
+`dist/cerberus-unchained-0.1.0-dev.rev105-20261101T093428Z` passes hash, chip
+header, partition and image-bound verification. All three application hashes
+and sizes match the retained five-target matrix. Its source map matches the
+corresponding retained host/native inputs and the committed source. The
+firmware source SHA-256 is
+`14fa81dfc271568338b1bfedb126ce254f7a80dcdd4f0cb52dbc5074b35dc87d`.
+
+`artifacts/device-rev105/local-milestone.json` binds the package, source commit,
+123-suite host receipt, five-target native receipt, final ELF resource audit
+and console evidence. The manifest, matched receipt and package log are also
+retained with native evidence. No image was flashed, no device command was
+sent, and no PR, push or public release was created for this milestone.
+Rev103 remains the last installed checkpoint.
