@@ -121,12 +121,16 @@ static inline size_t cerberus_ble_discovery_list_label(
     if ((!out && capacity) || !cerberus_ble_discovery_list_ref_valid(s3, c5, c5_count, ref))
         return 0U;
     const char *name;
+    char response_name[CERBERUS_BLE_NAME_MAX_LENGTH + 1U];
     const uint8_t *address;
     if (ref.source == CERBERUS_BLE_DISCOVERY_LIST_S3) {
         name = s3->entries[ref.index].record.peer.name;
         address = s3->entries[ref.index].record.peer.address;
     } else {
         name = c5[ref.index].name;
+        if (cerberus_dual_ble_list_response_name(&c5[ref.index])) {
+            cerberus_dual_ble_list_label(&c5[ref.index], response_name); name = response_name;
+        }
         address = c5[ref.index].address;
     }
     size_t length = 0U;

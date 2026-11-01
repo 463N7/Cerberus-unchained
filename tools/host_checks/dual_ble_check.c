@@ -1,5 +1,6 @@
 #include "dual_ble_scan.h"
 #include "ble_family_wire.h"
+#include "dual_ble_family.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -21,6 +22,9 @@ typedef struct {
     cerberus_dual_ble_snapshot_row_t frozen[CERBERUS_DUAL_BLE_CAPACITY];
     cerberus_dual_ble_receive_metadata_t frozen_receive[CERBERUS_DUAL_BLE_CAPACITY];
     cerberus_dual_ble_family_wire_t frozen_family[CERBERUS_DUAL_BLE_CAPACITY];
+    cerberus_dual_ble_response_wire_t frozen_response[CERBERUS_DUAL_BLE_CAPACITY];
+    bool response_supported, response_read_unsupported;
+    unsigned response_reads, response_fault;
     bool family_supported, family_read_unsupported;
     unsigned family_reads, family_fault;
     uint8_t family_code;
@@ -70,6 +74,7 @@ static void snapshot_freeze(peer_t *p)
     memset(p->frozen,0,sizeof(p->frozen));
     memset(p->frozen_receive,0,sizeof(p->frozen_receive));
     memset(p->frozen_family,0,sizeof(p->frozen_family));
+    memset(p->frozen_response,0,sizeof(p->frozen_response));
     for (uint8_t i=0;i<p->count;++i) {
         cerberus_dual_ble_snapshot_row_t *r=&p->frozen[i];
         memcpy(r->address,(uint8_t[]){1,2,3,4,5,(uint8_t)(i/4U)},6);
@@ -81,10 +86,25 @@ static void snapshot_freeze(peer_t *p)
         p->frozen_receive[i]=(cerberus_dual_ble_receive_metadata_t){
             .source_kind=CERBERUS_DUAL_BLE_RECEIVE_LEGACY,.callback_length=3,
             .sid=0xff,.data_status=0xff,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
-        if(p->mode==CERBERUS_DUAL_BLE_FAMILY) {
+        if(cerberus_dual_ble_family_mode(p->mode)) {
             cerberus_dual_ble_family_evidence_t evidence;
             assert(cerberus_dual_ble_family_parse_ad(r->raw,r->raw_length,r->address,r->address_type,&evidence));
             assert(cerberus_dual_ble_family_wire_encode(&evidence,p->family_code,&p->frozen_family[i]));
+        }
+        if(cerberus_dual_ble_response_mode(p->mode)) {
+            cerberus_dual_ble_response_wire_t *response=&p->frozen_response[i];
+            *response=(cerberus_dual_ble_response_wire_t){.version=1,.state=CERBERUS_DUAL_BLE_RESPONSE_PRESENT,
+                .flags=CERBERUS_DUAL_BLE_RESPONSE_AGE_VALID|CERBERUS_DUAL_BLE_RESPONSE_RSSI_VALID|
+                    CERBERUS_DUAL_BLE_RESPONSE_NAME_COMPLETE,
+                .raw_length=7,.event_type=4,.name_length=5,.rssi=-49,
+                .original_sequence=UINT64_C(0x100000001),.response_sequence=UINT64_C(0x100000002),
+                .age_ms=9,.interval_us=8000,
+                .receive={.source_kind=CERBERUS_DUAL_BLE_RECEIVE_LEGACY,.callback_length=7,
+                    .sid=0xff,.data_status=0xff,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID},
+                .raw={6,9,'H','C','-','0','5'},.name={'H','C','-','0','5'}};
+            cerberus_dual_ble_family_evidence_t evidence;
+            assert(cerberus_dual_ble_family_parse_ad(response->raw,response->raw_length,r->address,r->address_type,&evidence));
+            assert(cerberus_dual_ble_response_family_encode(&evidence,p->family_code,&response->family));
         }
     }
     cerberus_dual_ble_snapshot_row_t *r=&p->frozen[0];
@@ -114,6 +134,37 @@ static void snapshot_freeze(peer_t *p)
     case 7:p->frozen_family[0].ibeacon_uuid[15]=1;break;
     default:break;
     }
+    cerberus_dual_ble_response_wire_t *response=&p->frozen_response[0];
+    switch(p->response_fault) {
+    case 1:response->version=2;break;
+    case 2:response->state=3;break;
+    case 3:response->flags|=0x80;break;
+    case 4:response->reserved_tail=1;break;
+    case 5:response->original_sequence=0;break;
+    case 6:response->response_sequence=response->original_sequence;break;
+    case 7:response->interval_us=CERBERUS_DUAL_BLE_RESPONSE_INTERVAL_US+1U;break;
+    case 8:response->age_ms=UINT32_MAX;break;
+    case 9:response->rssi=21;break;
+    case 10:response->name_length=33;break;
+    case 11:response->raw_length=32;break;
+    case 12:response->raw[30]=1;break;
+    case 13:response->name[31]=1;break;
+    case 14:response->receive.ad_validation=0;break;
+    case 15:response->receive.sid=1;break;
+    case 16:response->receive.source_kind=0;break;
+    case 17:response->event_type=0;break;
+    case 18:response->raw_flags=1;break;
+    case 19:response->family.family_code=p->family_code==6?1:6;break;
+    case 20:response->family.version=0;break;
+    case 21:response->family.ibeacon_uuid[0]=1;break;
+    case 22:p->frozen_receive[0].ad_validation=2;break;
+    case 23:r->event_type=3;break;
+    case 24:response->state=CERBERUS_DUAL_BLE_RESPONSE_UNKNOWN;break;
+    case 25:response->state=CERBERUS_DUAL_BLE_RESPONSE_NONE;break;
+    case 26:response->age_ms=r->age_ms+1U;break;
+    case 27:response->interval_us=10000U;break;
+    default:break;
+    }
 }
 static esp_err_t snapshot_exchange(peer_t *p,uint8_t cmd,const void *request,
     size_t request_size,void *reply,size_t reply_size)
@@ -123,26 +174,30 @@ static esp_err_t snapshot_exchange(peer_t *p,uint8_t cmd,const void *request,
     assert(b->boot_id==p->boot && b->job_id==p->job && p->attached);
     if(cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ ||
         cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA ||
-        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY) {
+        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY ||
+        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE) {
         bool family=cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY;
+        bool response=cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE;
         bool metadata=cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA;
         assert(request_size==22);
-        if(family) {++p->family_reads;if(p->family_read_unsupported)return ESP_ERR_NOT_SUPPORTED;}
+        if(response) {++p->response_reads;if(p->response_read_unsupported)return ESP_ERR_NOT_SUPPORTED;}
+        else if(family) {++p->family_reads;if(p->family_read_unsupported)return ESP_ERR_NOT_SUPPORTED;}
         else if(metadata) {
             ++p->metadata_reads;
             if(!p->metadata_supported || (p->metadata_fail_enabled&&p->metadata_reads>p->metadata_fail_after))
                 return ESP_ERR_NOT_SUPPORTED;
         } else ++p->snapshot_reads;
         const cerberus_dual_ble_snapshot_read_t *r=request;
-        assert(r->handle==p->snapshot.handle&&r->index<p->snapshot.count&&r->chunk<(family?16:11));
+        assert(r->handle==p->snapshot.handle&&r->index<p->snapshot.count&&r->chunk<(response?31:family?16:11));
         cerberus_dual_ble_snapshot_chunk_t out={.handle=r->handle,.index=r->index,.chunk=r->chunk};
         if(p->busy_read) {--p->busy_read;out.error=CERBERUS_DUAL_BLE_SNAPSHOT_BUSY;}
         else {
-            cerberus_dual_ble_snapshot_family_row_t wire={0};
+            cerberus_dual_ble_snapshot_response_row_t wire={0};
             memcpy(&wire,&p->frozen[r->index],sizeof(p->frozen[r->index]));
             memcpy((uint8_t*)&wire+102,&p->frozen_receive[r->index],sizeof(p->frozen_receive[r->index]));
-            wire.family=p->frozen_family[r->index];
-            size_t offset=r->chunk*10U, amount=(family?sizeof(wire):metadata?110U:102U)-offset;
+            wire.family.family=p->frozen_family[r->index];
+            wire.response=p->frozen_response[r->index];
+            size_t offset=r->chunk*10U, amount=(response?sizeof(wire):family?158U:metadata?110U:102U)-offset;
             if(amount>10U)amount=10U;out.byte_count=(uint8_t)amount;
             memcpy(out.data,(const uint8_t *)&wire+offset,amount);
             switch(p->fault) {
@@ -152,7 +207,7 @@ static esp_err_t snapshot_exchange(peer_t *p,uint8_t cmd,const void *request,
             case BAD_READ_LENGTH:--out.byte_count;break;
             case BAD_READ_ERROR:out.error=5;break;
             case BAD_READ_ERROR_BODY:out.error=CERBERUS_DUAL_BLE_SNAPSHOT_BUSY;break;
-            case BAD_READ_TAIL:if(r->chunk==(family?15:10))out.data[9]=1;break;
+            case BAD_READ_TAIL:if(r->chunk==(response?30:family?15:10))out.data[9]=1;break;
             default:break;
             }
         }
@@ -221,7 +276,8 @@ static esp_err_t exchange(void *ctx, uint8_t cmd, const void *request,
     }
     if((cmd>=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_BEGIN&&cmd<=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_STATUS) ||
         cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA ||
-        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY)
+        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY ||
+        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE)
         return snapshot_exchange(p,cmd,request,request_size,reply,reply_size);
     if (cmd == CERBERUS_SPI_COMMAND_DUAL_BLE_INFO) {
         assert(!request_size && reply_size==sizeof(cerberus_dual_ble_info_t));
@@ -238,6 +294,7 @@ static esp_err_t exchange(void *ctx, uint8_t cmd, const void *request,
         assert(cerberus_dual_ble_start_valid(r)); assert(r->boot_id==p->boot);
         if(r->mode==CERBERUS_DUAL_BLE_ANALYZER&&!p->analyzer_supported)return ESP_ERR_NOT_SUPPORTED;
         if(r->mode==CERBERUS_DUAL_BLE_FAMILY&&!p->family_supported)return ESP_ERR_NOT_SUPPORTED;
+        if(cerberus_dual_ble_response_mode(r->mode)&&!p->response_supported)return ESP_ERR_NOT_SUPPORTED;
         if (!p->attached) { ++p->starts; ++p->epoch; ++p->generation;
             p->attached=true; p->owned=true; p->state=CERBERUS_BLE_SCAN_RUNNING;
             p->job=r->job_id; p->mode=r->mode;p->family_code=r->reserved;
@@ -949,6 +1006,139 @@ static void check_family_reader(void)
     assert(s.snapshots==1&&positions==16);drain(&s,&p);
     puts("FAMILY158 reader: six selectors, 32x16 bounded transfer, immutable binding, no downgrade, malformed proof/fence, Stop and retained-bank scope passed");
 }
+static void response_start(cerberus_dual_ble_scan_t *s,peer_t *p,uint8_t family,uint8_t count)
+{
+    init_live(s,p);p->response_supported=true;p->count=count;
+    assert(cerberus_dual_ble_begin_response(s,family)==ESP_OK);
+    tick(s,p);assert(p->starts==1&&cerberus_dual_ble_response_mode(p->mode)&&p->family_code==family);
+}
+static void response_read_begin(cerberus_dual_ble_scan_t *s,peer_t *p,uint8_t family,uint8_t count)
+{
+    response_start(s,p,family,count);p->cost_ms=8;
+    for(unsigned n=0;n<100&&s->phase!=12;++n)fast_tick(s,p);
+    assert(s->phase==12&&!s->copied&&!p->response_reads&&p->snapshot_begins==1);
+}
+static void check_response_reader(void)
+{
+    cerberus_dual_ble_scan_t s;peer_t p;cerberus_dual_ble_view_t view;
+    init_live(&s,&p);
+    assert(cerberus_dual_ble_begin_response(NULL,0)==ESP_ERR_INVALID_ARG);
+    assert(cerberus_dual_ble_begin_response(&s,7)==ESP_ERR_INVALID_ARG);
+    assert(cerberus_dual_ble_begin(&s,CERBERUS_DUAL_BLE_RESPONSE_DISCOVERY,NULL,0)==ESP_ERR_INVALID_ARG);
+    assert(cerberus_dual_ble_begin(&s,CERBERUS_DUAL_BLE_RESPONSE_FAMILY,NULL,0)==ESP_ERR_INVALID_ARG&&!p.frames);
+    for(uint8_t family=0;family<=6;++family){
+        response_start(&s,&p,family,2);
+        assert(cerberus_dual_ble_begin_response(&s,family)==ESP_ERR_INVALID_STATE);
+        cerberus_dual_ble_view(&s,&view);
+        assert(view.requested_response&&!view.published_response&&view.requested_family==family);
+        await_snapshots(&s,&p,1);
+        assert(p.response_reads==62&&!p.family_reads&&!p.metadata_reads&&!p.snapshot_reads);
+        cerberus_dual_ble_view(&s,&view);
+        assert(view.requested_response&&view.published_response&&view.published_family==family);
+        cerberus_dual_ble_row_t row;cerberus_dual_ble_provenance_t proof;
+        assert(cerberus_dual_ble_copy_row(&s,0,&row,&proof));
+        assert(row.response.original_sequence==UINT64_C(0x100000001)&&
+            row.response.response_sequence==UINT64_C(0x100000002));
+        assert(row.callback_age_ms==17&&row.response.age_ms==9&&row.rssi==-85&&row.response.rssi==-49);
+        assert(!strcmp(row.name,"SNAP")&&!memcmp(row.response.name,"HC-05",5)&&row.raw[2]==6);
+        cerberus_dual_ble_family_evidence_t evidence;
+        assert(cerberus_dual_ble_response_present(&row,&proof));
+        assert(cerberus_dual_ble_response_classify(&row,&proof,&evidence)&&evidence.hc_name==CERBERUS_BLE_HC_05);
+        uint32_t age=123;
+        assert(cerberus_dual_ble_response_age(&row,row.request_started_ms,&age)&&age==9);
+        assert(cerberus_dual_ble_response_age(&row,row.request_started_ms+5,&age)&&age==14);
+        age=123;assert(!cerberus_dual_ble_response_age(&row,row.request_started_ms-1,&age)&&age==123);
+        assert(!cerberus_dual_ble_response_age(&row,UINT64_MAX,&age)&&age==123);
+        cerberus_dual_ble_provenance_t bad=proof;bad.epoch=0;
+        assert(!cerberus_dual_ble_response_present(&row,&bad)&&
+            !cerberus_dual_ble_response_classify(&row,&bad,&evidence)&&evidence.state==CERBERUS_DUAL_BLE_FAMILY_NO_PROVENANCE);
+        drain(&s,&p);
+        assert(cerberus_dual_ble_begin(&s,CERBERUS_DUAL_BLE_DISCOVERY,NULL,0)==ESP_OK);
+        cerberus_dual_ble_view(&s,&view);
+        assert(!view.requested_response&&view.published_response&&view.published_family==family);
+        assert(!memcmp(&row,&s.rows[0],sizeof(row))&&cerberus_dual_ble_response_present(&row,&proof));
+        await_snapshots(&s,&p,1);assert(!s.published_response&&!s.published_family&&
+            bytes_zero(&s.rows[0].response,sizeof(s.rows[0].response)));drain(&s,&p);
+    }
+    /* Explicit mode never silently becomes passive/old metadata on capability
+     * or command failure, including a failure after a prior committed bank. */
+    for(unsigned old=0;old<3;++old){
+        init_live(&s,&p);
+        if(old==0){p.version=1;p.snapshot_capability=false;}
+        else if(old==1)p.snapshot_capability=false;
+        assert(cerberus_dual_ble_begin_response(&s,0)==ESP_OK);fast_tick(&s,&p);
+        assert(s.error==ESP_ERR_NOT_SUPPORTED&&!p.starts&&!p.stops&&!p.response_reads&&cerberus_dual_ble_released(&s));
+    }
+    response_start(&s,&p,6,1);s.count=1;s.rows[0].rssi=-111;s.published_response=false;s.published_family=3;
+    cerberus_dual_ble_row_t saved=s.rows[0];p.response_read_unsupported=true;
+    for(unsigned n=0;n<200&&!s.error;++n)fast_tick(&s,&p);
+    assert(s.error==ESP_ERR_NOT_SUPPORTED&&p.response_reads==1&&!p.family_reads&&!p.metadata_reads&&!p.snapshot_reads);
+    assert(!s.snapshots&&!s.published_response&&s.published_family==3&&!memcmp(&saved,&s.rows[0],sizeof(saved)));drain(&s,&p);
+    for(unsigned fault=1;fault<=27;++fault){
+        response_start(&s,&p,6,1);s.count=1;s.rows[0].rssi=-112;saved=s.rows[0];p.response_fault=fault;
+        for(unsigned n=0;n<250&&!s.error;++n)fast_tick(&s,&p);
+        assert(s.error==ESP_ERR_INVALID_RESPONSE&&!s.snapshots&&!s.published_response&&
+            !memcmp(&saved,&s.rows[0],sizeof(saved)));drain(&s,&p);
+    }
+    for(unsigned fault=BAD_READ_HANDLE;fault<FAULT_END;++fault){
+        response_start(&s,&p,6,2);s.count=1;s.rows[0].rssi=-113;saved=s.rows[0];p.fault=fault;
+        for(unsigned n=0;n<300&&!s.error;++n)fast_tick(&s,&p);
+        assert(s.error==ESP_ERR_INVALID_RESPONSE&&!s.snapshots&&!memcmp(&saved,&s.rows[0],sizeof(saved)));drain(&s,&p);
+    }
+    /* An invalid original proof cannot hide behind an otherwise valid response;
+     * generic acquisition must carry no selected-family proof in its prefix. */
+    for(unsigned family=0;family<=6;family+=6){
+        response_read_begin(&s,&p,(uint8_t)family,1);
+        p.frozen_family[0].version=2;
+        for(unsigned n=0;n<200&&!s.error;++n)fast_tick(&s,&p);
+        assert(s.error==ESP_ERR_INVALID_RESPONSE&&!s.snapshots);drain(&s,&p);
+    }
+    /* Canonical UNKNOWN and proven NONE are different, supported publications.
+     * Original clocks and bytes do not get refreshed by either. */
+    for(unsigned state=0;state<2;++state){
+        response_read_begin(&s,&p,0,1);
+        p.frozen_response[0]=(cerberus_dual_ble_response_wire_t){0};
+        if(state)p.frozen_response[0]=(cerberus_dual_ble_response_wire_t){.version=1,
+            .state=CERBERUS_DUAL_BLE_RESPONSE_NONE,.original_sequence=UINT64_C(0x123456789)};
+        await_snapshots(&s,&p,1);assert(s.published_response&&s.rows[0].response.state==state);
+        uint32_t age=77;assert(!cerberus_dual_ble_response_age(&s.rows[0],p.now,&age)&&age==77);
+        assert(s.rows[0].callback_age_ms==17&&s.rows[0].raw[2]==6);drain(&s,&p);
+    }
+    /* Valid independent unknown response age does not become the original age. */
+    response_read_begin(&s,&p,0,1);p.frozen_response[0].flags&=(uint8_t)~CERBERUS_DUAL_BLE_RESPONSE_AGE_VALID;
+    p.frozen_response[0].age_ms=UINT32_MAX;await_snapshots(&s,&p,1);
+    uint32_t untouched=73;assert(!cerberus_dual_ble_response_age(&s.rows[0],p.now,&untouched)&&untouched==73);drain(&s,&p);
+    for(unsigned upper=0;upper<2;++upper){
+        response_read_begin(&s,&p,0,1);p.frozen_response[0].interval_us=8001;
+        p.frozen_response[0].age_ms=upper?8:9;await_snapshots(&s,&p,1);drain(&s,&p);
+    }
+    /* Beyond255 offset progress stays bounded and does not terminate early. */
+    response_start(&s,&p,6,32);p.lose_begin_replies=2;
+    unsigned peak=0;bool beyond=false;
+    for(unsigned n=0;n<1600&&!s.snapshots;++n){unsigned used=fast_tick(&s,&p);if(used>peak)peak=used;
+        if(s.copied>255U)beyond=true;}
+    assert(s.snapshots==1&&s.count==32&&p.response_reads==32U*31U&&peak==4&&beyond);
+    assert(p.snapshot_begins==3&&p.handle_counter==1&&s.rows[31].request_started_ms+1==p.snapshot_clock_ms);
+    assert(s.rows[31].response.age_ms==9&&!s.sweeps);
+    completed(&p);for(unsigned n=0;n<1500&&!s.sweeps;++n)fast_tick(&s,&p);
+    assert(s.sweeps==1&&p.complete_fences==1);drain(&s,&p);
+    /* Stop never finishes an in-flight row or fence, including bytes256..309. */
+    response_read_begin(&s,&p,0,1);unsigned positions=0;
+    for(unsigned n=0;n<200&&!s.snapshots;++n){
+        if(s.phase==12){cerberus_dual_ble_scan_t copy=s;peer_t other=p;copy.ops.context=&other;
+            unsigned reads=other.response_reads;drain(&copy,&other);
+            assert(other.response_reads==reads&&!copy.snapshots&&!copy.published_response);++positions;}
+        fast_tick(&s,&p);
+    }
+    assert(s.snapshots==1&&positions==31);drain(&s,&p);
+    /* Lost START still requires bounded owner cleanup; no response bank escapes. */
+    init_live(&s,&p);p.response_supported=true;p.lose_start=true;p.fail_stop=true;
+    assert(cerberus_dual_ble_begin_response(&s,6)==ESP_OK);
+    for(unsigned n=0;n<30&&!s.error;++n)tick(&s,&p);
+    assert(s.error==ESP_ERR_TIMEOUT&&p.starts==1&&!s.snapshots&&!cerberus_dual_ble_released(&s));
+    p.fail_stop=false;drain(&s,&p);
+    puts("Response310 reader: explicit before-RF capability, 64-bit binding, separate hints/ages, 32x31 bounded transfer, frozen bank, UNKNOWN/NONE, Stop and no passive downgrade passed");
+}
 int main(void)
 {
     cerberus_dual_ble_scan_t s;peer_t p;
@@ -1005,7 +1195,8 @@ int main(void)
     check_receive_metadata();
     check_analyzer_history();check_analyzer_controller();
     check_family_reader();
+    check_response_reader();
     printf("dual BLE reader: owner/replay/fence/lost-reply/age/typed-row checks passed; store=%zu row=%zu wire=%zu scratch=%zu bytes\n",
-        sizeof(s),sizeof(s.rows[0]),sizeof(s.rows[0].family),sizeof(s.snapshot_family));
+        sizeof(s),sizeof(s.rows[0]),sizeof(s.rows[0].response),sizeof(s.snapshot_response));
     return 0;
 }

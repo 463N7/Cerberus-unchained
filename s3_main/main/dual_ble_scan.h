@@ -22,6 +22,10 @@ typedef struct {
     /* Same frozen original callback, including evidence beyond the retained
      * 31-byte preview. Canonical zero for ordinary/older peer rows. */
     cerberus_dual_ble_family_wire_t family;
+    /* Separate response evidence from the same frozen original. Passive and
+     * older publications retain canonical UNKNOWN; no aggregate field or
+     * original callback time is refreshed by a response. */
+    cerberus_dual_ble_response_wire_t response;
 } cerberus_dual_ble_row_t;
 /* Historical identity of the published bank, not the currently running job.
  * Freeze beside a copied row. Generation zero is valid after wrap; the full
@@ -51,6 +55,7 @@ typedef struct {
         cerberus_dual_ble_snapshot_row_t snapshot_row;
         cerberus_dual_ble_snapshot_metadata_row_t snapshot_metadata;
         cerberus_dual_ble_snapshot_family_row_t snapshot_family;
+        cerberus_dual_ble_snapshot_response_row_t snapshot_response;
     };
     uint64_t snapshot_request_id, snapshot_request_started_ms, next_snapshot_ms;
     uint64_t published_epoch, published_boot_id, track_request_ms, next_poll_ms, last_tick_ms;
@@ -64,8 +69,10 @@ typedef struct {
     uint32_t inventory_replaced, inventory_dropped;
     uint64_t discovery_started_ms;
     esp_err_t error;
-    uint8_t phase, count, read_index, copied, retries, published_generation, inventory_retries;
+    uint16_t copied;
+    uint8_t phase, count, read_index, retries, published_generation, inventory_retries;
     uint8_t published_family;
+    bool published_response;
     bool enabled, extended, has_track, stop_requested;
     bool has_first_result, live_updates, discovery_clock_valid, snapshot_anchor_valid, snapshots_capable;
     bool inventory_known, inventory_replacement_enabled, pending_inventory_known, inventory_query_enabled;
@@ -78,6 +85,7 @@ typedef struct {
     /* Requested mode versus the last committed bank. Retained rows do not
      * become evidence of the newly requested family before publication. */
     uint8_t requested_family, published_family;
+    bool requested_response, published_response;
     uint32_t sweeps;
     uint32_t snapshots, first_result_ms;
     bool has_first_result, live_updates;
@@ -106,6 +114,10 @@ esp_err_t cerberus_dual_ble_begin(cerberus_dual_ble_scan_t *, uint8_t mode,
 /* Family codes 1..6 match the passive S3 family selectors. Unsupported peers
  * fail before START; this never substitutes ordinary discovery admission. */
 esp_err_t cerberus_dual_ble_begin_family(cerberus_dual_ble_scan_t *, uint8_t family);
+/* Explicit response acquisition: active1M/passive-coded. family0 selects
+ * ordinary discovery,1..6 focused admission. Unsupported peers fail before
+ * START; this never substitutes a passive or older read projection. */
+esp_err_t cerberus_dual_ble_begin_response(cerberus_dual_ble_scan_t *, uint8_t family);
 void cerberus_dual_ble_stop(cerberus_dual_ble_scan_t *);
 /* At most four transport calls; stop starting more at an eight-ms local
  * budget. Cache recovery may add one passive peer-status probe within a

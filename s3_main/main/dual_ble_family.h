@@ -1,6 +1,7 @@
 #pragma once
 #include "ble_family_wire.h"
 #include "dual_ble_scan.h"
+#include "ble_response.h"
 
 /* Historical publication proof, never a current radio lease. Generation0 is
  * valid after wrap; boot+epoch must be nonzero and index must be in the bank.
@@ -50,4 +51,60 @@ static inline bool cerberus_dual_ble_family_classify(const cerberus_dual_ble_row
         return cerberus_dual_ble_family_unavailable(out, CERBERUS_DUAL_BLE_FAMILY_INVALID_SOURCE);
     return cerberus_dual_ble_family_parse_ad(row->raw, row->raw_length,
         row->address, row->address_type, out);
+}
+
+/* Validate the response against its frozen original, never against current
+ * scanner fields or aggregate peer hints. Generic acquisition carries no
+ * original family proof; focused acquisition carries its selected code. */
+static inline bool cerberus_dual_ble_response_row_valid(const cerberus_dual_ble_row_t *row)
+{
+    if (!row) return false;
+    uint8_t selected = 0U;
+    const cerberus_dual_ble_family_wire_t empty = {0};
+    if (memcmp(&row->family, &empty, sizeof(empty))) {
+        cerberus_dual_ble_family_evidence_t evidence;
+        if (!cerberus_dual_ble_family_wire_decode(&row->family, &row->receive,
+                row->raw_length, row->event_type, row->raw_flags,
+                row->address, row->address_type, &evidence)) return false;
+        selected = row->family.family_code;
+    }
+    return cerberus_dual_ble_response_source_valid(&row->response, &row->receive,
+        row->raw_length, row->event_type, row->raw_flags, row->address,
+        row->address_type, selected);
+}
+
+static inline bool cerberus_dual_ble_response_present(const cerberus_dual_ble_row_t *row,
+    const cerberus_dual_ble_provenance_t *proof)
+{
+    return proof && proof->boot_id && proof->epoch && proof->index < CERBERUS_DUAL_BLE_CAPACITY &&
+        row && row->response.state == CERBERUS_DUAL_BLE_RESPONSE_PRESENT &&
+        cerberus_dual_ble_response_row_valid(row);
+}
+
+/* This reports response-only facts. It never merges name/UUID fields across
+ * originals and responses, and grants no connection or sound eligibility. */
+static inline bool cerberus_dual_ble_response_classify(const cerberus_dual_ble_row_t *row,
+    const cerberus_dual_ble_provenance_t *proof, cerberus_dual_ble_family_evidence_t *out)
+{
+    if (!out) return false;
+    if (!proof || !proof->boot_id || !proof->epoch || proof->index >= CERBERUS_DUAL_BLE_CAPACITY)
+        return cerberus_dual_ble_family_unavailable(out, CERBERUS_DUAL_BLE_FAMILY_NO_PROVENANCE);
+    if (!cerberus_dual_ble_response_present(row, proof) ||
+        !cerberus_dual_ble_response_family(&row->response, row->address, row->address_type, out))
+        return cerberus_dual_ble_family_unavailable(out, CERBERUS_DUAL_BLE_FAMILY_INVALID_SOURCE);
+    return out->available;
+}
+
+/* Conservative response age only: the caller supplies its current clock.
+ * Both sources retain FIRST BEGIN's original anchor. Unknown/backward/overflow
+ * values fail without changing output; no exact C5-to-S3 clock is invented. */
+static inline bool cerberus_dual_ble_response_age(const cerberus_dual_ble_row_t *row,
+    uint64_t now_ms, uint32_t *out)
+{
+    if (!out || !row || row->response.state != CERBERUS_DUAL_BLE_RESPONSE_PRESENT ||
+        !(row->response.flags & CERBERUS_DUAL_BLE_RESPONSE_AGE_VALID) ||
+        !cerberus_dual_ble_response_row_valid(row)) return false;
+    uint32_t age = cerberus_dual_ble_age_upper(row->response.age_ms, row->request_started_ms, now_ms);
+    if (age == UINT32_MAX) return false;
+    *out = age; return true;
 }

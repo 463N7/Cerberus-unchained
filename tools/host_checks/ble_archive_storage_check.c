@@ -36,6 +36,7 @@
 #include "archive_storage_types.h"
 #include "ble_archive.h"
 #include "ble_archive_family_fixture.h"
+#include "ble_archive_response_fixture.h"
 #define CERBERUS_STORAGE_MOUNT_PATH "sdcard"
 #define TAG "archive-storage-test"
 #define ESP_LOGI(...) ((void)0)
@@ -189,11 +190,11 @@ static esp_err_t load(size_t *length)
 static void failure_output(size_t length){CHECK(length==0);for(size_t i=0;i<sizeof(output);++i)CHECK(output[i]==0);}
 static void clean(void){CHECK(!locked&&!streams&&!descriptors&&locks==unlocks);}
 
-static void check_full_v5_document(void)
+static void check_full_v6_document(void)
 {
     static cerberus_ble_archive_t document,decoded;
     static uint8_t original[CERBERUS_BLE_ARCHIVE_MAX_SIZE];
-    CHECK(CERBERUS_STORAGE_BLE_ARCHIVE_MAX_BYTES==16928U&&CERBERUS_BLE_ARCHIVE_MAX_SIZE==16928U);
+    CHECK(CERBERUS_STORAGE_BLE_ARCHIVE_MAX_BYTES==27680U&&CERBERUS_BLE_ARCHIVE_MAX_SIZE==27680U);
     memset(&document,0,sizeof(document));document.count=64;document.saved_uptime_ms=100;
     for(unsigned i=0;i<64;++i){
         cerberus_ble_archive_row_t *r=&document.rows[i];
@@ -216,21 +217,24 @@ static void check_full_v5_document(void)
             r->advertisement_event_type=3;r->advertisement_flags=3;
             CHECK(archive_test_family_original(r->advertisement,&r->receive,&r->family,
                 r->address,r->address_type,(i%2)?'5':'6'));
+            CHECK(archive_test_response_row(r,i==63?6:(uint8_t)((i-32)%6+1),
+                (i%2)?6:0));
         }
     }
     setup();size_t encoded=0;
-    CHECK(cerberus_ble_archive_encode(&document,payload,sizeof(payload),&encoded)&&encoded==16928U);
-    CHECK(payload[8]==5&&payload[12]==8&&payload[13]==1);
-    CHECK(payload[32+63*264+216]==1&&payload[32+63*264+220]==CERBERUS_BLE_HC_05);
+    CHECK(cerberus_ble_archive_encode(&document,payload,sizeof(payload),&encoded)&&encoded==27680U);
+    CHECK(payload[8]==6&&payload[12]==176&&payload[13]==1);
+    CHECK(payload[32+63*432+216]==1&&payload[32+63*432+264]==1&&
+        payload[32+63*432+265]==CERBERUS_DUAL_BLE_RESPONSE_PRESENT);
     memcpy(original,payload,encoded);
     CHECK(save(encoded)==ESP_OK&&!strcmp(name,"B00001.BLE"));
     size_t got=0;CHECK(load(&got)==ESP_OK&&got==encoded&&!memcmp(output,payload,encoded));
     CHECK(cerberus_ble_archive_decode(output,got,&decoded)&&!memcmp(&decoded,&document,sizeof(document)));
     /* Failure publishing another full-size document leaves the prior mixed
-     * snapshot and its complete family suffix untouched. */
-    document.rows[63].receive.sid=1;
-    CHECK(archive_test_family_original(document.rows[63].advertisement,&document.rows[63].receive,
-        &document.rows[63].family,document.rows[63].address,document.rows[63].address_type,'6'));
+     * snapshot and its complete response/proof/age suffix untouched. */
+    CHECK(archive_test_response_row(&document.rows[63],1,6));
+    document.rows[63].c5_response.original_sequence+=100;
+    document.rows[63].c5_response.response_sequence+=100;
     CHECK(cerberus_ble_archive_encode(&document,payload,sizeof(payload),&encoded));
     const enum event publish_failures[]={WRITE,FLUSH,SYNC,CLOSE,RENAME};
     for(unsigned n=0;n<sizeof(publish_failures)/sizeof(publish_failures[0]);++n){
@@ -249,7 +253,7 @@ static void check_full_v5_document(void)
 
 int main(void)
 {
-    check_full_v5_document();
+    check_full_v6_document();
     for(unsigned length=1;length<=sizeof(payload);length=length<128?length+31:sizeof(payload)+1){
         setup();CHECK(save(length)==ESP_OK&&!strcmp(name,"B00001.BLE"));verify(name,payload,length);
         size_t got;CHECK(load(&got)==ESP_OK&&got==length&&!memcmp(output,payload,length));clean();

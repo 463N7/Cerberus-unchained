@@ -4,6 +4,7 @@
  * cross-receiver identity merge, or mutation of source evidence. */
 #include "dual_ble_scan.h"
 #include "ble_rssi.h"
+#include "dual_ble_family.h"
 #include <string.h>
 
 #define CERBERUS_DUAL_BLE_RECENT_MS UINT32_C(30000)
@@ -14,6 +15,14 @@ typedef enum {
     CERBERUS_DUAL_BLE_SORT_COUNT
 } cerberus_dual_ble_sort_t;
 
+/* Original display name has priority. A fallback is sourced only from the
+ * separately validated matched response; callers label it RSP NAME. */
+static inline bool cerberus_dual_ble_list_response_name(const cerberus_dual_ble_row_t *row)
+{
+    return row && !row->name[0] && row->response.state == CERBERUS_DUAL_BLE_RESPONSE_PRESENT &&
+        row->response.name_length && cerberus_dual_ble_response_row_valid(row);
+}
+
 static inline void cerberus_dual_ble_list_label(const cerberus_dual_ble_row_t *row,
     char out[CERBERUS_BLE_NAME_MAX_LENGTH + 1U])
 {
@@ -21,6 +30,11 @@ static inline void cerberus_dual_ble_list_label(const cerberus_dual_ble_row_t *r
     if (row && row->name[0]) {
         while (n < CERBERUS_BLE_NAME_MAX_LENGTH && row->name[n]) {
             unsigned char value = (unsigned char)row->name[n];
+            out[n++] = value >= 0x20U && value <= 0x7eU ? (char)value : '?';
+        }
+    } else if (cerberus_dual_ble_list_response_name(row)) {
+        while (n < row->response.name_length && n < CERBERUS_BLE_NAME_MAX_LENGTH) {
+            uint8_t value = row->response.name[n];
             out[n++] = value >= 0x20U && value <= 0x7eU ? (char)value : '?';
         }
     } else {

@@ -32,7 +32,7 @@ static void seed_native(cerberus_s3_ble_filter_t family)
     session.completed=live_session.completed=true;
     live_commands=live_observations=starts=stops=0;
     live_last_poll=0;fail_alloc=false;
-    discovery_ui_allocations=unified_sort_calls=unified_classify_calls=0;
+    discovery_ui_allocations=unified_sort_calls=unified_classify_calls=unified_response_classify_calls=0;
 }
 
 static void native_tick(uint64_t now,bool asleep)
@@ -809,6 +809,78 @@ static void unified_full_original_and_focus(const char *prefix)
     stop_and_release(1600);clean_live();
 }
 
+#include "dual_ble_response_ui_fixture.h"
+static void unified_response_families(const char *prefix)
+{
+    const uint8_t beacon[27]={26,0xff,0x4c,0,2,0x15,1,2,3,4};
+    const uint8_t findmy[]={3,3,0x44,0xfd},flipper[]={3,3,0x82,0x30};
+    const uint8_t flock[]={4,0xff,0xc8,9,1},meta[]={3,0xff,0x5f,0xfd},hc[]={6,9,'H','C','-','0','5'};
+    const struct {const uint8_t *data;size_t length;} cases[]={
+        {beacon,sizeof(beacon)},{findmy,sizeof(findmy)},{flipper,sizeof(flipper)},
+        {flock,sizeof(flock)},{meta,sizeof(meta)},{hc,sizeof(hc)}};
+    for(unsigned family=1;family<=6;++family){
+        seed_native((cerberus_s3_ble_filter_t)family);native_tick(1000,false);
+        companion_row(0,90,1,-20);companion_row(1,90,2,-40);
+        for(unsigned i=0;i<2;++i){
+            fixture_response_row(&companion_store.rows[i],cases[family-1].data,cases[family-1].length,
+                (uint8_t)family,1000);companion_store.rows[i].address_type=(uint8_t)(i+1);
+            companion_store.rows[i].rssi=(int8_t)(-20-(int)i*20);
+        }
+        ++companion_store.snapshots;clock_ms=1100;native_tick(1100,false);
+        CHECK(live_view.total_count==2&&ble_discovery_live->painted_count==2);
+        CHECK(strstr(live_badges[0],"C5 RSP HINT")&&!strstr(live_badges[0],"FULL HINT"));
+        CHECK(ble_discovery_live->painted_c5[0].address_type==1&&ble_discovery_live->painted_c5[1].address_type==2);
+        CHECK(ble_discovery_live->c5_family_bits[0]==0&&ble_discovery_live->c5_response_bits[0]&(1U<<(family-1)));
+        unsigned parsed=unified_classify_calls,rsp_parsed=unified_response_classify_calls,boundaries=all_boundary_calls();
+        clock_ms=1200;repaint_unified();CHECK(unified_classify_calls==parsed&&unified_response_classify_calls==rsp_parsed);
+        CHECK(all_boundary_calls()==boundaries);
+        if(cerberus_s3_ble_recent_supported((cerberus_s3_ble_filter_t)family)){
+            companion_store.rows[0].callback_age_ms=UINT32_MAX;companion_store.rows[0].timing_flags=0;
+            companion_store.rows[1].response.age_ms=UINT32_MAX;
+            companion_store.rows[1].response.flags&=(uint8_t)~CERBERUS_DUAL_BLE_RESPONSE_AGE_VALID;
+            ++companion_store.snapshots;live_ble_recent_only=true;clock_ms=30900;repaint_unified();
+            CHECK(live_view.total_count==1); /* Response bound exactly30,000ms; unknown excluded. */
+            clock_ms=30901;repaint_unified();CHECK(live_view.total_count==0);
+            live_ble_recent_only=false;repaint_unified();CHECK(live_view.total_count==2);
+        }
+        if(family==6){
+            memcpy(companion_store.rows[0].response.name,"HC-05",5);companion_store.rows[0].response.name_length=5;
+            companion_store.rows[0].response.flags|=CERBERUS_DUAL_BLE_RESPONSE_NAME_COMPLETE;
+            companion_store.rows[0].response.age_ms=100;companion_store.rows[0].response.flags|=CERBERUS_DUAL_BLE_RESPONSE_AGE_VALID;
+            companion_store.rows[0].timing_flags=3;companion_store.rows[0].callback_age_ms=900;
+            ++companion_store.snapshots;clock_ms=1100;repaint_unified();
+            CHECK(!strcmp(live_names[0],"HC-05")&&strstr(live_details[0],"RSP NAME"));
+            save(prefix,"response-family-name-list");
+            cerberus_dual_ble_row_t frozen=ble_discovery_live->painted_c5[0];
+            cerberus_dual_ble_provenance_t proof=ble_discovery_live->painted_c5_provenance[0];
+            memset(&companion_store.rows[0].response,0,sizeof(companion_store.rows[0].response));
+            ++companion_store.published_epoch;++companion_store.snapshots;
+            handle_live_scan_tap(20,135);CHECK(ble_mode==UI_BLE_MODE_C5);
+            CHECK(!memcmp(&frozen,&dual_ble_ui_selected,sizeof(frozen))&&!memcmp(&proof,&dual_ble_ui_selected_provenance,sizeof(proof)));
+            actual_c5_footer_tap(250,440);CHECK(archive_save_calls==1&&!memcmp(&frozen,&archive_saved_c5,sizeof(frozen)));
+            actual_c5_footer_tap(40,440);CHECK(ble_mode==UI_BLE_MODE_LIST);
+            repaint_unified();CHECK(live_view.total_count==1);
+        }
+        stop_and_release((uint64_t)clock_ms+1000);clean_live();
+    }
+    seed_native(CERBERUS_S3_BLE_FILTER_ALL);native_tick(1000,false);
+    companion_row(0,80,1,-20);fixture_response_row(&companion_store.rows[0],hc,sizeof(hc),0,1000);
+    memcpy(companion_store.rows[0].response.name,"HC-05",5);companion_store.rows[0].response.name_length=5;
+    ++companion_store.snapshots;clock_ms=1100;native_tick(1100,false);
+    CHECK(!strcmp(live_names[0],"HC-05")&&strstr(live_details[0],"RSP NAME")&&strstr(live_badges[0],"C5 LAST"));
+    dual_ble_ui_response_requests=true;companion_store.start.mode=CERBERUS_DUAL_BLE_DISCOVERY;
+    repaint_unified();CHECK(strstr(live_subtitle,"MODE CHANGING")&&strstr(live_subtitle,"RETAINED PASSIVE"));
+    companion_store.start.mode=CERBERUS_DUAL_BLE_RESPONSE_DISCOVERY;companion_store.error=ESP_ERR_NOT_SUPPORTED;
+    repaint_unified();CHECK(strstr(live_subtitle,"REQUESTS UNAVAILABLE")&&live_view.total_count==1);
+    save(prefix,"response-unavailable-retained-list");
+    companion_store.error=ESP_ERR_NO_MEM;repaint_unified();CHECK(strstr(live_subtitle,"C5 NO MEMORY"));
+    unsigned before=all_boundary_calls();
+    handle_live_scan_tap(20,113);CHECK(ble_mode==UI_BLE_MODE_C5);
+    dual_ble_live_tap(200,65);CHECK(!dual_ble_ui_response_requests&&all_boundary_calls()==before);
+    dual_ble_live_tap(30,65);CHECK(ble_mode==UI_BLE_MODE_LIST);
+    stop_and_release(2100);clean_live();
+}
+
 int main(int argc,char **argv)
 {
     CHECK(argc==2);
@@ -828,6 +900,7 @@ int main(int argc,char **argv)
     unified_family_recency(argv[1]);
     unified_family_cache_and_unavailable(argv[1]);
     unified_full_original_and_focus(argv[1]);
+    unified_response_families(argv[1]);
     printf("Ordinary BLE live UI: %u checks passed; active updates, frozen painted selection, scoped cleanup and C5 independence\n",live_checks);
     return 0;
 }

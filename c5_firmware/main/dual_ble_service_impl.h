@@ -11,6 +11,7 @@ static void dual_expire_locked(void)
         dual_track_seen = false;
         cerberus_ble_analyzer_counter_reset(&dual_analyzer);
         dual_snapshot.valid = false;
+        response_free_locked();
     }
 }
 
@@ -71,6 +72,11 @@ static void dual_start(const cerberus_dual_ble_start_t *r, cerberus_dual_ble_sta
         xSemaphoreGive(scanner_mutex);
         return;
     }
+    if (cerberus_dual_ble_response_mode(r->mode)) {
+        if (dual_response) { dual_status_locked(r->job_id,ESP_ERR_INVALID_STATE,out); xSemaphoreGive(scanner_mutex); return; }
+        dual_response=calloc(1U,sizeof(*dual_response));
+        if (!dual_response) { dual_status_locked(r->job_id,ESP_ERR_NO_MEM,out); xSemaphoreGive(scanner_mutex); return; }
+    }
     dual_attached = true;
     dual_job_highwater = r->job_id;
     dual_job_id = r->job_id;
@@ -89,7 +95,7 @@ static void dual_start(const cerberus_dual_ble_start_t *r, cerberus_dual_ble_sta
     xSemaphoreGive(scanner_mutex);
     error = start_scan(true);
     xSemaphoreTake(scanner_mutex, portMAX_DELAY);
-    if (error) dual_attached = false;
+    if (error) { dual_attached = false; response_free_locked(); }
     dual_status_locked(r->job_id, error, out);
     xSemaphoreGive(scanner_mutex);
 }
@@ -118,9 +124,10 @@ static void dual_snapshot_status_locked(int32_t error, cerberus_dual_ble_snapsho
 static bool dual_snapshot_command(uint8_t command, const void *request,
     size_t request_size, void *response, size_t *response_size)
 {
+    bool response_read = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE;
     bool family = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY;
     bool metadata = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA;
-    bool reading = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ || metadata || family;
+    bool reading = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ || metadata || family || response_read;
     bool beginning = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_BEGIN;
     cerberus_dual_ble_snapshot_read_t read = {0};
     cerberus_dual_ble_snapshot_begin_t begin = {0};
@@ -157,7 +164,7 @@ static bool dual_snapshot_command(uint8_t command, const void *request,
                 if (!begin.request_id || dual_snapshot.request_id == UINT64_MAX ||
                     begin.request_id != dual_snapshot.request_id + 1U ||
                     dual_snapshot.counter == UINT64_MAX ||
-                    (dual_mode != CERBERUS_DUAL_BLE_DISCOVERY && dual_mode != CERBERUS_DUAL_BLE_FAMILY) ||
+                    (dual_mode != CERBERUS_DUAL_BLE_DISCOVERY && !cerberus_dual_ble_family_mode(dual_mode) && !cerberus_dual_ble_response_mode(dual_mode)) ||
                     (scan_status.state != CERBERUS_BLE_SCAN_RUNNING &&
                      scan_status.state != CERBERUS_BLE_SCAN_COMPLETE)) error = ESP_ERR_INVALID_STATE;
                 else if (scan_status.stored_count > CERBERUS_DUAL_BLE_CAPACITY) error = ESP_ERR_INVALID_RESPONSE;
@@ -171,7 +178,7 @@ static bool dual_snapshot_command(uint8_t command, const void *request,
                     const uint32_t freeze_ms = (uint32_t)((uint64_t)freeze_us / 1000U);
                     memset(dual_snapshot.rows, 0, sizeof(dual_snapshot.rows));
                     memset(dual_snapshot.receive, 0, sizeof(dual_snapshot.receive));
-                    if (dual_mode == CERBERUS_DUAL_BLE_FAMILY)
+                    if (cerberus_dual_ble_family_mode(dual_mode))
                         memset(dual_snapshot.family, 0, sizeof(dual_snapshot.family));
                     for (uint8_t i = 0U; i < scan_status.stored_count; ++i) {
                         const cerberus_ble_record_t *r = &scan_results[i];
@@ -188,10 +195,18 @@ static bool dual_snapshot_command(uint8_t command, const void *request,
                                 r->advertisement_length, r->advertisement_event_type,
                                 r->advertisement_flags))
                             dual_snapshot.receive[i] = r->receive;
-                        if (dual_mode == CERBERUS_DUAL_BLE_FAMILY)
+                        if (cerberus_dual_ble_family_mode(dual_mode))
                             dual_snapshot.family[i] = scan_family[i];
+                        if (dual_response) response_freeze_locked(i,freeze_us);
                         out->age_ms = UINT32_MAX;
-                        if (r->original_time_valid && freeze_us >= 0) {
+                        if (dual_response && r->original_time_valid && freeze_us>=0) {
+                            uint64_t original_us=dual_response->live[i].original_us;
+                            if ((uint64_t)freeze_us>=original_us &&
+                                (uint64_t)freeze_us/1000U-original_us/1000U<UINT32_MAX) {
+                                out->age_ms=(uint32_t)((uint64_t)freeze_us/1000U-original_us/1000U);
+                                out->timing_flags|=CERBERUS_DUAL_BLE_SEEN;
+                            }
+                        } else if (!dual_response && r->original_time_valid && freeze_us >= 0) {
                             out->age_ms = freeze_ms - r->original_observed_ms;
                             out->timing_flags |= CERBERUS_DUAL_BLE_SEEN;
                         }
@@ -216,13 +231,14 @@ static bool dual_snapshot_command(uint8_t command, const void *request,
         if (!error) dual_last_contact_ms = dual_now_ms();
         if (!reading) dual_snapshot_status_locked(error, &status);
         else if (!error) {
-            if (family && dual_mode != CERBERUS_DUAL_BLE_FAMILY) error = ESP_ERR_INVALID_STATE;
+            if ((family && !cerberus_dual_ble_family_mode(dual_mode)) ||
+                (response_read && (!cerberus_dual_ble_response_mode(dual_mode) || !dual_response))) error = ESP_ERR_INVALID_STATE;
             else if (read.index >= dual_snapshot.count || read.chunk >=
-                    (family ? CERBERUS_DUAL_BLE_SNAPSHOT_FAMILY_CHUNKS : CERBERUS_DUAL_BLE_SNAPSHOT_CHUNKS))
+                    (response_read ? CERBERUS_DUAL_BLE_SNAPSHOT_RESPONSE_CHUNKS : family ? CERBERUS_DUAL_BLE_SNAPSHOT_FAMILY_CHUNKS : CERBERUS_DUAL_BLE_SNAPSHOT_CHUNKS))
                 error = ESP_ERR_INVALID_ARG;
             else {
                 const size_t offset = (size_t)read.chunk * CERBERUS_DUAL_BLE_SNAPSHOT_CHUNK_BYTES;
-                const size_t row_size = family ? CERBERUS_DUAL_BLE_SNAPSHOT_FAMILY_ROW_BYTES :
+                const size_t row_size = response_read ? CERBERUS_DUAL_BLE_SNAPSHOT_RESPONSE_ROW_BYTES : family ? CERBERUS_DUAL_BLE_SNAPSHOT_FAMILY_ROW_BYTES :
                     metadata ? CERBERUS_DUAL_BLE_SNAPSHOT_METADATA_ROW_BYTES : CERBERUS_DUAL_BLE_SNAPSHOT_ROW_BYTES;
                 const size_t remaining = row_size - offset;
                 const size_t length = remaining < sizeof(chunk.data) ? remaining : sizeof(chunk.data);
@@ -235,8 +251,12 @@ static bool dual_snapshot_command(uint8_t command, const void *request,
                     else if (position < CERBERUS_DUAL_BLE_SNAPSHOT_METADATA_ROW_BYTES)
                         chunk.data[i] = ((const uint8_t *)&dual_snapshot.receive[read.index])[
                             position - sizeof(cerberus_dual_ble_snapshot_row_t)];
-                    else chunk.data[i] = ((const uint8_t *)&dual_snapshot.family[read.index])[
-                        position - CERBERUS_DUAL_BLE_SNAPSHOT_METADATA_ROW_BYTES];
+                    else if (position < CERBERUS_DUAL_BLE_SNAPSHOT_FAMILY_ROW_BYTES) {
+                        if (cerberus_dual_ble_family_mode(dual_mode))
+                            chunk.data[i] = ((const uint8_t *)&dual_snapshot.family[read.index])[
+                                position - CERBERUS_DUAL_BLE_SNAPSHOT_METADATA_ROW_BYTES];
+                    } else chunk.data[i] = dual_response->frozen[read.index][
+                        position - CERBERUS_DUAL_BLE_SNAPSHOT_FAMILY_ROW_BYTES];
                 }
                 chunk.byte_count = (uint8_t)length;
             }
@@ -327,7 +347,8 @@ bool cerberus_ble_dual_command(uint8_t command, const void *request,
     if ((command >= CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_BEGIN &&
         command <= CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_STATUS) ||
         command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA ||
-        command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY)
+        command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY ||
+        command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE)
         return dual_snapshot_command(command, request, request_size, response, response_size);
     if (command == CERBERUS_SPI_COMMAND_DUAL_BLE_INFO) {
         if (request_size) return false;
@@ -412,6 +433,7 @@ bool cerberus_ble_dual_command(uint8_t command, const void *request,
             dual_attached = false; dual_track_seen = false;
             cerberus_ble_analyzer_counter_reset(&dual_analyzer);
             dual_snapshot.valid = false;
+            response_free_locked();
             out.state = CERBERUS_BLE_SCAN_IDLE; out.flags = 0U; out.error_code = 0;
         }
     }

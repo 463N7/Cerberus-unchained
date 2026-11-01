@@ -226,7 +226,7 @@ esp_err_t cerberus_display_draw_mono_bitmap(uint16_t x,uint16_t y,uint16_t w,uin
 #ifdef CERBERUS_DISCOVERY_NATIVE_TEST
 #include "s3_ble_discovery_native_fakes.h"
 static unsigned discovery_ui_allocations;
-static unsigned unified_sort_calls,unified_classify_calls;
+static unsigned unified_sort_calls,unified_classify_calls,unified_response_classify_calls;
 static uint8_t measured_unified_order(const cerberus_s3_ble_discovery_inventory_t *s3,
     const cerberus_dual_ble_row_t *c5,uint8_t count,cerberus_ble_discovery_list_source_t source,
     cerberus_ble_discovery_list_sort_t sort,uint32_t s3_mask,uint32_t c5_mask,
@@ -235,14 +235,19 @@ static uint8_t measured_unified_order(const cerberus_s3_ble_discovery_inventory_
 static bool measured_family_classify(const cerberus_dual_ble_row_t *row,
     const cerberus_dual_ble_provenance_t *proof,cerberus_dual_ble_family_evidence_t *out)
 {++unified_classify_calls;return cerberus_dual_ble_family_classify(row,proof,out);}
+static bool measured_response_classify(const cerberus_dual_ble_row_t *row,
+    const cerberus_dual_ble_provenance_t *proof,cerberus_dual_ble_family_evidence_t *out)
+{++unified_response_classify_calls;return cerberus_dual_ble_response_classify(row,proof,out);}
 static void *discovery_ui_calloc(size_t n,size_t size,unsigned capabilities)
 {++discovery_ui_allocations;return heap_caps_calloc(n,size,capabilities);}
 #define heap_caps_calloc discovery_ui_calloc
 #define cerberus_ble_discovery_list_order_masked measured_unified_order
 #define cerberus_dual_ble_family_classify measured_family_classify
+#define cerberus_dual_ble_response_classify measured_response_classify
 #include "s3_ble_discovery_live_ui.h"
 #undef cerberus_ble_discovery_list_order_masked
 #undef cerberus_dual_ble_family_classify
+#undef cerberus_dual_ble_response_classify
 #undef heap_caps_calloc
 #else
 /* This suite intentionally retains the legacy/frozen-bank presentation path
@@ -284,7 +289,7 @@ static void seed_list(void)
     memset(&companion_store,0,sizeof(companion_store));dual_ble_ui_store=&companion_store;
     companion_syncs=companion_retries=companion_exchanges=archive_save_calls=0;
     companion_released=true;dual_ble_ui_detail=dual_ble_ui_receive_info=dual_ble_ui_from_unified=false;
-    dual_ble_ui_error=ESP_OK;
+    dual_ble_ui_error=ESP_OK;dual_ble_ui_response_requests=dual_ble_ui_response_mode=dual_ble_ui_response_tab=false;
     reset();memset(observations,0,sizeof(observations));memset(&store,0,sizeof(store));
     memset(live_records,0,sizeof(live_records));memset(live_ble_focus_bits,0,sizeof(live_ble_focus_bits));
     memset(live_page,0,sizeof(live_page));sentinel_scan_session_init(&session);

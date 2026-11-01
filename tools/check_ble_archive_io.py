@@ -35,11 +35,11 @@ for name in ("CERBERUS_STORAGE_PATH_MAX", "CERBERUS_STORAGE_NAME_MAX",
 end = header.index("} cerberus_storage_owner_t;") + len("} cerberus_storage_owner_t;")
 constants.append(header[header.rindex("typedef enum", 0, end):end])
 (out / "archive_storage_types.h").write_text("\n".join(constants), encoding="utf-8")
-# Reuse the immutable, independently generated v1-v4 compatibility vectors.
+# Reuse the immutable, independently generated v1-v5 compatibility vectors.
 # They are literal historical bytes, not rewritten by the current encoder.
 codec_fixture = (root / "tools/host_checks/ble_archive_check.c").read_text(encoding="utf-8")
 vectors = []
-for name in ("hex", "v2_hex", "v3_hex", "v4_hex"):
+for name in ("hex", "v2_hex", "v3_hex", "v4_hex", "v5_golden"):
     literal = re.search(r"static const char " + name + r"\[\]\s*=\s*(?:\"[0-9a-f]+\"\s*)+;", codec_fixture)
     if literal is None:
         raise ValueError(f"Missing fixed archive compatibility vector: {name}")

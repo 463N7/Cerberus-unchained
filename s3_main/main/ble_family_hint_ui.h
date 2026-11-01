@@ -6,9 +6,9 @@
 #include "s3_ibeacon_hint_view.h"
 #include "s3_meta_hint_view.h"
 
-static inline esp_err_t ble_family_hint_ui_draw(
+static inline esp_err_t ble_family_hint_ui_draw_source(
     const cerberus_dual_ble_family_evidence_t *evidence, bool full_callback,
-    uint8_t full_length, uint8_t preview_length, bool saved, uint16_t top,
+    uint8_t full_length, uint8_t preview_length, bool saved, bool response, uint16_t top,
     uint8_t requested_page, uint8_t *painted_pages)
 {
     char line[64];
@@ -25,7 +25,8 @@ static inline esp_err_t ble_family_hint_ui_draw(
         if (evidence->categories & (1U << bit)) ++matches;
     }
     uint8_t page = requested_page < pages ? requested_page : 0U;
-    snprintf(line, sizeof(line), saved ? "SAVED C5 ORIGINAL / HINTS %u/%u" :
+    snprintf(line, sizeof(line), response ? (saved ? "SAVED C5 RESPONSE / HINTS %u/%u" :
+        "C5 MATCHED RESPONSE / HINTS %u/%u") : saved ? "SAVED C5 ORIGINAL / HINTS %u/%u" :
         full_callback ? "C5 FULL ORIGINAL / HINTS %u/%u" :
         address_only ? "C5 ORIGINAL + ADDRESS / HINTS %u/%u" :
         "C5 ORIGINAL ADV / HINTS %u/%u", page + 1U, pages);
@@ -33,13 +34,13 @@ static inline esp_err_t ble_family_hint_ui_draw(
     if (!available) {
         const char *reason = evidence->state == CERBERUS_DUAL_BLE_FAMILY_NO_PROVENANCE ? "SOURCE PROOF UNAVAILABLE" :
             evidence->state == CERBERUS_DUAL_BLE_FAMILY_RECEIVE_UNKNOWN ? "RECEIVE INFO UNAVAILABLE" :
-            evidence->state == CERBERUS_DUAL_BLE_FAMILY_TRUNCATED ? "FULL ORIGINAL NOT RETAINED" :
+            evidence->state == CERBERUS_DUAL_BLE_FAMILY_TRUNCATED ? (response ? "FULL RESPONSE NOT RETAINED" : "FULL ORIGINAL NOT RETAINED") :
             evidence->state == CERBERUS_DUAL_BLE_FAMILY_MALFORMED ? "AD EVIDENCE NOT CLASSIFIABLE" :
             evidence->state == CERBERUS_DUAL_BLE_FAMILY_INVALID_SOURCE ? "SOURCE ENVELOPE NOT VALID" :
-            saved ? "FULL ORIGINAL HINTS NOT SAVED" : "FAMILY EVIDENCE UNAVAILABLE";
+            saved ? (response ? "RESPONSE HINTS NOT SAVED" : "FULL ORIGINAL HINTS NOT SAVED") : "FAMILY EVIDENCE UNAVAILABLE";
         ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(top + 16U), reason, UI_MUTED, 1), TAG, "C5 hint unavailable");
         ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(top + 34U), "COMPLETE SOURCE EVIDENCE REQUIRED", UI_MUTED, 1), TAG, "C5 hint limit");
-        ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(top + 52U), "RAW ADV AND RX INFO STILL AVAILABLE", UI_MUTED, 1), TAG, "C5 hint recovery");
+        ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(top + 52U), response ? "RESPONSE RAW / RX INFO IF RETAINED" : "RAW ADV AND RX INFO STILL AVAILABLE", UI_MUTED, 1), TAG, "C5 hint recovery");
     } else if (!page) {
         if (full_callback) snprintf(line, sizeof(line), "FULL %u B / PREVIEW %u B / %u HINTS",
             full_length, preview_length, matches);
@@ -55,7 +56,7 @@ static inline esp_err_t ble_family_hint_ui_draw(
             evidence->categories & CERBERUS_DUAL_BLE_FAMILY_META_HINT ? "META " : "",
             evidence->categories & CERBERUS_DUAL_BLE_FAMILY_HC_NAME_HINT ? "HC NAME" : "");
         ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(top + 26U), line, UI_TEXT, 1), TAG, "C5 hint families");
-        ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(top + 38U), "ORIGINAL ADV ONLY / NO RESPONSE DATA", UI_MUTED, 1), TAG, "C5 hint provenance");
+        ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(top + 38U), response ? "MATCHED RESPONSE / ADV KEPT SEPARATE" : "ORIGINAL ADV ONLY / NO RESPONSE DATA", UI_MUTED, 1), TAG, "C5 hint provenance");
         ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(top + 50U), full_callback ? (saved ? "SAVED FORMAT HINTS / NOT VERIFIED ID" :
             "SD SAVES PREVIEW + DECODED HINTS") :
             evidence->meta_blocked ? "META ID RULE SUPPRESSES META HINT" :
@@ -148,10 +149,20 @@ static inline esp_err_t ble_family_hint_ui_draw(
         } else if (family == CERBERUS_DUAL_BLE_FAMILY_HC_NAME_HINT) {
             ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(top + 14U), "HC COMPLETE-NAME HINT", UI_TEXT, 1), TAG, "C5 HC hint");
             ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(top + 26U), cerberus_ble_hc_name_label(evidence->hc_name), UI_TEXT, 1), TAG, "C5 HC name");
-            ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(top + 38U), "EXACT NAME IN THIS ORIGINAL ADV", UI_MUTED, 1), TAG, "C5 HC source");
+            ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(top + 38U), response ? "EXACT NAME IN THIS MATCHED RESPONSE" : "EXACT NAME IN THIS ORIGINAL ADV", UI_MUTED, 1), TAG, "C5 HC source");
             ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(top + 50U), "NAME DOES NOT IDENTIFY HARDWARE", UI_MUTED, 1), TAG, "C5 HC scope");
         }
     }
     *painted_pages = pages;
     return ESP_OK;
+}
+
+/* Compatibility for existing original-only live/saved callers. */
+static inline esp_err_t ble_family_hint_ui_draw(
+    const cerberus_dual_ble_family_evidence_t *evidence, bool full_callback,
+    uint8_t full_length, uint8_t preview_length, bool saved, uint16_t top,
+    uint8_t requested_page, uint8_t *painted_pages)
+{
+    return ble_family_hint_ui_draw_source(evidence, full_callback, full_length,
+        preview_length, saved, false, top, requested_page, painted_pages);
 }

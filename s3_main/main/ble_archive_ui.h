@@ -9,6 +9,7 @@
 #include "cerberus_protocol.h"
 #include "ble_receive_info_ui.h"
 #include "ble_family_wire.h"
+#include "ble_response.h"
 #include "ble_family_hint_ui.h"
 
 typedef enum {
@@ -25,7 +26,7 @@ typedef struct {
     uint64_t job_id, painted_saved_uptime_ms, selected_saved_uptime_ms;
     uint64_t painted_age_ms[4], selected_age_ms;
     uint64_t release_started_ms;
-    bool painted_age_valid[4], selected_age_valid, raw_response, raw_hints;
+    bool painted_age_valid[4], selected_age_valid, raw_response, raw_hints, c5_response;
     bool job_pending, saving, has_document, paint_valid, selected_valid, release_pending;
     uint8_t page, raw_page, painted_count, hint_page, hint_pages;
     uint8_t order[CERBERUS_BLE_ARCHIVE_LIST_CAPACITY], filtered_count;
@@ -93,7 +94,7 @@ static inline bool ble_archive_ui_complete(ble_archive_ui_store_t *store,
     store->source_filter = CERBERUS_BLE_ARCHIVE_LIST_ALL;
     store->sort = CERBERUS_BLE_ARCHIVE_LIST_FILE;
     store->raw_response = false;
-    store->raw_hints = false; store->hint_page = store->hint_pages = 0U;
+    store->raw_hints = false; store->c5_response = false; store->hint_page = store->hint_pages = 0U;
     store->error = ESP_OK;
     store->view = BLE_ARCHIVE_UI_LIST;
     return true;
@@ -267,7 +268,11 @@ static inline esp_err_t ble_archive_ui_detail(ble_archive_ui_store_t *store)
     if (row->receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5) {
         ESP_RETURN_ON_ERROR(draw_centered(340, row->receive.source_kind ?
             "C5 RECEIVE INFO RETAINED" : "C5 RECEIVE INFO UNAVAILABLE", UI_TEXT, 1), TAG, "archive receive info");
-        snprintf(line, sizeof(line), "C5 RESPONSE BYTES UNAVAILABLE");
+        if (row->c5_response.state == CERBERUS_DUAL_BLE_RESPONSE_PRESENT)
+            snprintf(line, sizeof(line), "C5 MATCHED RESPONSE: %u OF %u BYTES", row->c5_response.raw_length,
+                row->c5_response.receive.callback_length);
+        else snprintf(line, sizeof(line), row->c5_response.state == CERBERUS_DUAL_BLE_RESPONSE_NONE ?
+            "NO ADMITTED C5 RESPONSE" : "C5 RESPONSE BYTES UNAVAILABLE");
     } else if (row->response_state == CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT) {
         snprintf(line, sizeof(line), "MATCHED RESPONSE: %u OF %u BYTES", row->response_length,
             row->response_original_length);
@@ -334,13 +339,34 @@ static inline uint8_t ble_archive_ui_fields(const cerberus_ble_archive_row_t *ro
     uint8_t offsets[15], uint8_t *bad_offset)
 { return ble_archive_ui_payload_fields(row->advertisement, row->advertisement_length, offsets, bad_offset); }
 
+static inline bool ble_archive_ui_c5_response_valid(const cerberus_ble_archive_row_t *row)
+{
+    if (row->receiver != CERBERUS_BLE_ARCHIVE_RECEIVER_C5 || !row->receiver_boot_id ||
+        !row->scan_epoch_valid || !row->scan_epoch) return false;
+    cerberus_dual_ble_family_evidence_t original;
+    const cerberus_dual_ble_family_wire_t empty = {0};
+    if (memcmp(&row->family, &empty, sizeof(empty)) &&
+        !cerberus_dual_ble_family_wire_decode(&row->family, &row->receive,
+            row->advertisement_length, row->advertisement_event_type, row->advertisement_flags,
+            row->address, row->address_type, &original)) return false;
+    return cerberus_dual_ble_response_source_valid(&row->c5_response, &row->receive,
+        row->advertisement_length, row->advertisement_event_type, row->advertisement_flags,
+        row->address, row->address_type, row->family.version ? row->family.family_code : 0U);
+}
+
 static inline esp_err_t ble_archive_ui_hints(ble_archive_ui_store_t *store)
 {
     const cerberus_ble_archive_row_t *row = &store->selected;
     cerberus_dual_ble_family_evidence_t evidence = {0};
     const cerberus_dual_ble_family_wire_t absent = {0};
-    bool present = memcmp(&row->family, &absent, sizeof(absent)) != 0;
-    if (present && (row->receiver != CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ||
+    bool response = store->c5_response;
+    bool present = response ? row->c5_response.state == CERBERUS_DUAL_BLE_RESPONSE_PRESENT :
+        memcmp(&row->family, &absent, sizeof(absent)) != 0;
+    if (response) {
+        if (!ble_archive_ui_c5_response_valid(row) ||
+            !cerberus_dual_ble_response_family(&row->c5_response, row->address, row->address_type, &evidence))
+            (void)cerberus_dual_ble_family_unavailable(&evidence, CERBERUS_DUAL_BLE_FAMILY_INVALID_SOURCE);
+    } else if (present && (row->receiver != CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ||
         !row->receiver_boot_id || !row->scan_epoch_valid || !row->scan_epoch ||
         !cerberus_dual_ble_family_wire_decode(&row->family, &row->receive,
             row->advertisement_length, row->advertisement_event_type,
@@ -349,19 +375,22 @@ static inline esp_err_t ble_archive_ui_hints(ble_archive_ui_store_t *store)
     /* An absent v1-v4/ordinary proof stays unknown. Never reconstruct a full
      * report's family facts from its short raw preview or aggregate fields. */
     char line[53];
-    ESP_RETURN_ON_ERROR(draw_centered(98, "HISTORICAL / NO LIVE RADIO", UI_MUTED, 1), TAG, "archive hint scope");
-    if (store->selected_age_valid) snprintf(line, sizeof(line), "AGE AT SAVE: <= %llu ms",
-        (unsigned long long)store->selected_age_ms);
+    ESP_RETURN_ON_ERROR(draw_centered(120, "HISTORICAL / NO LIVE RADIO", UI_MUTED, 1), TAG, "archive hint scope");
+    bool age_valid = response ? row->c5_response_age_upper_valid : store->selected_age_valid;
+    uint64_t age = response ? row->c5_response_age_upper_at_save_ms : store->selected_age_ms;
+    if (age_valid) snprintf(line, sizeof(line), "AGE AT SAVE: <= %llu ms", (unsigned long long)age);
     else snprintf(line, sizeof(line), "AGE AT SAVE: UNKNOWN");
-    ESP_RETURN_ON_ERROR(draw_centered(120, line, UI_TEXT, 1), TAG, "archive hint age");
+    ESP_RETURN_ON_ERROR(draw_centered(140, line, UI_TEXT, 1), TAG, "archive hint age");
     snprintf(line, sizeof(line), "SAVED BOOT UPTIME: %llu ms", (unsigned long long)store->selected_saved_uptime_ms);
-    ESP_RETURN_ON_ERROR(draw_centered(140, line, UI_MUTED, 1), TAG, "archive hint saved clock");
+    ESP_RETURN_ON_ERROR(draw_centered(160, line, UI_MUTED, 1), TAG, "archive hint saved clock");
     snprintf(line, sizeof(line), "C5 BOOT ID: %016llX", (unsigned long long)row->receiver_boot_id);
-    ESP_RETURN_ON_ERROR(draw_centered(160, line, UI_MUTED, 1), TAG, "archive hint source");
-    ESP_RETURN_ON_ERROR(draw_centered(180, "ORIGINAL ADV / NO MATCHED RESPONSE", UI_MUTED, 1), TAG, "archive hint provenance");
+    ESP_RETURN_ON_ERROR(draw_centered(180, line, UI_MUTED, 1), TAG, "archive hint source");
+    ESP_RETURN_ON_ERROR(draw_centered(200, response ? "MATCHED RESPONSE / ORIGINAL KEPT SEPARATE" :
+        "ORIGINAL ADV / RESPONSE KEPT SEPARATE", UI_MUTED, 1), TAG, "archive hint provenance");
     uint8_t pages = 0U;
-    ESP_RETURN_ON_ERROR(ble_family_hint_ui_draw(&evidence, present && evidence.available,
-        row->receive.callback_length, row->advertisement_length, true, 218U,
+    ESP_RETURN_ON_ERROR(ble_family_hint_ui_draw_source(&evidence, present && evidence.available,
+        response ? row->c5_response.receive.callback_length : row->receive.callback_length,
+        response ? row->c5_response.raw_length : row->advertisement_length, true, response, 218U,
         store->hint_page, &pages), TAG, "archive saved hints");
     ESP_RETURN_ON_ERROR(draw_centered(310, "DECODED HINTS / RAW PREVIEW IS SEPARATE", UI_MUTED, 1), TAG, "archive hint bytes");
     ESP_RETURN_ON_ERROR(draw_centered(332, "SAVED EVIDENCE / NOT CURRENT RADIO STATE", UI_MUTED, 1), TAG, "archive hint time");
@@ -378,30 +407,66 @@ static inline esp_err_t ble_archive_ui_raw(ble_archive_ui_store_t *store)
     const bool response = store->raw_response;
     const bool c5 = row->receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5;
     store->hint_pages = 0U;
-    ESP_RETURN_ON_ERROR(ble_archive_ui_clear(c5 && store->raw_hints ? "SAVED C5 HINTS" :
-        response ? (c5 ? "SAVED RECEIVE INFO" : "SAVED RESPONSE") :
-        "SAVED RAW ADV"), TAG, "archive raw");
+    ESP_RETURN_ON_ERROR(ble_archive_ui_clear(c5 && store->raw_hints ?
+        (store->c5_response ? "SAVED C5 RSP HINTS" : "SAVED C5 HINTS") :
+        response ? (c5 ? (store->c5_response ? "SAVED RSP RX INFO" : "SAVED RECEIVE INFO") : "SAVED RESPONSE") :
+        c5 && store->c5_response ? "SAVED C5 RESPONSE" : "SAVED RAW ADV"), TAG, "archive raw");
     if (c5) {
-        ESP_RETURN_ON_ERROR(draw_button(8, 54, 96, 28, !response && !store->raw_hints ? "RAW ADV *" : "RAW ADV"), TAG, "archive ADV selector");
+        ESP_RETURN_ON_ERROR(draw_button(8, 54, 96, 28, !response && !store->raw_hints ?
+            (store->c5_response ? "RAW RSP *" : "RAW ADV *") : (store->c5_response ? "RAW RSP" : "RAW ADV")), TAG, "archive ADV selector");
         ESP_RETURN_ON_ERROR(draw_button(112, 54, 96, 28, response ? "RX INFO *" : "RX INFO"), TAG, "archive receive selector");
         ESP_RETURN_ON_ERROR(draw_button(216, 54, 96, 28, store->raw_hints ? "HINTS *" : "HINTS"), TAG, "archive hint selector");
+        ESP_RETURN_ON_ERROR(draw_button(8, 84, 148, 24, store->c5_response ? "ORIGINAL ADV" : "ORIGINAL ADV *"), TAG, "archive original source");
+        ESP_RETURN_ON_ERROR(draw_button(164, 84, 148, 24, store->c5_response ? "MATCHED RSP *" : "MATCHED RSP"), TAG, "archive response source");
+        if (store->c5_response && (!ble_archive_ui_c5_response_valid(row) ||
+            row->c5_response.state != CERBERUS_DUAL_BLE_RESPONSE_PRESENT)) {
+            const char *state = ble_archive_ui_c5_response_valid(row) && row->c5_response.state == CERBERUS_DUAL_BLE_RESPONSE_NONE ?
+                "NO ADMITTED MATCHED RESPONSE" : "C5 RESPONSE EVIDENCE UNKNOWN";
+            ESP_RETURN_ON_ERROR(draw_centered(144, state, UI_TEXT, 1), TAG, "archive C5 response missing");
+            ESP_RETURN_ON_ERROR(draw_centered(176, "HISTORICAL / NO RESPONSE BYTES TO SHOW", UI_MUTED, 1), TAG, "archive C5 missing bytes");
+            ESP_RETURN_ON_ERROR(draw_centered(204, "THIS DOES NOT PROVE NO RESPONSE WAS SENT", UI_MUTED, 1), TAG, "archive C5 response absence");
+            return ble_archive_ui_back("BACK TO DETAILS");
+        }
         if (store->raw_hints) return ble_archive_ui_hints(store);
     } else {
         ESP_RETURN_ON_ERROR(draw_button(8, 54, 148, 28, response ? "ADVERTISEMENT" : "ADVERTISEMENT *"), TAG, "archive ADV selector");
         ESP_RETURN_ON_ERROR(draw_button(164, 54, 148, 28, response ? "RESPONSE *" : "RESPONSE"), TAG, "archive alternate selector");
     }
     if (c5 && response) {
-        ESP_RETURN_ON_ERROR(ble_receive_info_ui_draw(&row->receive, row->advertisement_length, 116U), TAG, "archive receive metadata");
+        ESP_RETURN_ON_ERROR(ble_receive_info_ui_draw(store->c5_response ? &row->c5_response.receive : &row->receive,
+            store->c5_response ? row->c5_response.raw_length : row->advertisement_length, 116U), TAG, "archive receive metadata");
         ESP_RETURN_ON_ERROR(draw_centered(224, "HISTORICAL EVIDENCE / RECORDED AT SAVE", UI_MUTED, 1), TAG, "archive receive history");
-        ESP_RETURN_ON_ERROR(draw_centered(244, "NOT CURRENT RADIO STATE", UI_MUTED, 1), TAG, "archive receive clock scope");
-        ESP_RETURN_ON_ERROR(draw_centered(274, "C5 RESPONSE BYTES UNAVAILABLE", UI_MUTED, 1), TAG, "archive receive response scope");
-        ESP_RETURN_ON_ERROR(draw_centered(294, "MISSING BYTES ARE NOT RECONSTRUCTED", UI_MUTED, 1), TAG, "archive receive preview scope");
+        char detail[53];
+        if (store->c5_response) {
+            if (row->c5_response.flags & CERBERUS_DUAL_BLE_RESPONSE_RSSI_VALID)
+                snprintf(detail, sizeof(detail), "SAVED RESPONSE RSSI %d dBm", row->c5_response.rssi);
+            else snprintf(detail, sizeof(detail), "SAVED RESPONSE RSSI UNKNOWN");
+            ESP_RETURN_ON_ERROR(draw_centered(244, detail, UI_TEXT, 1), TAG, "archive response RSSI");
+            if (row->c5_response_age_upper_valid) snprintf(detail, sizeof(detail), "RSP AGE AT SAVE: <= %llu ms",
+                (unsigned long long)row->c5_response_age_upper_at_save_ms);
+            else snprintf(detail, sizeof(detail), "RSP AGE AT SAVE: UNKNOWN");
+            ESP_RETURN_ON_ERROR(draw_centered(264, detail, UI_TEXT, 1), TAG, "archive response age");
+            memcpy(detail, "RSP NAME: ", 10U);size_t n=10U;
+            for (uint8_t i=0U;i<row->c5_response.name_length && i<32U;++i) {
+                uint8_t c=row->c5_response.name[i];detail[n++]=c>=32U&&c<=126U?(char)c:'.';
+            }
+            detail[n]='\0';
+            if (n==10U) snprintf(detail, sizeof(detail), "RSP NAME: NOT RETAINED");
+            ESP_RETURN_ON_ERROR(draw_centered(282, detail, UI_MUTED, 1), TAG, "archive response name");
+        } else {
+            ESP_RETURN_ON_ERROR(draw_centered(244, "NOT CURRENT RADIO STATE", UI_MUTED, 1), TAG, "archive receive clock scope");
+            ESP_RETURN_ON_ERROR(draw_centered(274, "RESPONSE HAS ITS OWN SOURCE TAB", UI_MUTED, 1), TAG, "archive receive response scope");
+        }
+        ESP_RETURN_ON_ERROR(draw_centered(314, "MISSING BYTES ARE NOT RECONSTRUCTED", UI_MUTED, 1), TAG, "archive receive preview scope");
         return ble_archive_ui_back("BACK TO DETAILS");
     }
-    const bool available = !response || row->response_state == CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT;
-    const uint8_t *data = response ? row->response : row->advertisement;
-    const uint8_t size = !available ? 0U : response ? row->response_length : row->advertisement_length;
-    const uint8_t flags = response ? row->response_flags : row->advertisement_flags;
+    const bool c5_rsp = c5 && store->c5_response;
+    const bool packet_response = c5_rsp || (!c5 && response);
+    const bool available = c5 ? true : !response || row->response_state == CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT;
+    const uint8_t *data = c5_rsp ? row->c5_response.raw : response ? row->response : row->advertisement;
+    const uint8_t size = !available ? 0U : c5_rsp ? row->c5_response.raw_length : response ? row->response_length : row->advertisement_length;
+    const uint8_t flags = c5_rsp ? row->c5_response.raw_flags : response ? row->response_flags : row->advertisement_flags;
+    const uint16_t shift = c5 ? 26U : 0U;
     uint8_t offsets[15], bad;
     uint8_t count = ble_archive_ui_payload_fields(data, size, offsets, &bad);
     if ((unsigned)store->raw_page * 3U >= count) store->raw_page = 0U;
@@ -413,38 +478,39 @@ static inline esp_err_t ble_archive_ui_raw(ble_archive_ui_store_t *store)
         ESP_RETURN_ON_ERROR(draw_centered(204, "THIS DOES NOT PROVE NO RESPONSE WAS SENT", UI_MUTED, 1), TAG, "archive absence scope");
         return ble_archive_ui_back("BACK TO DETAILS");
     }
-    if (response) snprintf(line, sizeof(line), "%u OF %u BYTES / EVENT %u / FLAGS %02X", size,
-        row->response_original_length, row->response_event_type, flags);
+    if (packet_response) snprintf(line, sizeof(line), "%u OF %u BYTES / EVENT %u / FLAGS %02X", size,
+        c5_rsp ? row->c5_response.receive.callback_length : row->response_original_length,
+        c5_rsp ? row->c5_response.event_type : row->response_event_type, flags);
     else snprintf(line, sizeof(line), "%u BYTES / EVENT %u / RAW FLAGS %02X", size,
         row->advertisement_event_type, flags);
-    ESP_RETURN_ON_ERROR(draw_centered(90, line, UI_TEXT, 1), TAG, "archive raw metadata");
+    ESP_RETURN_ON_ERROR(draw_centered(90U + shift, line, UI_TEXT, 1), TAG, "archive raw metadata");
     if (bad != UINT8_MAX) snprintf(line, sizeof(line), "MALFORMED OR CUT AD AT BYTE %u", bad);
     else snprintf(line, sizeof(line), "AD BOUNDARIES VALID / FIELD VALUES UNVERIFIED");
-    ESP_RETURN_ON_ERROR(draw_centered(108, line, UI_MUTED, 1), TAG, "archive raw structure");
+    ESP_RETURN_ON_ERROR(draw_centered(108U + shift, line, UI_MUTED, 1), TAG, "archive raw structure");
     bool truncated = (flags & CERBERUS_BLE_ADVERTISEMENT_TRUNCATED) != 0U;
     bool malformed = (flags & CERBERUS_BLE_ADVERTISEMENT_MALFORMED) != 0U;
     const char *limits = truncated && malformed ? "SOURCE: TRUNCATED + MALFORMED" : truncated ?
         "SOURCE: TRUNCATED / MISSING BYTES UNKNOWN" : malformed ?
         "SOURCE MARKED MALFORMED / RAW RETAINED" : "RAW FLAGS RETAINED / MISSING BYTES NOT FILLED";
-    ESP_RETURN_ON_ERROR(draw_centered(124, limits, UI_MUTED, 1), TAG, "archive raw limits");
+    ESP_RETURN_ON_ERROR(draw_centered(124U + shift, limits, UI_MUTED, 1), TAG, "archive raw limits");
     for (unsigned n = 0U; n < 2U; ++n) {
         size_t used = (size_t)snprintf(line, sizeof(line), "%02u: ", n * 16U);
         for (unsigned i = n * 16U; i < (n + 1U) * 16U && i < size; ++i)
             used += (size_t)snprintf(line + used, sizeof(line) - used, "%02X%s", data[i], i % 16U == 15U ? "" : " ");
-        ESP_RETURN_ON_ERROR(draw_centered(144U + n * 18U, line, UI_TEXT, 1), TAG, "archive hex bytes");
+        ESP_RETURN_ON_ERROR(draw_centered(144U + shift + n * 18U, line, UI_TEXT, 1), TAG, "archive hex bytes");
     }
     for (unsigned n = 0U; n < 3U && (unsigned)store->raw_page * 3U + n < count; ++n) {
         unsigned index = (unsigned)store->raw_page * 3U + n;
         uint8_t offset = offsets[index], length = data[offset];
         snprintf(line, sizeof(line), "AD %u / %02X / %s", index + 1U,
             data[offset + 1U], ble_archive_ui_ad_name(data[offset + 1U]));
-        ESP_RETURN_ON_ERROR(draw_centered(184U + n * 56U, line, UI_TEXT, 1), TAG, "archive field type");
+        ESP_RETURN_ON_ERROR(draw_centered(184U + shift + n * (c5 ? 48U : 56U), line, UI_TEXT, 1), TAG, "archive field type");
         for (unsigned part = 0U; part < 2U; ++part) {
             size_t used = 0U;
             for (unsigned i = part * 15U; i < (part + 1U) * 15U && i + 1U < length; ++i)
                 used += (size_t)snprintf(line + used, sizeof(line) - used, "%02X ", data[offset + 2U + i]);
             if (!used) snprintf(line, sizeof(line), "%s", part == 0U ? "[NO VALUE BYTES]" : "");
-            ESP_RETURN_ON_ERROR(draw_centered(200U + n * 56U + part * 14U, line, UI_MUTED, 1), TAG, "archive field value");
+            ESP_RETURN_ON_ERROR(draw_centered(200U + shift + n * (c5 ? 48U : 56U) + part * 14U, line, UI_MUTED, 1), TAG, "archive field value");
         }
     }
     if (!count) ESP_RETURN_ON_ERROR(draw_centered(232, "NO COMPLETE AD FIELDS", UI_MUTED, 1), TAG, "archive no fields");
@@ -524,14 +590,21 @@ static inline ble_archive_ui_action_t ble_archive_ui_tap(ble_archive_ui_store_t 
             store->selected_age_ms = store->painted_age_ms[row];
             store->selected_age_valid = store->painted_age_valid[row];
             store->selected_valid = true; store->paint_valid = false;
-            store->raw_page = 0U; store->raw_response = store->raw_hints = false;
+            store->raw_page = 0U; store->raw_response = store->raw_hints = false; store->c5_response = false;
             store->hint_page = store->hint_pages = 0U; store->view = BLE_ARCHIVE_UI_DETAIL;
             return BLE_ARCHIVE_UI_REDRAW;
         }
     } else if (store->view == BLE_ARCHIVE_UI_DETAIL && store->selected_valid &&
         x >= 64U && x < 256U && y >= 374U && y < 418U) {
         store->view = BLE_ARCHIVE_UI_RAW; store->raw_page = 0U;
-        store->raw_response = store->raw_hints = false; store->hint_page = store->hint_pages = 0U;
+        store->raw_response = store->raw_hints = false; store->c5_response = false; store->hint_page = store->hint_pages = 0U;
+        return BLE_ARCHIVE_UI_REDRAW;
+    } else if (store->view == BLE_ARCHIVE_UI_RAW && store->selected_valid &&
+        store->selected.receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5 && y >= 84U && y < 108U) {
+        if (x >= 8U && x < 156U) store->c5_response = false;
+        else if (x >= 164U && x < 312U) store->c5_response = true;
+        else return BLE_ARCHIVE_UI_NONE;
+        store->raw_page = store->hint_page = store->hint_pages = 0U;
         return BLE_ARCHIVE_UI_REDRAW;
     } else if (store->view == BLE_ARCHIVE_UI_RAW && store->selected_valid &&
         y >= 54U && y < 82U) {
@@ -558,8 +631,12 @@ static inline ble_archive_ui_action_t ble_archive_ui_tap(ble_archive_ui_store_t 
             store->selected.response_state != CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT))
             return BLE_ARCHIVE_UI_NONE;
         uint8_t offsets[15], bad;
-        unsigned count = store->raw_response ?
-            ble_archive_ui_payload_fields(store->selected.response,
+        if (store->selected.receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5 && store->c5_response &&
+            (!ble_archive_ui_c5_response_valid(&store->selected) ||
+             store->selected.c5_response.state != CERBERUS_DUAL_BLE_RESPONSE_PRESENT)) return BLE_ARCHIVE_UI_NONE;
+        unsigned count = store->selected.receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5 && store->c5_response ?
+            ble_archive_ui_payload_fields(store->selected.c5_response.raw, store->selected.c5_response.raw_length, offsets, &bad) :
+            store->raw_response ? ble_archive_ui_payload_fields(store->selected.response,
                 store->selected.response_state == CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT ?
                     store->selected.response_length : 0U, offsets, &bad) :
             ble_archive_ui_fields(&store->selected, offsets, &bad);

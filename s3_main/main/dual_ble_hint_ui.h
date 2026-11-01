@@ -18,3 +18,19 @@ static esp_err_t dual_ble_hint_ui_draw(const cerberus_dual_ble_row_t *row,
     *painted_pages = pages;
     return ESP_OK;
 }
+
+static esp_err_t dual_ble_response_hint_ui_draw(const cerberus_dual_ble_row_t *row,
+    const cerberus_dual_ble_provenance_t *proof, uint8_t requested_page, uint8_t *painted_pages)
+{
+    cerberus_dual_ble_family_evidence_t evidence;
+    *painted_pages = 0U;
+    bool available = cerberus_dual_ble_response_classify(row, proof, &evidence);
+    uint8_t pages = 0U;
+    ESP_RETURN_ON_ERROR(ble_family_hint_ui_draw_source(&evidence, available,
+        row->response.receive.callback_length, row->response.raw_length, false, true,
+        230U, requested_page, &pages), TAG, "C5 response hints");
+    if (pages > 1U)
+        ESP_RETURN_ON_ERROR(draw_small_button(8, 294, 304, 18, "NEXT HINT PAGE >"), TAG, "C5 response page");
+    *painted_pages = pages;
+    return ESP_OK;
+}

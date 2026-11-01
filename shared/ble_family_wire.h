@@ -87,20 +87,16 @@ static inline bool cerberus_dual_ble_family_wire_encode(
     *out = p; return true;
 }
 
-static inline bool cerberus_dual_ble_family_wire_decode(
+static inline bool cerberus_dual_ble_family_wire_unpack(
     const cerberus_dual_ble_family_wire_t *w,
-    const cerberus_dual_ble_receive_metadata_t *receive,
-    uint8_t raw_length, uint8_t event_type, uint8_t raw_flags,
     const uint8_t address[6], uint8_t address_type,
     cerberus_dual_ble_family_evidence_t *out)
 {
     if (!out) return false;
     memset(out, 0, sizeof(*out));
-    if (!w || !address || address_type > 3U || event_type > 3U || raw_length > 31U ||
-        (raw_flags & ~3U) || w->version != CERBERUS_DUAL_BLE_FAMILY_WIRE_VERSION ||
+    if (!w || !address || address_type > 3U || w->version != CERBERUS_DUAL_BLE_FAMILY_WIRE_VERSION ||
         w->family_code < 1U || w->family_code > 6U || (w->flags & ~7U) ||
-        w->reserved[0] || w->reserved[1] ||
-        !cerberus_dual_ble_receive_metadata_valid(receive, raw_length, event_type, raw_flags)) return false;
+        w->reserved[0] || w->reserved[1]) return false;
     cerberus_dual_ble_family_evidence_t p = {0};
     p.state = w->state; p.categories = w->categories; p.hc_name = w->hc_name;
     p.ibeacon_result = w->ibeacon_result;
@@ -118,10 +114,28 @@ static inline bool cerberus_dual_ble_family_wire_decode(
     p.ibeacon.minor = (uint16_t)w->ibeacon_minor_le[0] | ((uint16_t)w->ibeacon_minor_le[1] << 8U);
     p.ibeacon.measured_power_dbm = w->ibeacon_power;
     if (!cerberus_dual_ble_family_evidence_valid(&p)) return false;
+    if (p.available && p.flock_oui != cerberus_ble_flock_oui_hint(address, address_type)) return false;
+    *out = p; return true;
+}
+
+/* Original-only source gate remains unchanged. Response decoding uses its
+ * own strict envelope and only shares the canonical fact unpacker above. */
+static inline bool cerberus_dual_ble_family_wire_decode(
+    const cerberus_dual_ble_family_wire_t *w,
+    const cerberus_dual_ble_receive_metadata_t *receive,
+    uint8_t raw_length, uint8_t event_type, uint8_t raw_flags,
+    const uint8_t address[6], uint8_t address_type,
+    cerberus_dual_ble_family_evidence_t *out)
+{
+    if (!out) return false;
+    memset(out, 0, sizeof(*out));
+    cerberus_dual_ble_family_evidence_t p;
+    if (event_type > 3U || raw_length > 31U || (raw_flags & ~3U) ||
+        !cerberus_dual_ble_receive_metadata_valid(receive, raw_length, event_type, raw_flags) ||
+        !cerberus_dual_ble_family_wire_unpack(w, address, address_type, &p)) return false;
     if (p.available) {
         if (receive->source_kind == CERBERUS_DUAL_BLE_RECEIVE_UNKNOWN ||
-            receive->ad_validation != CERBERUS_DUAL_BLE_AD_VALID ||
-            p.flock_oui != cerberus_ble_flock_oui_hint(address, address_type)) return false;
+            receive->ad_validation != CERBERUS_DUAL_BLE_AD_VALID) return false;
     } else if ((p.state == CERBERUS_DUAL_BLE_FAMILY_RECEIVE_UNKNOWN) !=
         (receive->source_kind == CERBERUS_DUAL_BLE_RECEIVE_UNKNOWN)) return false;
     *out = p; return true;

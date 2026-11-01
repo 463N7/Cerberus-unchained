@@ -694,8 +694,18 @@ static void live_make_view(void)
             snprintf(live_subtitle, sizeof(live_subtitle), "STOPPING / WAITING FOR RADIO RELEASE");
         else if (discovery->error)
             snprintf(live_subtitle, sizeof(live_subtitle), "SCAN ERROR / %.30s", esp_err_to_name(discovery->error));
+        else if (dual_ble_ui_response_requests && companion.error == ESP_ERR_NOT_SUPPORTED)
+            snprintf(live_subtitle, sizeof(live_subtitle), "C5 REQUESTS UNAVAILABLE / S3 / C5 >");
+        else if (discovery->enabled && dual_ble_ui_response_requests != companion.requested_response)
+            snprintf(live_subtitle, sizeof(live_subtitle), "C5 MODE CHANGING / RETAINED %s / C5 >",
+                companion.published_response ? "REQUESTS" : "PASSIVE");
+        else if (discovery->enabled && dual_ble_ui_response_requests && !companion.error)
+            snprintf(live_subtitle, sizeof(live_subtitle), "C5 RESPONSE REQUESTS %s / %u / C5 >",
+                companion.stopping ? "STOP" : companion.receiving ? "LIVE" : companion.reading ? "READ" : "WAIT", companion.count);
         else if (ble_filter != CERBERUS_S3_BLE_FILTER_ALL && companion.error == ESP_ERR_NOT_SUPPORTED)
             snprintf(live_subtitle, sizeof(live_subtitle), "C5 FOCUS UNAVAILABLE / S3 VIEW / C5 >");
+        else if (companion.error == ESP_ERR_NO_MEM)
+            snprintf(live_subtitle, sizeof(live_subtitle), "C5 NO MEMORY / S3 VIEW / C5 >");
         else if (companion.error)
             snprintf(live_subtitle, sizeof(live_subtitle), "S3 VIEW / C5 ERROR %ld / TAP FOR C5 >", (long)companion.error);
         else if (discovery->enabled && ble_filter != CERBERUS_S3_BLE_FILTER_ALL)

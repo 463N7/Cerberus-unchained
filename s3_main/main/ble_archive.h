@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include "dual_ble_protocol.h"
 
-/* Portable, bounded, passive BLE evidence. No radio, filesystem, allocation,
+/* Portable, bounded BLE observation evidence. No radio, filesystem, allocation,
  * ESP-IDF types, native struct serialization, or active-target eligibility.
  * This is a saved snapshot, not a callback stream or a live scanner bank. */
 enum {
@@ -13,7 +13,8 @@ enum {
     CERBERUS_BLE_ARCHIVE_V2_VERSION = 2,
     CERBERUS_BLE_ARCHIVE_V3_VERSION = 3,
     CERBERUS_BLE_ARCHIVE_V4_VERSION = 4,
-    CERBERUS_BLE_ARCHIVE_VERSION = 5,
+    CERBERUS_BLE_ARCHIVE_V5_VERSION = 5,
+    CERBERUS_BLE_ARCHIVE_VERSION = 6,
     CERBERUS_BLE_ARCHIVE_MAX_ROWS_PER_RECEIVER = 32,
     CERBERUS_BLE_ARCHIVE_MAX_ROWS = 64,
     CERBERUS_BLE_ARCHIVE_NAME_MAX = 32,
@@ -28,8 +29,10 @@ enum {
     CERBERUS_BLE_ARCHIVE_V3_MAX_SIZE = 13344,
     CERBERUS_BLE_ARCHIVE_V4_ROW_SIZE = 216,
     CERBERUS_BLE_ARCHIVE_V4_MAX_SIZE = 13856,
-    CERBERUS_BLE_ARCHIVE_ROW_SIZE = 264,
-    CERBERUS_BLE_ARCHIVE_MAX_SIZE = 16928,
+    CERBERUS_BLE_ARCHIVE_V5_ROW_SIZE = 264,
+    CERBERUS_BLE_ARCHIVE_V5_MAX_SIZE = 16928,
+    CERBERUS_BLE_ARCHIVE_ROW_SIZE = 432,
+    CERBERUS_BLE_ARCHIVE_MAX_SIZE = 27680,
     CERBERUS_BLE_ARCHIVE_RSSI_UNAVAILABLE = 127,
 };
 enum {
@@ -106,6 +109,13 @@ typedef struct {
      * A canonical unavailable/nonmatching proof preserves dequalification;
      * it must not fall back to an earlier or short-preview positive hint. */
     cerberus_dual_ble_family_wire_t family;
+    /* v6: separate C5 response domain. The older S3 response fields above
+     * remain UNKNOWN for C5. Pre-v6/S3/LEGACY have canonical allzero C5
+     * response evidence. A response never replaces original bytes/time/RSSI.
+     * This is local callback correlation, not an authenticated air exchange. */
+    cerberus_dual_ble_response_wire_t c5_response;
+    uint64_t c5_response_age_upper_at_save_ms;
+    bool c5_response_age_upper_valid;
 } cerberus_ble_archive_row_t;
 
 typedef struct {
@@ -116,11 +126,13 @@ typedef struct {
 
 bool cerberus_ble_archive_validate(const cerberus_ble_archive_t *document);
 
-/* Encode v5: header32 + count*row264. Decode also accepts v4 row216, v3 row208, v2 row144
+/* Encode v6: header32 + count*row432. Decode also accepts v5 row264,
+ * v4 row216, v3 row208, v2 row144
  * and v1 row128/count<=32, mapping v1's unspecified source to LEGACY. V3
  * response evidence remains intact. Pre-v3 rows have UNKNOWN response;
  * all pre-v4 rows have UNKNOWN receive metadata. Every pre-v5 row has absent
- * allzero full-family proof, never fabricated provenance.
+ * allzero full-family proof, never fabricated provenance. Pre-v6 rows have
+ * allzero UNKNOWN C5 response evidence and unknown response age bounds.
  * Little-endian integers, zero padding
  * and reserved bytes. CRC-32/ISO-HDLC covers ALL encoded bytes, treating the
  * header CRC field as zero. This detects corruption, not authenticity.
@@ -148,4 +160,8 @@ bool cerberus_ble_archive_age_upper_at_save(const cerberus_ble_archive_t *docume
 /* Exact historical age of a PRESENT S3 response with a valid independent
  * source time. Rejects unavailable response/time; leaves output untouched. */
 bool cerberus_ble_archive_response_age_at_save(const cerberus_ble_archive_t *document,
+    size_t index, uint64_t *age_ms);
+/* Independent conservative C5 response age at SAVE; never subtract from S3
+ * uptime to invent a timestamp. Rejects unknown bounds and other receivers. */
+bool cerberus_ble_archive_c5_response_age_upper_at_save(const cerberus_ble_archive_t *document,
     size_t index, uint64_t *age_ms);

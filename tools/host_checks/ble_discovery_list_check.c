@@ -1,5 +1,6 @@
 #undef NDEBUG
 #include <stdio.h>
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -383,10 +384,33 @@ static void source_masks(void)
         }
 }
 
+#include "dual_ble_response_ui_fixture.h"
+static void response_name_order(void)
+{
+    const uint8_t bytes[]={6,9,'H','C','-','0','5'};
+    initialize(1,2);strcpy(inventory.entries[0].record.peer.name,"Bravo");
+    for(unsigned i=0;i<2;++i){
+        fixture_response_row(&companion[i],bytes,sizeof(bytes),0,1000);
+        memcpy(companion[i].response.name,i?"Zulu":"Alpha",i?4:5);
+        companion[i].response.name_length=i?4:5;
+    }
+    freeze_inputs();CHECK(order(2,CERBERUS_BLE_DISCOVERY_LIST_ALL,CERBERUS_BLE_DISCOVERY_LIST_NAME,false,1000)==3);
+    expect(0,CERBERUS_BLE_DISCOVERY_LIST_C5,0);expect(1,CERBERUS_BLE_DISCOVERY_LIST_S3,0);expect(2,CERBERUS_BLE_DISCOVERY_LIST_C5,1);
+    char name[33];CHECK(cerberus_ble_discovery_list_label(&inventory,companion,2,ref(2,0),name,sizeof(name))==5);
+    CHECK(!strcmp(name,"Alpha"));unchanged();
+    strcpy(companion[0].name,"Omega");freeze_inputs();
+    CHECK(order(2,CERBERUS_BLE_DISCOVERY_LIST_ALL,CERBERUS_BLE_DISCOVERY_LIST_NAME,false,1000)==3);
+    expect(0,1,0);expect(1,2,0);expect(2,2,1);unchanged();
+    companion[0].name[0]=0;companion[0].response.original_sequence=0;
+    CHECK(!cerberus_dual_ble_list_response_name(&companion[0]));
+    CHECK(cerberus_ble_discovery_list_label(&inventory,companion,2,ref(2,0),name,sizeof(name))==17);
+    CHECK(!strcmp(name,"46:45:44:43:42:41"));
+}
+
 int main(void)
 {
     capacity_and_sources(); typed_identity_and_ties(); signal_semantics(); labels();
-    ages_and_recent(); invalid_arguments(); generated_cross_product();source_masks();
+    ages_and_recent(); invalid_arguments(); generated_cross_product();source_masks();response_name_order();
     printf("BLE discovery list PASS: %u checks; 64 source refs, stable ordering, typed identity and exact/upper ages\n", checks);
     return 0;
 }

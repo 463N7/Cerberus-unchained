@@ -7,6 +7,8 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include "ble_response.h"
 
 static unsigned checks;
 #define CHECK(x) do { ++checks; assert(x); } while (0)
@@ -40,6 +42,7 @@ struct ble_gap_disc_params { unsigned itvl,window,filter_policy,limited,passive,
 struct ble_gap_ext_disc_params { unsigned itvl,window,passive; };
 
 #include "c5_ble_watch_record_type.h"
+#include "../../c5_firmware/main/ble_response_state.h"
 static int mutex;
 static void *scanner_mutex=&mutex;
 static bool locked,host_synced=true,scan_cancelled;
@@ -52,6 +55,9 @@ static cerberus_watch_capture_t watch_capture;
 static cerberus_ble_activity_capture_t activity_capture;
 static uint64_t watch_capture_epoch;
 static uint32_t scan_callback_epoch;
+static uint64_t dual_epoch;
+static c5_response_context_t *dual_response;
+static struct {bool valid;} dual_snapshot;
 /* Ordinary Watch never owns the separate companion protocol. Keep the actual
  * scanner admission and callback branches compiled; companion lifecycle and
  * typed-target behavior are exercised by check_dual_ble.py. */
@@ -94,14 +100,15 @@ static bool another_radio_operation_is_active(void){return false;}
 static int ble_gap_ext_disc(uint8_t type,unsigned a,unsigned b,unsigned c,unsigned d,unsigned e,
     const struct ble_gap_ext_disc_params *one,const struct ble_gap_ext_disc_params *coded,
     int (*cb)(struct ble_gap_event *,void *),void *arg)
-{CHECK(!type&&!a&&!b&&!c&&!d&&!e&&one==coded&&one->passive==1&&one->itvl==160&&one->window==80);
+{CHECK(!type&&!a&&!b&&!c&&!d&&!e&&coded->passive==1&&one->passive==(cerberus_dual_ble_response_mode(dual_mode)&&dual_response?0U:1U)&&one->itvl==160&&one->window==80);
  ++rf_starts;rf_callback=cb;rf_arg=arg;return rf_error;}
 #else
 static int ble_gap_disc(uint8_t type,int forever,const struct ble_gap_disc_params *p,
     int (*cb)(struct ble_gap_event *,void *),void *arg)
-{CHECK(!type&&!forever&&p->passive==1&&!p->filter_duplicates&&!p->itvl&&!p->window);
+{CHECK(!type&&!forever&&p->passive==(cerberus_dual_ble_response_mode(dual_mode)&&dual_response?0U:1U)&&!p->filter_duplicates&&p->itvl==(p->passive?0U:160U)&&p->window==(p->passive?0U:80U));
  ++rf_starts;rf_callback=cb;rf_arg=arg;return rf_error;}
 #endif
+#include "../../c5_firmware/main/ble_response_impl.h"
 #include "c5_ble_watch_timing_impl.h"
 
 /* Canonical 31-byte BLE Service Data carrying BasicID, independently encoded. */
@@ -326,9 +333,32 @@ static void family_actual_lifecycle(void)
     }
     dual_attached=false;analyzer_callback_exhausted=false;
 }
+static void response_actual_lifecycle(void)
+{
+    for(unsigned mode=4;mode<=5;++mode){
+        dual_attached=true;dual_mode=(uint8_t)mode;dual_family=mode==5?6:0;dual_version=2;
+        analyzer_callback_exhausted=false;scan_callback_epoch=100;dual_radio_active=false;dual_error=0;
+        scan_status.state=CERBERUS_BLE_SCAN_IDLE;
+        CHECK(start_scan(true)==ESP_ERR_INVALID_STATE); /* No allocation, no active RF. */
+        dual_response=calloc(1,sizeof(*dual_response));CHECK(dual_response);clock_us=20000000;
+        CHECK(start_scan(true)==ESP_OK&&scan_inventory.enabled);start_scan_event(&start_event);
+        CHECK(dual_radio_active);complete();CHECK(!dual_radio_active&&dual_response);
+        for(unsigned fault=0;fault<3;++fault){
+            if(!dual_response)dual_response=calloc(1,sizeof(*dual_response));CHECK(dual_response);
+            dual_error=0;clock_us+=100000;CHECK(start_scan(true)==ESP_OK);
+            infer_error=fault==0?9:0;rf_error=fault==1?8:0;callout_error=fault==2?7:0;
+            start_scan_event(&start_event);CHECK(scan_status.state==CERBERUS_BLE_SCAN_ERROR&&dual_error&&!dual_radio_active&&!dual_response);
+            infer_error=rf_error=callout_error=0;
+        }
+        dual_response=calloc(1,sizeof(*dual_response));CHECK(dual_response);
+        scan_status.state=CERBERUS_BLE_SCAN_IDLE;scan_callback_epoch=UINT32_MAX;unsigned before=queued;
+        CHECK(start_scan(true)==ESP_ERR_INVALID_STATE&&queued==before&&!dual_radio_active);
+        dual_attached=false;response_free_locked();CHECK(!dual_response);
+    }
+}
 int main(void)
 {
-    entry_clock_and_qualification();stale_delivery_and_saturation();extended_admission();motion_wire();analyzer_actual_lifecycle();family_actual_lifecycle();
+    entry_clock_and_qualification();stale_delivery_and_saturation();extended_admission();motion_wire();analyzer_actual_lifecycle();family_actual_lifecycle();response_actual_lifecycle();
     CHECK(!locked);printf("C5 BLE timing (%s): %u checks; actual passive start/GAP/getters, atomic motion and own Location age, partial/response/malformed exclusion, stale callback/completion, zero/negative/full-width time, replacement and epoch saturation passed.\n",TEST_EXTENDED?"extended":"legacy",checks);
     return 0;
 }

@@ -31,8 +31,9 @@ esp_err_t cerberus_ble_scanner_get_result(
     uint8_t generation,
     uint8_t index,
     cerberus_ble_scan_result_payload_t *result);
-/* RAW_ADVERTISEMENT returns one bounded packet. Scan responses are not
-   solicited, captured, or merged with advertisements. */
+/* RAW_ADVERTISEMENT returns one bounded original. Explicit companion
+ * response scans capture a separate source through READ_RESPONSE only;
+ * response bytes are never merged into this legacy original API. */
 esp_err_t cerberus_ble_scanner_get_data_chunk(
     uint8_t generation,
     uint8_t index,

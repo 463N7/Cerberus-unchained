@@ -1,5 +1,9 @@
 # BLE SD snapshots and offline analysis
 
+## Rev110 source checkpoint
+
+V6 adds C5 matched-response metadata, preview, full-callback decoded family evidence and an independent upper age bound at save. V1-v5 remain readable with missing response evidence explicit. Saved C5 views select ADV or RSP independently of RAW, RX and HINTS. Opening a report does not use either radio or the current boot clock. Rev109 remains installed; [rev110](DUAL_RADIO_REV110.md) records the local candidate and validation. Earlier sections below keep their revision-specific scope.
+
 Current source work in [rev109](DUAL_RADIO_REV109.md) extends saved reports to
 v5 with the frozen C5 full-original family record and offline HINTS, while
 retaining v1-v4 readers. The raw preview remains 31 bytes. The matched rev109

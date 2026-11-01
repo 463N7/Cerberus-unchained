@@ -56,7 +56,7 @@ for extended in (0, 1):
     exe = out / f"c5-ble-watch-timing-{extended}.exe"
     subprocess.run([
         sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
-        f"-DTEST_EXTENDED={extended}", "-I", str(out), "-I", str(root / "shared"),
+        f"-DTEST_EXTENDED={extended}", "-I", str(out), "-I", str(root / "shared"), "-I", str(root / "c5_firmware/main"),
         str(root / "tools/host_checks/c5_ble_watch_timing_check.c"),
         str(root / "shared/cerberus_watch_capture.c"), str(root / "shared/sentinel_watch_protocol.c"),
         "-o", str(exe),

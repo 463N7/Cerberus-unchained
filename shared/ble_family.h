@@ -1,6 +1,6 @@
 #pragma once
 
-/* Passive hints from one complete original advertisement, not authenticated
+/* Format hints from one complete AD source, not authenticated
  * identity, response correlation or action eligibility. The payload parser is
  * independent of receiver/UI types; the frozen C5 proof gate lives in the S3 wrapper.
  * No clock, allocation, RF or transport calls. Caller keeps inputs/output
@@ -49,8 +49,8 @@ static inline bool cerberus_dual_ble_family_unavailable(
     return false;
 }
 
-/* Full delivered container only, <=255 bytes. The caller establishes that it
- * is an original and complete before invoking this portable parser. It does
+/* Full delivered container only, <=255 bytes. The caller establishes its
+ * original/response source and completeness before invoking this parser. It does
  * not accept fragments or join other reports. A true zero-category result
  * means valid AD with no supported hint; false means unclassifiable evidence.
  * Categories, including blocked Meta identifiers, are same-report only.

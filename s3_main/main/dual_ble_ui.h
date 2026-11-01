@@ -19,6 +19,9 @@ static cerberus_dual_ble_sort_t dual_ble_ui_sort = CERBERUS_DUAL_BLE_SORT_SIGNAL
 static bool dual_ble_ui_recent_only;
 static uint8_t dual_ble_ui_target[6], dual_ble_ui_type;
 static uint8_t dual_ble_ui_family;
+/* Explicit session preference; boot/default stays passive. */
+static bool dual_ble_ui_response_requests, dual_ble_ui_response_mode;
+static bool dual_ble_ui_response_tab;
 static int dual_ble_ui_mode = -1;
 static bool dual_ble_ui_attempted, dual_ble_ui_detail;
 static bool dual_ble_ui_receive_info;
@@ -53,12 +56,14 @@ static void dual_ble_ui_sync_request(int mode, uint8_t family,
         (mode == CERBERUS_DUAL_BLE_TRACK && (!address || type > 3U)) ||
         (mode == CERBERUS_DUAL_BLE_FAMILY && (!family || family > 6U))) mode = -1;
     if (mode != CERBERUS_DUAL_BLE_FAMILY) family = 0U;
-    bool changed = mode != dual_ble_ui_mode || (mode == CERBERUS_DUAL_BLE_TRACK &&
+    bool response = dual_ble_ui_response_requests &&
+        (mode == CERBERUS_DUAL_BLE_DISCOVERY || mode == CERBERUS_DUAL_BLE_FAMILY);
+    bool changed = response != dual_ble_ui_response_mode || mode != dual_ble_ui_mode || (mode == CERBERUS_DUAL_BLE_TRACK &&
         (type != dual_ble_ui_type || memcmp(address, dual_ble_ui_target, 6U))) ||
         family != dual_ble_ui_family;
     if (changed) {
         dual_ble_ui_mode = mode; dual_ble_ui_attempted = false; dual_ble_ui_error = ESP_OK;
-        dual_ble_ui_family = family;
+        dual_ble_ui_family = family; dual_ble_ui_response_mode = response;
         if (mode == CERBERUS_DUAL_BLE_TRACK) {
             memcpy(dual_ble_ui_target, address, 6U); dual_ble_ui_type = type;
         }
@@ -76,7 +81,8 @@ static void dual_ble_ui_sync_request(int mode, uint8_t family,
     cerberus_dual_ble_tick(dual_ble_ui_store, now);
     if (mode >= 0 && !dual_ble_ui_attempted && cerberus_dual_ble_released(dual_ble_ui_store)) {
         dual_ble_ui_attempted = true;
-        dual_ble_ui_error = mode == CERBERUS_DUAL_BLE_FAMILY ?
+        dual_ble_ui_error = response ? cerberus_dual_ble_begin_response(dual_ble_ui_store, family) :
+            mode == CERBERUS_DUAL_BLE_FAMILY ?
             cerberus_dual_ble_begin_family(dual_ble_ui_store, family) :
             cerberus_dual_ble_begin(dual_ble_ui_store, (uint8_t)mode,
             mode == CERBERUS_DUAL_BLE_TRACK ? dual_ble_ui_target : NULL,
@@ -114,7 +120,7 @@ static void dual_ble_ui_open(bool reset_detail)
     dual_ble_ui_from_unified = false;
     if (reset_detail) {
         dual_ble_ui_detail = false; dual_ble_ui_receive_info = false; dual_ble_ui_hints = false;
-        dual_ble_ui_hint_page = dual_ble_ui_hint_pages = 0U;
+        dual_ble_ui_hint_page = dual_ble_ui_hint_pages = 0U; dual_ble_ui_response_tab = false;
     }
 }
 
@@ -127,7 +133,7 @@ static void dual_ble_ui_select_frozen(const cerberus_dual_ble_row_t *row,
     dual_ble_ui_selected_provenance = *provenance;
     dual_ble_ui_detail = true;
     dual_ble_ui_receive_info = false;
-    dual_ble_ui_hints = false; dual_ble_ui_hint_page = dual_ble_ui_hint_pages = 0U;
+    dual_ble_ui_hints = false; dual_ble_ui_hint_page = dual_ble_ui_hint_pages = 0U; dual_ble_ui_response_tab = false;
     dual_ble_ui_from_unified = true;
 }
 
@@ -137,7 +143,9 @@ static bool dual_ble_ui_selected_peer(cerberus_c5_ble_result_t *out)
     memset(out, 0, sizeof(*out));
     memcpy(out->address, dual_ble_ui_selected.address, 6U);
     out->address_type = dual_ble_ui_selected.address_type;
-    memcpy(out->name, dual_ble_ui_selected.name, sizeof(out->name));
+    if (cerberus_dual_ble_list_response_name(&dual_ble_ui_selected))
+        cerberus_dual_ble_list_label(&dual_ble_ui_selected, out->name);
+    else memcpy(out->name, dual_ble_ui_selected.name, sizeof(out->name));
     out->name[sizeof(out->name) - 1U] = '\0';
     out->rssi = dual_ble_ui_selected.rssi;
     out->manufacturer_id = dual_ble_ui_selected.manufacturer_id;
@@ -155,7 +163,7 @@ static esp_err_t dual_ble_ui_draw_receive(const cerberus_dual_ble_row_t *row)
 static void dual_ble_ui_label(const cerberus_dual_ble_row_t *row,
     char out[CERBERUS_BLE_NAME_MAX_LENGTH + 1U])
 {
-    if (!row->name[0] && privacy_addresses_masked())
+    if (!row->name[0] && !cerberus_dual_ble_list_response_name(row) && privacy_addresses_masked())
         memcpy(out, "Unnamed device", sizeof("Unnamed device"));
     else cerberus_dual_ble_list_label(row, out);
 }
@@ -169,45 +177,78 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
     dual_ble_ui_hint_pages = 0U;
     const uint64_t now = dual_ble_ui_clock(NULL);
     cerberus_dual_ble_view_t view; dual_ble_ui_get_view(&view);
-    ESP_RETURN_ON_ERROR(draw_small_button(8, 50, 304, 30, "BACK TO BLE LIST"), TAG, "C5 BLE back");
+    ESP_RETURN_ON_ERROR(draw_small_button(8, 50, dual_ble_ui_detail ? 304 : 148, 30,
+        dual_ble_ui_detail ? "BACK TO BLE LIST" : "BACK TO BLE"), TAG, "C5 BLE back");
+    if (!dual_ble_ui_detail)
+        ESP_RETURN_ON_ERROR(draw_small_button(164, 50, 148, 30,
+            dual_ble_ui_response_requests ? "RESPONSE REQS >" : "PASSIVE >"), TAG, "C5 acquisition");
     if (dual_ble_ui_detail) {
         const cerberus_dual_ble_row_t *row = &dual_ble_ui_selected;
         dual_ble_ui_label(row, name);
-        snprintf(line, sizeof(line), "C5 / %s", name);
+        snprintf(line, sizeof(line), cerberus_dual_ble_list_response_name(row) ? "C5 RSP NAME / %s" : "C5 / %s", name);
         ESP_RETURN_ON_ERROR(draw_centered(96, line, UI_TEXT, 1), TAG, "C5 BLE name");
         cerberus_privacy_format_ble_identifier(row->address, privacy_addresses_masked(), identifier, sizeof(identifier));
         ESP_RETURN_ON_ERROR(draw_centered(118, identifier, UI_TEXT, 1), TAG, "C5 BLE address");
-        snprintf(line, sizeof(line), "ADDRESS TYPE %u / C5 OBSERVATIONS ONLY", row->address_type);
+        snprintf(line, sizeof(line), "TYPE %u / ORIGINAL ADV REPORTS %u", row->address_type, row->reports);
         ESP_RETURN_ON_ERROR(draw_centered(140, line, UI_MUTED, 1), TAG, "C5 BLE type");
+        const bool response_present = cerberus_dual_ble_response_present(row, &dual_ble_ui_selected_provenance);
         uint32_t age;
-        bool known_age = cerberus_dual_ble_list_age(row, now, &age);
-        if (cerberus_dual_ble_list_rssi_valid(row)) snprintf(line, sizeof(line), "LAST ADV %d dBm", row->rssi);
+        bool known_age = dual_ble_ui_response_tab ? response_present &&
+            cerberus_dual_ble_response_age(row, now, &age) : cerberus_dual_ble_list_age(row, now, &age);
+        if (dual_ble_ui_response_tab) {
+            if (response_present && (row->response.flags & CERBERUS_DUAL_BLE_RESPONSE_RSSI_VALID))
+                snprintf(line, sizeof(line), "RSP %d dBm", row->response.rssi);
+            else snprintf(line, sizeof(line), "RSP RSSI N/A");
+        } else if (cerberus_dual_ble_list_rssi_valid(row)) snprintf(line, sizeof(line), "LAST ADV %d dBm", row->rssi);
         else snprintf(line, sizeof(line), "LAST ADV RSSI N/A");
         size_t used = strlen(line);
         if (known_age) snprintf(line + used, sizeof(line) - used, " / AGE <= %lu ms%s", (unsigned long)age,
             age > CERBERUS_DUAL_BLE_RECENT_MS ? " / RECENCY?" : "");
         else snprintf(line + used, sizeof(line) - used, " / AGE UNKNOWN");
         ESP_RETURN_ON_ERROR(draw_centered(162, line, UI_MUTED, 1), TAG, "C5 BLE timing");
-        snprintf(line, sizeof(line), "REPORTS %u / VENDOR ID %04X", row->reports, row->manufacturer_id);
-        ESP_RETURN_ON_ERROR(draw_centered(186, line, UI_TEXT, 1), TAG, "C5 BLE metadata");
+        ESP_RETURN_ON_ERROR(draw_small_button(8, 174, 148, 22,
+            dual_ble_ui_response_tab ? "ORIGINAL ADV" : "ORIGINAL ADV *"), TAG, "C5 original source");
+        ESP_RETURN_ON_ERROR(draw_small_button(164, 174, 148, 22,
+            dual_ble_ui_response_tab ? "MATCHED RSP *" : "MATCHED RSP"), TAG, "C5 response source");
         ESP_RETURN_ON_ERROR(draw_small_button(8, 198, 96, 26,
-            !dual_ble_ui_receive_info && !dual_ble_ui_hints ? "RAW ADV *" : "RAW ADV"), TAG, "C5 raw tab");
+            !dual_ble_ui_receive_info && !dual_ble_ui_hints ?
+                (dual_ble_ui_response_tab ? "RAW RSP *" : "RAW ADV *") : (dual_ble_ui_response_tab ? "RAW RSP" : "RAW ADV")), TAG, "C5 raw tab");
         ESP_RETURN_ON_ERROR(draw_small_button(112, 198, 96, 26,
             dual_ble_ui_receive_info ? "RX INFO *" : "RX INFO"), TAG, "C5 metadata tab");
         ESP_RETURN_ON_ERROR(draw_small_button(216, 198, 96, 26,
             dual_ble_ui_hints ? "HINTS *" : "HINTS"), TAG, "C5 hint tab");
-        if (dual_ble_ui_hints) {
+        if (dual_ble_ui_response_tab && !response_present) {
+            bool known_none = row->response.state == CERBERUS_DUAL_BLE_RESPONSE_NONE &&
+                dual_ble_ui_selected_provenance.boot_id && dual_ble_ui_selected_provenance.epoch &&
+                dual_ble_ui_selected_provenance.index < CERBERUS_DUAL_BLE_CAPACITY &&
+                cerberus_dual_ble_response_source_valid(&row->response, &row->receive,
+                    row->raw_length, row->event_type, row->raw_flags, row->address, row->address_type,
+                    row->family.version ? row->family.family_code : 0U);
+            ESP_RETURN_ON_ERROR(draw_centered(238, known_none ? "NO ADMITTED MATCHED RESPONSE" :
+                "RESPONSE EVIDENCE UNKNOWN", UI_MUTED, 1), TAG, "C5 response state");
+            ESP_RETURN_ON_ERROR(draw_centered(260, "ORIGINAL ADV IS KEPT SEPARATE", UI_MUTED, 1), TAG, "C5 response separation");
+            ESP_RETURN_ON_ERROR(draw_centered(282, "NO CLAIM THAT NO RESPONSE WAS SENT", UI_MUTED, 1), TAG, "C5 response limit");
+        } else if (dual_ble_ui_response_tab && dual_ble_ui_hints) {
+            ESP_RETURN_ON_ERROR(dual_ble_response_hint_ui_draw(row, &dual_ble_ui_selected_provenance,
+                dual_ble_ui_hint_page, &hint_pages), TAG, "C5 response hints");
+        } else if (dual_ble_ui_hints) {
             ESP_RETURN_ON_ERROR(dual_ble_hint_ui_draw(row, &dual_ble_ui_selected_provenance,
                 dual_ble_ui_hint_page, &hint_pages), TAG, "C5 original hints");
         } else if (dual_ble_ui_receive_info) {
-            ESP_RETURN_ON_ERROR(dual_ble_ui_draw_receive(row), TAG, "C5 receive metadata");
+            ESP_RETURN_ON_ERROR(dual_ble_ui_response_tab ?
+                ble_receive_info_ui_draw(&row->response.receive, row->response.raw_length, 230U) :
+                dual_ble_ui_draw_receive(row), TAG, "C5 receive metadata");
         } else {
-            snprintf(line, sizeof(line), "ORIGINAL ADV %u B / FLAGS %02X", row->raw_length, row->raw_flags);
+            uint8_t raw_length = dual_ble_ui_response_tab ? row->response.raw_length : row->raw_length;
+            const uint8_t *raw = dual_ble_ui_response_tab ? row->response.raw : row->raw;
+            snprintf(line, sizeof(line), dual_ble_ui_response_tab ? "MATCHED RSP %u B / FLAGS %02X" :
+                "ORIGINAL ADV %u B / FLAGS %02X", raw_length,
+                dual_ble_ui_response_tab ? row->response.raw_flags : row->raw_flags);
             ESP_RETURN_ON_ERROR(draw_centered(234, line, UI_MUTED, 1), TAG, "C5 BLE packet");
             for (unsigned part = 0; part < 4U; ++part) {
                 size_t n = 0U; line[0] = '\0';
-                for (unsigned i = part * 8U; i < row->raw_length && i < (part + 1U) * 8U; ++i)
-                    n += (size_t)snprintf(line + n, sizeof(line) - n, "%02X ", row->raw[i]);
+                for (unsigned i = part * 8U; i < raw_length && i < (part + 1U) * 8U; ++i)
+                    n += (size_t)snprintf(line + n, sizeof(line) - n, "%02X ", raw[i]);
                 ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(254U + part * 14U), line, UI_TEXT, 1), TAG, "C5 BLE bytes");
             }
         }
@@ -218,15 +259,27 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
         uint8_t order[CERBERUS_DUAL_BLE_CAPACITY];
         dual_ble_ui_visible_count = cerberus_dual_ble_list_order(dual_ble_ui_store ? dual_ble_ui_store->rows : NULL,
             view.count, dual_ble_ui_sort, dual_ble_ui_recent_only, now, order);
-        if (dual_ble_ui_mode == CERBERUS_DUAL_BLE_FAMILY)
+        if (dual_ble_ui_response_requests)
+            snprintf(line, sizeof(line), "C5 RESPONSE REQUESTS / %u OF %u", dual_ble_ui_visible_count, view.count);
+        else if (dual_ble_ui_mode == CERBERUS_DUAL_BLE_FAMILY)
             snprintf(line, sizeof(line), "C5 FOCUSED / %u OF %u RETAINED", dual_ble_ui_visible_count, view.count);
         else if (view.live_updates) snprintf(line, sizeof(line), "C5 LIVE / %u OF %u / %lu UPDATES",
             dual_ble_ui_visible_count, view.count, (unsigned long)view.snapshots);
         else snprintf(line, sizeof(line), "C5 WHOLE SWEEP / %u OF %u", dual_ble_ui_visible_count, view.count);
         ESP_RETURN_ON_ERROR(draw_centered(84, line, UI_TEXT, 1), TAG, "C5 BLE source");
-        if (dual_ble_ui_mode == CERBERUS_DUAL_BLE_FAMILY && view.error == ESP_ERR_NOT_SUPPORTED)
+        if (dual_ble_ui_response_requests && view.error == ESP_ERR_NOT_SUPPORTED)
+            snprintf(line, sizeof(line), "REQUESTS UNAVAILABLE / S3 AVAILABLE");
+        else if (dual_ble_ui_mode == CERBERUS_DUAL_BLE_FAMILY && view.error == ESP_ERR_NOT_SUPPORTED)
             snprintf(line, sizeof(line), "FOCUS UNAVAILABLE / S3 VIEW AVAILABLE");
+        else if (view.error == ESP_ERR_NO_MEM) snprintf(line, sizeof(line), "C5 NO MEMORY / S3 VIEW AVAILABLE");
         else if (view.error) snprintf(line, sizeof(line), "C5 ERROR %ld / S3 VIEW AVAILABLE", (long)view.error);
+        else if (!s3_enabled && !view.enabled && !view.receiving && !view.reading && !view.stopping)
+            snprintf(line, sizeof(line), "STOPPED / RETAINED %s", view.published_response ? "REQUESTS" : "PASSIVE");
+        else if (dual_ble_ui_response_requests != view.requested_response || view.stopping)
+            snprintf(line, sizeof(line), "MODE CHANGING / RETAINED %s", view.published_response ? "REQUESTS" : "PASSIVE");
+        else if (view.published_response != dual_ble_ui_response_requests && view.count)
+            snprintf(line, sizeof(line), "RETAINED %s / REQUESTED %s", view.published_response ? "REQUESTS" : "PASSIVE",
+                dual_ble_ui_response_requests ? "REQUESTS" : "PASSIVE");
         else if (dual_ble_ui_mode == CERBERUS_DUAL_BLE_FAMILY)
             snprintf(line, sizeof(line), "FOCUS %s / %lu RF SWEEPS / ROWS RETAINED",
                 view.stopping || view.requested_family != dual_ble_ui_family ? "CHANGING" :
@@ -252,7 +305,8 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
             dual_ble_ui_label(row, name);
             ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 3U, name, UI_TEXT, UI_PANEL, 1), TAG, "C5 BLE row name");
             cerberus_privacy_format_ble_identifier(row->address, privacy_addresses_masked(), identifier, sizeof(identifier));
-            snprintf(line, sizeof(line), "%s T%u", identifier, row->address_type);
+            snprintf(line, sizeof(line), "%s T%u%s", identifier, row->address_type,
+                cerberus_dual_ble_list_response_name(row) ? " RSP NAME" : "");
             ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 15U, line, UI_MUTED, UI_PANEL, 1), TAG, "C5 BLE row address");
             if (cerberus_dual_ble_list_rssi_valid(row)) snprintf(line, sizeof(line), "C5 %d dBm", row->rssi);
             else snprintf(line, sizeof(line), "C5 RSSI N/A");
@@ -268,6 +322,8 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
             ++painted_count;
         }
         if (!dual_ble_ui_visible_count) ESP_RETURN_ON_ERROR(draw_centered(208,
+            dual_ble_ui_response_requests && view.error == ESP_ERR_NOT_SUPPORTED ?
+            "NO C5 RESULTS / REQUESTS UNAVAILABLE" :
             dual_ble_ui_mode == CERBERUS_DUAL_BLE_FAMILY && view.error == ESP_ERR_NOT_SUPPORTED ?
             "NO C5 RESULTS / FOCUS UNAVAILABLE" : view.count ?
             "NO CONFIRMED RECENT C5 RESULTS" : view.live_updates ? "WAITING FOR C5 DISCOVERIES" :
@@ -278,7 +334,8 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
         ESP_RETURN_ON_ERROR(draw_centered(318, line, UI_MUTED, 1), TAG, "C5 BLE inventory");
         ESP_RETURN_ON_ERROR(draw_small_button(8, 326, 148, 32, "PREVIOUS"), TAG, "C5 BLE previous");
         ESP_RETURN_ON_ERROR(draw_small_button(164, 326, 148, 32, "NEXT"), TAG, "C5 BLE next");
-        if (view.has_first_result) snprintf(line, sizeof(line), "FIRST RESULTS IN %lu ms", (unsigned long)view.first_result_ms);
+        if (dual_ble_ui_response_requests) snprintf(line, sizeof(line), "1M REQUESTS / CODED PASSIVE");
+        else if (view.has_first_result) snprintf(line, sizeof(line), "FIRST RESULTS IN %lu ms", (unsigned long)view.first_result_ms);
         else snprintf(line, sizeof(line), "NO NEW RESULTS THIS RUN");
         ESP_RETURN_ON_ERROR(draw_centered(360, line, UI_MUTED, 1), TAG, "C5 BLE reader latency");
     }
@@ -291,9 +348,23 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
 
 static int dual_ble_ui_tap(uint16_t x, uint16_t y)
 {
-    if (x >= 8U && x < 312U && y >= 50U && y < 80U) return DUAL_BLE_UI_BACK_S3;
+    if (y >= 50U && y < 80U) {
+        if (x >= 8U && x < (dual_ble_ui_detail ? 312U : 156U)) return DUAL_BLE_UI_BACK_S3;
+        if (!dual_ble_ui_detail && x >= 164U && x < 312U) {
+            dual_ble_ui_response_requests = !dual_ble_ui_response_requests;
+            dual_ble_ui_painted_count = 0U;
+            return DUAL_BLE_UI_REDRAW;
+        }
+    }
     if (x >= 20U && x < 300U && y >= 370U && y < 410U) return DUAL_BLE_UI_TOGGLE;
     if (dual_ble_ui_detail) {
+        if (y >= 174U && y < 196U) {
+            if (x >= 8U && x < 156U) dual_ble_ui_response_tab = false;
+            else if (x >= 164U && x < 312U) dual_ble_ui_response_tab = true;
+            else return DUAL_BLE_UI_NONE;
+            dual_ble_ui_hint_page = dual_ble_ui_hint_pages = 0U;
+            return DUAL_BLE_UI_REDRAW;
+        }
         if (y >= 198U && y < 224U) {
             if (x >= 8U && x < 104U) { dual_ble_ui_receive_info = false; dual_ble_ui_hints = false; }
             else if (x >= 112U && x < 208U) { dual_ble_ui_receive_info = true; dual_ble_ui_hints = false; }
@@ -331,7 +402,7 @@ static int dual_ble_ui_tap(uint16_t x, uint16_t y)
                 dual_ble_ui_selected_provenance = dual_ble_ui_painted_provenance[row];
                 dual_ble_ui_detail = true;
                 dual_ble_ui_receive_info = false;
-                dual_ble_ui_hints = false; dual_ble_ui_hint_page = dual_ble_ui_hint_pages = 0U;
+                dual_ble_ui_hints = false; dual_ble_ui_hint_page = dual_ble_ui_hint_pages = 0U; dual_ble_ui_response_tab = false;
                 return DUAL_BLE_UI_REDRAW;
             }
         }

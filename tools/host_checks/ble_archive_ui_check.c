@@ -28,6 +28,7 @@ static esp_err_t draw_button(uint16_t x,uint16_t y,uint16_t w,uint16_t h,const c
     return error==ESP_OK?cerberus_display_draw_text(x+(w-strlen(text)*6U)/2U,y+(h-7U)/2U,text,UI_TEXT,UI_PANEL,1):error;
 }
 #include "ble_archive_ui.h"
+#include "ble_archive_response_fixture.h"
 static ble_archive_ui_store_t viewer;
 static cerberus_ble_archive_t source;
 
@@ -389,7 +390,7 @@ static void test_receive_info(const char *directory)
     CHECK(strstr(drawn,"CALLBACK 255 B / PREVIEW 31 B")&&strstr(drawn,"PHY CODED PRIMARY / 2M SECONDARY")&&
         strstr(drawn,"SID 15 / PROPS 00 / CTRL COMPLETE")&&strstr(drawn,"FULL AD LAYOUT VALID / PREVIEW CUT"));
     CHECK(strstr(drawn,"HISTORICAL EVIDENCE")&&strstr(drawn,"NOT CURRENT RADIO STATE")&&
-        strstr(drawn,"C5 RESPONSE BYTES UNAVAILABLE")&&strstr(drawn,"MISSING BYTES ARE NOT RECONSTRUCTED"));
+        strstr(drawn,"RESPONSE HAS ITS OWN SOURCE TAB")&&strstr(drawn,"MISSING BYTES ARE NOT RECONSTRUCTED"));
     CHECK(!strstr(drawn,"PREV FIELDS")&&!strstr(drawn,"COMPLETE FIELDS")&&!strstr(drawn,"SAVED RESPONSE"));
     CHECK(ble_archive_ui_tap(&viewer,8,374)==BLE_ARCHIVE_UI_NONE&&
         ble_archive_ui_tap(&viewer,164,374)==BLE_ARCHIVE_UI_NONE&&viewer.raw_page==0);
@@ -655,7 +656,7 @@ static void reopen_family(void)
 {
     static uint8_t bytes[CERBERUS_BLE_ARCHIVE_MAX_SIZE];size_t written=0;
     CHECK(cerberus_ble_archive_encode(&source,bytes,sizeof(bytes),&written));
-    CHECK(written==32U+264U*source.count);
+    CHECK(written==32U+432U*source.count);
     CHECK(cerberus_ble_archive_decode(bytes,written,&viewer.incoming));
     CHECK(ble_archive_ui_begin(&viewer,1,false)&&
         ble_archive_ui_complete(&viewer,1,&viewer.incoming,"saved-family-v5.BLE"));
@@ -794,6 +795,159 @@ static void test_v4_missing_hints(const char *directory)
     CHECK(ble_archive_ui_tap(&viewer,250,54)==BLE_ARCHIVE_UI_REDRAW);repaint();
     CHECK(strstr(drawn,"FULL ORIGINAL HINTS NOT SAVED")&&!strstr(drawn,"NO SUPPORTED FAMILY HINT"));
     CHECK(strstr(drawn,"AGE AT SAVE: <= 18364758544493064720 ms"));preview(directory,"archive-family-v4-unavailable");
+    CHECK(ble_archive_ui_tap(&viewer,200,94)==BLE_ARCHIVE_UI_REDRAW);repaint();
+    CHECK(strstr(drawn,"C5 RESPONSE EVIDENCE UNKNOWN")&&!viewer.hint_pages);
+}
+
+static void saved_response_source(uint8_t family,uint8_t selected_family)
+{
+    seed(33);source.rows[0]=source.rows[32];source.count=1;
+    CHECK(archive_test_response_row(&source.rows[0],family,selected_family));
+    CHECK(cerberus_ble_archive_validate(&source));
+}
+static void open_saved_response(void)
+{
+    reopen_family();CHECK(!viewer.c5_response);
+    CHECK(ble_archive_ui_tap(&viewer,200,94)==BLE_ARCHIVE_UI_REDRAW&&viewer.c5_response);
+    repaint();
+}
+static void test_saved_c5_responses(const char *directory)
+{
+    const char *details[]={"IBEACON ADVERTISED FORMAT","FIND MY FORMAT HINTS","CODES: 3081",
+        "FLOCK ADVERTISED CLUES","META IDENTIFIER HINTS","HC-05"};
+    for(uint8_t family=1;family<=6U;++family){
+        saved_response_source(family,family==6U?0U:family);open_saved_response();
+        CHECK(strstr(drawn,"SAVED C5 RESPONSE")&&strstr(drawn,"FULL 255 B / PREVIEW 31 B"));
+        CHECK(strstr(drawn,"AGE AT SAVE: <= 523 ms")&&strstr(drawn,"MATCHED RESPONSE / ORIGINAL KEPT SEPARATE"));
+        CHECK(strstr(drawn,"HISTORICAL / NO LIVE RADIO")&&!strstr(drawn,"BEEP")&&!strstr(drawn,"FOX"));
+        if(family==6U)preview(directory,"archive-response-full255-summary");
+        cerberus_ble_archive_row_t frozen=viewer.selected;
+        memset(&viewer.document.rows[0],0,sizeof(viewer.document.rows[0]));
+        viewer.document.saved_uptime_ms=0;
+        CHECK(ble_archive_ui_tap(&viewer,164,374)==BLE_ARCHIVE_UI_REDRAW);repaint();
+        CHECK(strstr(drawn,details[family-1U])&&strstr(drawn,"AGE AT SAVE: <= 523 ms"));
+        CHECK(strstr(drawn,"SAVED BOOT UPTIME: 1000000 ms")&&strstr(drawn,"C5 BOOT ID: ABCDEF0123456789"));
+        CHECK(!memcmp(&viewer.selected,&frozen,sizeof(frozen)));
+        if(family==6U){CHECK(strstr(drawn,"EXACT NAME IN THIS MATCHED RESPONSE"));preview(directory,"archive-response-full255-name");}
+        CHECK(ble_archive_ui_tap(&viewer,8,54)==BLE_ARCHIVE_UI_REDRAW);repaint();
+        CHECK(strstr(drawn,"31 OF 255 BYTES / EVENT 3")&&strstr(drawn,"MALFORMED OR CUT AD AT BYTE 0"));
+        CHECK(!strstr(drawn,details[family-1U]));
+        if(family==6U)preview(directory,"archive-response-raw-preview");
+        CHECK(ble_archive_ui_tap(&viewer,160,65)==BLE_ARCHIVE_UI_REDRAW);repaint();
+        CHECK(strstr(drawn,"CALLBACK 255 B / PREVIEW 31 B")&&strstr(drawn,"PROPS 0A"));
+        CHECK(strstr(drawn,"SAVED RESPONSE RSSI -47 dBm")&&strstr(drawn,"RSP AGE AT SAVE: <= 523 ms"));
+        if(family==6U){CHECK(strstr(drawn,"RSP NAME: HC-05"));preview(directory,"archive-response-receive-info");}
+        CHECK(ble_archive_ui_tap(&viewer,40,94)==BLE_ARCHIVE_UI_REDRAW&&!viewer.c5_response);repaint();
+        CHECK(strstr(drawn,"CALLBACK 3 B / PREVIEW 3 B")&&!strstr(drawn,"SAVED RESPONSE RSSI"));
+        CHECK(ble_archive_ui_tap(&viewer,250,65)==BLE_ARCHIVE_UI_REDRAW);repaint();
+        CHECK(strstr(drawn,"AGE AT SAVE: <= 525 ms")&&!strstr(drawn,"AGE AT SAVE: <= 523 ms"));
+        CHECK(!strstr(drawn,details[family-1U]));
+        CHECK(ble_archive_ui_tap(&viewer,200,94)==BLE_ARCHIVE_UI_REDRAW);repaint();
+        unsigned total=calls;
+        for(unsigned failure=1;failure<=total;++failure){
+            clear_draw();fail_after=failure;CHECK(ble_archive_ui_draw(&viewer,ESP_OK)!=ESP_OK);
+            CHECK(!viewer.hint_pages&&ble_archive_ui_tap(&viewer,164,374)==BLE_ARCHIVE_UI_NONE);
+            CHECK(!memcmp(&frozen,&viewer.selected,sizeof(frozen)));
+        }
+        /* Local tabs can request a repaint even after a failed paint. */
+        CHECK(ble_archive_ui_tap(&viewer,40,94)==BLE_ARCHIVE_UI_REDRAW&&!viewer.c5_response);repaint();
+        CHECK(ble_archive_ui_tap(&viewer,200,94)==BLE_ARCHIVE_UI_REDRAW);repaint();
+        CHECK(viewer.hint_pages>1U);
+        const uint16_t gaps[][2]={{7,94},{156,94},{160,94},{312,94},{200,83},{200,108}};
+        for(unsigned i=0;i<sizeof(gaps)/sizeof(gaps[0]);++i)
+            CHECK(ble_archive_ui_tap(&viewer,gaps[i][0],gaps[i][1])==BLE_ARCHIVE_UI_NONE);
+        CHECK(ble_archive_ui_tap(&viewer,64,426)==BLE_ARCHIVE_UI_REDRAW&&viewer.view==BLE_ARCHIVE_UI_DETAIL);
+        CHECK(ble_archive_ui_tap(&viewer,64,374)==BLE_ARCHIVE_UI_REDRAW&&!viewer.c5_response);
+    }
+}
+static void test_saved_c5_response_states(const char *directory)
+{
+    saved_response_source(6,0);source.rows[0].c5_response_age_upper_valid=false;
+    source.rows[0].c5_response_age_upper_at_save_ms=0;open_saved_response();
+    CHECK(strstr(drawn,"AGE AT SAVE: UNKNOWN")&&strstr(drawn,"FULL 255 B"));
+    preview(directory,"archive-response-age-unknown");
+    saved_response_source(6,6);source.rows[0].age_upper_valid=false;source.rows[0].age_upper_at_save_ms=0;
+    source.rows[0].c5_response_age_upper_at_save_ms=UINT64_MAX;source.saved_uptime_ms=UINT64_MAX;
+    open_saved_response();CHECK(strstr(drawn,"AGE AT SAVE: <= 18446744073709551615 ms"));
+    preview(directory,"archive-response-extreme-age");
+    CHECK(ble_archive_ui_tap(&viewer,160,65)==BLE_ARCHIVE_UI_REDRAW);repaint();
+    CHECK(strstr(drawn,"RSP AGE AT SAVE: <= 18446744073709551615 ms"));
+    preview(directory,"archive-response-extreme-age-receive");
+    /* Name storage is bounded bytes, not necessarily a terminated C string. */
+    saved_response_source(6,0);cerberus_dual_ble_response_wire_t *r=&source.rows[0].c5_response;
+    r->name_length=32;memset(r->name,'N',32);r->name[2]=0;r->name[4]=0xff;
+    open_saved_response();CHECK(ble_archive_ui_tap(&viewer,160,65)==BLE_ARCHIVE_UI_REDRAW);repaint();
+    CHECK(strstr(drawn,"RSP NAME: NN.N.NNNNNNNNNNNNNNNNNNNNNNNNNNN"));
+    preview(directory,"archive-response-bounded-name");
+    for(unsigned state=0;state<=1;++state){
+        saved_response_source(6,6);r=&source.rows[0].c5_response;memset(r,0,sizeof(*r));
+        if(state){r->version=1;r->state=CERBERUS_DUAL_BLE_RESPONSE_NONE;r->original_sequence=7;}
+        source.rows[0].c5_response_age_upper_valid=false;source.rows[0].c5_response_age_upper_at_save_ms=0;
+        open_saved_response();CHECK(strstr(drawn,state?"NO ADMITTED MATCHED RESPONSE":"C5 RESPONSE EVIDENCE UNKNOWN"));
+        CHECK(strstr(drawn,"THIS DOES NOT PROVE NO RESPONSE WAS SENT")&&!viewer.hint_pages);
+        CHECK(ble_archive_ui_tap(&viewer,164,374)==BLE_ARCHIVE_UI_NONE);
+        preview(directory,state?"archive-response-none":"archive-response-unknown");
+    }
+    saved_response_source(6,6);open_saved_response();viewer.selected.c5_response.response_sequence=0;
+    repaint();CHECK(strstr(drawn,"C5 RESPONSE EVIDENCE UNKNOWN")&&!strstr(drawn,"HC-05")&&!viewer.hint_pages);
+    CHECK(ble_archive_ui_tap(&viewer,64,426)==BLE_ARCHIVE_UI_REDRAW);
+}
+static void test_saved_response_meta_pages(const char *directory)
+{
+    uint8_t full[255]={0};size_t used=0;
+    const uint8_t base[12]={0xfb,0x34,0x9b,0x5f,0x80,0,0,0x80,0,0x10,0,0};
+    const unsigned widths[]={2,4,16};
+    for(unsigned w=0;w<3;++w){
+        unsigned width=widths[w];full[used++]=(uint8_t)(11U*width+1U);full[used++]=(uint8_t)(3U+2U*w);
+        for(unsigned id=0;id<11;++id){
+            uint16_t value=cerberus_ble_meta_id_value(id);
+            if(width==16U){memcpy(full+used,base,12);full[used+12]=(uint8_t)value;full[used+13]=(uint8_t)(value>>8);}
+            else {full[used]=(uint8_t)value;full[used+1]=(uint8_t)(value>>8);}
+            used+=width;
+        }
+    }
+    CHECK(used==248U);saved_response_source(5,5);
+    cerberus_ble_archive_row_t *r=&source.rows[0];cerberus_dual_ble_family_evidence_t evidence;
+    CHECK(cerberus_dual_ble_family_parse_ad(full,sizeof(full),r->address,r->address_type,&evidence));
+    memcpy(r->c5_response.raw,full,31);
+    CHECK(cerberus_dual_ble_response_family_encode(&evidence,5,&r->c5_response.family));
+    open_saved_response();CHECK(viewer.hint_pages==18U);preview(directory,"archive-response-meta-summary");
+    for(unsigned page=1;page<18;++page){
+        CHECK(ble_archive_ui_tap(&viewer,164,374)==BLE_ARCHIVE_UI_REDRAW);repaint();
+        CHECK(viewer.hint_page==page&&viewer.hint_pages==18U);
+        CHECK(strstr(drawn,"META HINT SUPPRESSED BY ID RULE")&&strstr(drawn,"AGE AT SAVE: <= 523 ms"));
+        for(unsigned pair=0;pair<2&&2U*(page-1U)+pair<33U;++pair){
+            unsigned index=2U*(page-1U)+pair;char expected[40];
+            snprintf(expected,sizeof(expected),"ID %04X / %s",cerberus_ble_meta_id_value(index/3U),
+                index%3U==0U?"LIST16":index%3U==1U?"LIST32":"LIST128");CHECK(strstr(drawn,expected));
+        }
+    }
+    CHECK(strstr(drawn,"ID/CONTEXT PAIRS 33-33 OF 33"));preview(directory,"archive-response-meta-last-pair");
+}
+static void test_v5_missing_response(const char *directory)
+{
+    /* Immutable independent v5 vector, not produced by the new v6 encoder. */
+    static const char hex[]=
+        "43424c4541524300050020000801010028010000807060504030201048ff8a9f"
+        "010203040506020d03c9a5024c00030300fe1f02341201000807060504030201"
+        "000000000000000000000000000000004101ff00000000000000000000000000"
+        "000000000000000000000000000000000d180000000000000000000000000000"
+        "0201060000000000000000000000000000000000000000000000000000000000"
+        "1032547698badcfe112233445566778800000000000000000000000000000000"
+        "0000000000000000000000000000000000000000000000000000000000000000"
+        "0000000000000000000000000000000002000307030100010000000000000000"
+        "0000000000000000000000000000000000000000000000000000000000000000"
+        "0000000000000000";
+    uint8_t bytes[296];CHECK(strlen(hex)==2U*sizeof(bytes));
+    for(unsigned i=0;i<sizeof(bytes);++i){unsigned value;CHECK(sscanf(hex+2U*i,"%2x",&value)==1);bytes[i]=(uint8_t)value;}
+    memset(&viewer,0,sizeof(viewer));CHECK(cerberus_ble_archive_decode(bytes,sizeof(bytes),&source));
+    CHECK(ble_archive_ui_begin(&viewer,1,false)&&ble_archive_ui_complete(&viewer,1,&source,"old-v5.BLE"));
+    repaint();CHECK(ble_archive_ui_tap(&viewer,8,150)==BLE_ARCHIVE_UI_REDRAW);
+    CHECK(ble_archive_ui_tap(&viewer,64,374)==BLE_ARCHIVE_UI_REDRAW);
+    CHECK(ble_archive_ui_tap(&viewer,200,94)==BLE_ARCHIVE_UI_REDRAW);repaint();
+    CHECK(strstr(drawn,"C5 RESPONSE EVIDENCE UNKNOWN")&&!strstr(drawn,"NO ADMITTED MATCHED RESPONSE"));
+    CHECK(!viewer.selected.c5_response.version&&!viewer.selected.c5_response_age_upper_valid);
+    preview(directory,"archive-response-v5-unknown");
 }
 
 int main(int argc,char **argv)
@@ -802,6 +956,7 @@ int main(int argc,char **argv)
     test_filtered_pages(argv[1]);test_sort_and_empty(argv[1]);test_frozen_filtered_and_jobs(argv[1]);
     test_control_recovery_and_history(argv[1]);test_v1_filtered_read(argv[1]);
     test_saved_full_families(argv[1]);test_saved_hint_states(argv[1]);test_saved_meta_pages(argv[1]);test_v4_missing_hints(argv[1]);
+    test_saved_c5_responses(argv[1]);test_saved_c5_response_states(argv[1]);test_saved_response_meta_pages(argv[1]);test_v5_missing_response(argv[1]);
     printf("BLE archive UI PASS %u assertions; PSRAM model=%zu bytes; no clock, heap, SD, IO worker or radio linked\n",
         checks,sizeof(ble_archive_ui_store_t));
     return 0;

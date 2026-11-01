@@ -1,5 +1,6 @@
 #include "ble_archive.h"
 #include "ble_family_wire.h"
+#include "ble_response.h"
 
 #include <string.h>
 
@@ -14,6 +15,30 @@ enum {
 
 static const uint8_t archive_magic[8] = {'C', 'B', 'L', 'E', 'A', 'R', 'C', 0};
 static bool all_zero(const uint8_t *bytes, size_t length);
+
+static bool c5_response_valid(const cerberus_ble_archive_row_t *r)
+{
+    if (r->receiver != CERBERUS_BLE_ARCHIVE_RECEIVER_C5)
+        return all_zero((const uint8_t *)&r->c5_response, sizeof(r->c5_response)) &&
+            !r->c5_response_age_upper_valid && !r->c5_response_age_upper_at_save_ms;
+    const uint8_t family = r->family.version ? r->family.family_code : 0U;
+    if (!cerberus_dual_ble_response_source_valid(&r->c5_response, &r->receive,
+            r->advertisement_length, r->advertisement_event_type, r->advertisement_flags,
+            r->address, r->address_type, family)) return false;
+    if (!r->c5_response_age_upper_valid) return !r->c5_response_age_upper_at_save_ms;
+    if (r->c5_response.state != CERBERUS_DUAL_BLE_RESPONSE_PRESENT ||
+        !(r->c5_response.flags & CERBERUS_DUAL_BLE_RESPONSE_AGE_VALID) ||
+        r->c5_response_age_upper_at_save_ms < r->c5_response.age_ms) return false;
+    if (r->age_upper_valid) {
+        if (r->c5_response_age_upper_at_save_ms > r->age_upper_at_save_ms) return false;
+        const uint64_t elapsed = r->age_upper_at_save_ms - r->c5_response_age_upper_at_save_ms;
+        /* Both bounds share the first-BEGIN S3 anchor. Millisecond rounding
+         * may straddle one tick; the underlying source interval stays in us. */
+        if (elapsed < r->c5_response.interval_us / 1000U ||
+            elapsed > (r->c5_response.interval_us + 999U) / 1000U) return false;
+    }
+    return true;
+}
 
 static bool response_valid(const cerberus_ble_archive_row_t *r)
 {
@@ -99,7 +124,7 @@ static bool row_valid(const cerberus_ble_archive_row_t *r, uint64_t saved_ms)
                 r->advertisement_length, r->advertisement_event_type,
                 r->advertisement_flags, r->address, r->address_type, &evidence)) return false;
     }
-    return response_valid(r);
+    return response_valid(r) && c5_response_valid(r);
 }
 
 bool cerberus_ble_archive_validate(const cerberus_ble_archive_t *document)
@@ -227,6 +252,9 @@ static void encode_row(const cerberus_ble_archive_row_t *r, uint8_t *out)
     memcpy(out+257,f->ibeacon_major_le,2U); memcpy(out+259,f->ibeacon_minor_le,2U);
     out[261]=(uint8_t)f->ibeacon_power; /* Signed two's-complement octet. */
     out[262]=f->reserved[0]; out[263]=f->reserved[1];
+    cerberus_dual_ble_response_encode_bytes(&r->c5_response, out + 264);
+    out[416] = r->c5_response_age_upper_valid ? 1U : 0U;
+    put64(out + 424, r->c5_response_age_upper_at_save_ms);
 }
 
 static bool all_zero(const uint8_t *bytes, size_t length)
@@ -297,7 +325,7 @@ static bool decode_row(const uint8_t *p, uint64_t saved_ms, uint16_t version,
         r->receive.primary_phy = p[212]; r->receive.secondary_phy = p[213];
         r->receive.data_status = p[214]; r->receive.ad_validation = p[215];
     }
-    if (version == CERBERUS_BLE_ARCHIVE_VERSION) {
+    if (version >= CERBERUS_BLE_ARCHIVE_V5_VERSION) {
         cerberus_dual_ble_family_wire_t *f = &r->family;
         f->version=p[216]; f->family_code=p[217]; f->state=p[218];
         f->categories=p[219]; f->hc_name=p[220]; f->ibeacon_result=p[221]; f->flags=p[222];
@@ -309,6 +337,12 @@ static bool decode_row(const uint8_t *p, uint64_t saved_ms, uint16_t version,
         memcpy(f->ibeacon_major_le,p+257,2U); memcpy(f->ibeacon_minor_le,p+259,2U);
         f->ibeacon_power=p[261]<=INT8_MAX ? (int8_t)p[261] : (int8_t)((int)p[261]-256);
         f->reserved[0]=p[262]; f->reserved[1]=p[263];
+    }
+    if (version == CERBERUS_BLE_ARCHIVE_VERSION) {
+        if (p[416] > 1U || !all_zero(p + 417, 7U)) return false;
+        cerberus_dual_ble_response_decode_bytes(p + 264, &r->c5_response);
+        r->c5_response_age_upper_valid = p[416] != 0U;
+        r->c5_response_age_upper_at_save_ms = get64(p + 424);
     }
     return row_valid(r, saved_ms);
 }
@@ -353,11 +387,12 @@ bool cerberus_ble_archive_decode(const uint8_t *input, size_t length,
     const bool legacy = version == CERBERUS_BLE_ARCHIVE_LEGACY_VERSION;
     if (!legacy && version != CERBERUS_BLE_ARCHIVE_V2_VERSION &&
         version != CERBERUS_BLE_ARCHIVE_V3_VERSION && version != CERBERUS_BLE_ARCHIVE_V4_VERSION &&
-        version != CERBERUS_BLE_ARCHIVE_VERSION) return false;
+        version != CERBERUS_BLE_ARCHIVE_V5_VERSION && version != CERBERUS_BLE_ARCHIVE_VERSION) return false;
     const uint16_t row_size = legacy ? CERBERUS_BLE_ARCHIVE_LEGACY_ROW_SIZE :
         version == CERBERUS_BLE_ARCHIVE_V2_VERSION ? CERBERUS_BLE_ARCHIVE_V2_ROW_SIZE :
         version == CERBERUS_BLE_ARCHIVE_V3_VERSION ? CERBERUS_BLE_ARCHIVE_V3_ROW_SIZE :
-        version == CERBERUS_BLE_ARCHIVE_V4_VERSION ? CERBERUS_BLE_ARCHIVE_V4_ROW_SIZE : CERBERUS_BLE_ARCHIVE_ROW_SIZE;
+        version == CERBERUS_BLE_ARCHIVE_V4_VERSION ? CERBERUS_BLE_ARCHIVE_V4_ROW_SIZE :
+        version == CERBERUS_BLE_ARCHIVE_V5_VERSION ? CERBERUS_BLE_ARCHIVE_V5_ROW_SIZE : CERBERUS_BLE_ARCHIVE_ROW_SIZE;
     if (get16(input + 12) != row_size) return false;
     const uint16_t count = get16(input + 14);
     const uint64_t saved_ms = get64(input + 20);
@@ -414,5 +449,16 @@ bool cerberus_ble_archive_response_age_at_save(const cerberus_ble_archive_t *doc
         document->rows[index].response_state != CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT ||
         !document->rows[index].response_time_valid) return false;
     *age_ms = document->saved_uptime_ms - document->rows[index].response_source_uptime_ms;
+    return true;
+}
+
+bool cerberus_ble_archive_c5_response_age_upper_at_save(const cerberus_ble_archive_t *document,
+    size_t index, uint64_t *age_ms)
+{
+    if (!document || !age_ms || !document->count || document->count > CERBERUS_BLE_ARCHIVE_MAX_ROWS ||
+        index >= document->count || !row_valid(&document->rows[index], document->saved_uptime_ms) ||
+        document->rows[index].receiver != CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ||
+        !document->rows[index].c5_response_age_upper_valid) return false;
+    *age_ms = document->rows[index].c5_response_age_upper_at_save_ms;
     return true;
 }

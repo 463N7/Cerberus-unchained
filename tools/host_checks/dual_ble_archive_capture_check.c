@@ -1,4 +1,5 @@
 #include "dual_ble_archive_capture.h"
+#include "ble_archive_response_fixture.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -199,6 +200,78 @@ static void check_family_capture(void)
         .sid=255,.primary_phy=1,.ad_validation=1};receive_roundtrip(&source);
 }
 
+static void check_response_capture(void)
+{
+    for (uint8_t family=1;family<=6;++family) {
+        cerberus_dual_ble_row_t source=observation();
+        cerberus_ble_archive_row_t facts={0};
+        memcpy(facts.address,source.address,6);facts.address_type=source.address_type;
+        assert(archive_test_response_row(&facts,family,family));
+        memcpy(source.raw,facts.advertisement,31);source.raw_length=3;source.event_type=3;source.raw_flags=0;
+        source.receive=facts.receive;source.family=facts.family;source.response=facts.c5_response;
+        source.callback_age_ms=125;source.request_started_ms=100;
+        const cerberus_dual_ble_row_t selected=source;
+        const cerberus_dual_ble_provenance_t proof=provenance;
+        cerberus_ble_archive_t document={.saved_uptime_ms=500,.count=1},decoded;
+        assert(cerberus_dual_ble_archive_capture_row(&document.rows[0],&selected,&proof,500));
+        assert(document.rows[0].c5_response_age_upper_valid&&document.rows[0].c5_response_age_upper_at_save_ms==523);
+        assert(document.rows[0].age_upper_at_save_ms==525&&document.rows[0].rssi==source.rssi);
+        assert(document.rows[0].reports_seen==source.reports&&document.rows[0].response_state==0);
+        assert(!memcmp(&document.rows[0].c5_response,&source.response,sizeof(source.response)));
+        assert(cerberus_ble_archive_validate(&document));
+        uint8_t wire[CERBERUS_BLE_ARCHIVE_MAX_SIZE];size_t length=0;
+        assert(cerberus_ble_archive_encode(&document,wire,sizeof(wire),&length)&&length==464);
+        assert(cerberus_ble_archive_decode(wire,length,&decoded));
+        assert(!memcmp(&document,&decoded,sizeof(document)));
+        uint64_t age=0;assert(cerberus_ble_archive_c5_response_age_upper_at_save(&decoded,0,&age)&&age==523);
+        assert_exact_times_unknown(&decoded.rows[0]);
+        /* Selection remains its own immutable observation after a new live
+         * response, raw original, bank or boot replaces current state. */
+        source.response.response_sequence+=9;source.response.raw[0]^=1;source.family.categories=0;
+        cerberus_dual_ble_provenance_t live=proof;++live.boot_id;++live.epoch;
+        cerberus_ble_archive_row_t again;
+        assert(cerberus_dual_ble_archive_capture_row(&again,&selected,&proof,500));
+        assert(!memcmp(&again,&document.rows[0],sizeof(again))&&again.receiver_boot_id!=live.boot_id);
+        for (unsigned fault=0;fault<15;++fault) {
+            source=selected;
+            if(fault==0)source.response.version=0;
+            if(fault==1)source.response.state=0;
+            if(fault==2)source.response.original_sequence=0;
+            if(fault==3)source.response.response_sequence=source.response.original_sequence;
+            if(fault==4)source.response.interval_us=2000001;
+            if(fault==5)source.response.receive.sid=8;
+            if(fault==6)source.response.receive.properties=2;
+            if(fault==7)source.response.receive.ad_validation=2;
+            if(fault==8)source.response.raw_length=32;
+            if(fault==9)source.response.raw_flags=0;
+            if(fault==10)source.response.family.family_code=(uint8_t)(family%6+1);
+            if(fault==11)source.response.reserved_tail=1;
+            if(fault==12)source.response.age_ms=126;
+            if(fault==13)source.response.interval_us=1000;
+            if(fault==14)source.callback_age_ms=UINT32_MAX;
+            reject_unchanged(&source,&proof);
+        }
+        source=selected;
+        assert(cerberus_dual_ble_archive_capture_row(&again,&source,&proof,99));
+        assert(!again.age_upper_valid&&!again.c5_response_age_upper_valid&&!again.c5_response_age_upper_at_save_ms);
+        source.request_started_ms=0;
+        assert(cerberus_dual_ble_archive_capture_row(&again,&source,&proof,UINT64_MAX-124));
+        assert(!again.age_upper_valid&&again.c5_response_age_upper_valid&&again.c5_response_age_upper_at_save_ms==UINT64_MAX-1);
+        source=selected;source.response.flags&=(uint8_t)~CERBERUS_DUAL_BLE_RESPONSE_AGE_VALID;
+        source.response.age_ms=UINT32_MAX;
+        assert(cerberus_dual_ble_archive_capture_row(&again,&source,&proof,500));
+        assert(again.age_upper_valid&&!again.c5_response_age_upper_valid);
+        source=selected;memset(&source.response,0,sizeof(source.response));
+        source.response.version=1;source.response.state=CERBERUS_DUAL_BLE_RESPONSE_NONE;
+        source.response.original_sequence=selected.response.original_sequence;
+        assert(cerberus_dual_ble_archive_capture_row(&again,&source,&proof,500));
+        assert(again.c5_response.state==CERBERUS_DUAL_BLE_RESPONSE_NONE&&!again.c5_response_age_upper_valid);
+        source=selected;memset(&source.response,0,sizeof(source.response));
+        assert(cerberus_dual_ble_archive_capture_row(&again,&source,&proof,500));
+        assert(again.c5_response.state==CERBERUS_DUAL_BLE_RESPONSE_UNKNOWN&&!again.c5_response_age_upper_valid);
+    }
+}
+
 int main(void)
 {
     cerberus_dual_ble_row_t source=observation();
@@ -279,6 +352,7 @@ int main(void)
     assert(strlen(row.name)==32);
     check_receive_capture();
     check_family_capture();
-    puts("C5 archive capture: frozen identity/receive/full-family proof, v5 raw and age round-trips, UNKNOWN response and transactional rejection passed");
+    check_response_capture();
+    puts("C5 archive capture: frozen original/response identity, all-six full255 response families, independent age bounds, v1-v6 and transactional rejection passed");
     return 0;
 }

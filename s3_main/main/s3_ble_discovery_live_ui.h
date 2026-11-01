@@ -35,6 +35,7 @@ typedef struct {
     uint32_t order_c5_snapshots, order_s3_mask, order_c5_mask;
     uint32_t c5_classifiable, c5_oui_only;
     uint8_t c5_family_bits[CERBERUS_DUAL_BLE_CAPACITY];
+    uint8_t c5_response_bits[CERBERUS_DUAL_BLE_CAPACITY];
     bool c5_family_cache_valid;
     uint8_t order_s3_count, order_c5_count, order_count, order_sort, order_source, order_family;
     bool order_valid;
@@ -342,6 +343,7 @@ static uint8_t ble_discovery_combined_order(void)
     if (ble_filter != CERBERUS_S3_BLE_FILTER_ALL && !store->c5_family_cache_valid) {
         store->c5_classifiable = store->c5_oui_only = 0U;
         memset(store->c5_family_bits, 0, sizeof(store->c5_family_bits));
+        memset(store->c5_response_bits, 0, sizeof(store->c5_response_bits));
         for (uint8_t i = 0U; i < c5_count; ++i) {
             cerberus_dual_ble_family_evidence_t evidence;
             const cerberus_dual_ble_provenance_t provenance = {
@@ -352,6 +354,10 @@ static uint8_t ble_discovery_combined_order(void)
                 if (evidence.flock_oui && !cerberus_ble_flock_hints_level(&evidence.flock))
                     store->c5_oui_only |= UINT32_C(1) << i;
             }
+            if (cerberus_dual_ble_response_classify(&c5->rows[i], &provenance, &evidence)) {
+                store->c5_classifiable |= UINT32_C(1) << i;
+                store->c5_response_bits[i] = evidence.categories;
+            }
         }
         store->c5_family_cache_valid = true;
     }
@@ -360,11 +366,14 @@ static uint8_t ble_discovery_combined_order(void)
     uint8_t wanted = ble_filter == CERBERUS_S3_BLE_FILTER_ALL ? 0U :
         (uint8_t)(1U << ((unsigned)ble_filter - 1U));
     for (uint8_t i = 0U; i < c5_count; ++i) {
-        if (wanted && !(store->c5_family_bits[i] & wanted)) continue;
+        if (wanted && !((store->c5_family_bits[i] | store->c5_response_bits[i]) & wanted)) continue;
         if (live_ble_recent_only && cerberus_s3_ble_recent_supported(ble_filter)) {
             uint32_t upper;
-            if (!cerberus_dual_ble_list_age(&c5->rows[i], now_ms, &upper) ||
-                upper > CERBERUS_DUAL_BLE_RECENT_MS) continue;
+            bool recent_adv = (!wanted || (store->c5_family_bits[i] & wanted)) &&
+                cerberus_dual_ble_list_age(&c5->rows[i], now_ms, &upper) && upper <= CERBERUS_DUAL_BLE_RECENT_MS;
+            bool recent_rsp = wanted && (store->c5_response_bits[i] & wanted) &&
+                cerberus_dual_ble_response_age(&c5->rows[i], now_ms, &upper) && upper <= CERBERUS_DUAL_BLE_RECENT_MS;
+            if (!recent_adv && !recent_rsp) continue;
         }
         c5_mask |= UINT32_C(1) << i;
     }
@@ -457,10 +466,12 @@ static bool ble_discovery_build_unified_row(unsigned row, size_t position, uint6
         if (!cerberus_dual_ble_copy_row(dual_ble_ui_store, ref.index, peer,
                 &store->painted_c5_provenance[row])) return false;
         cerberus_privacy_format_ble_identifier(peer->address, privacy_addresses_masked(), identifier, sizeof(identifier));
-        if (peer->name[0]) cerberus_dual_ble_list_label(peer, live_names[row]);
+        bool response_name = cerberus_dual_ble_list_response_name(peer);
+        if (peer->name[0] || response_name) cerberus_dual_ble_list_label(peer, live_names[row]);
         else snprintf(live_names[row], sizeof(live_names[row]), "%s",
             privacy_addresses_masked() ? "Unnamed device" : identifier);
-        snprintf(live_details[row], sizeof(live_details[row]), "%s T%u", identifier, peer->address_type);
+        snprintf(live_details[row], sizeof(live_details[row]), "%s T%u%s", identifier, peer->address_type,
+            response_name ? " / RSP NAME" : "");
         uint32_t age;
         if (cerberus_dual_ble_list_age(peer, now_ms, &age)) {
             uint32_t seconds = age / 1000U + (age % 1000U != 0U);
@@ -469,14 +480,26 @@ static bool ble_discovery_build_unified_row(unsigned row, size_t position, uint6
         } else snprintf(live_badges[row], sizeof(live_badges[row]), "C5 LAST / ADV AGE UNKNOWN");
         if (ble_filter != CERBERUS_S3_BLE_FILTER_ALL) {
             snprintf(live_details[row], sizeof(live_details[row]), "C5 LAST %s T%u", identifier, peer->address_type);
-            const char *kind = ble_filter == CERBERUS_S3_BLE_FILTER_FLOCK &&
+            uint8_t wanted = (uint8_t)(1U << ((unsigned)ble_filter - 1U));
+            bool adv = (store->c5_family_bits[ref.index] & wanted) != 0U;
+            bool rsp = (store->c5_response_bits[ref.index] & wanted) != 0U;
+            const char *kind = adv && rsp ? "C5 ADV+RSP" : rsp ? "C5 RSP HINT" :
+                ble_filter == CERBERUS_S3_BLE_FILTER_FLOCK &&
                 (store->c5_oui_only & (UINT32_C(1) << ref.index)) ? "C5 ADDR CLUE" :
                 peer->family.version ? "C5 FULL HINT" : "C5 ADV HINT";
-            if (cerberus_dual_ble_list_age(peer, now_ms, &age)) {
+            uint32_t response_age;
+            bool age_valid = adv && cerberus_dual_ble_list_age(peer, now_ms, &age);
+            bool response_age_valid = rsp && cerberus_dual_ble_response_age(peer, now_ms, &response_age);
+            bool use_response = response_age_valid && (!age_valid || response_age < age);
+            if (use_response) age = response_age;
+            if (age_valid || response_age_valid) {
                 uint32_t seconds = age / 1000U + (age % 1000U != 0U);
-                snprintf(live_badges[row], sizeof(live_badges[row]), "%s <=%lus%s",
-                    kind, (unsigned long)seconds, age > CERBERUS_DUAL_BLE_RECENT_MS ? " RECENCY?" : "");
+                snprintf(live_badges[row], sizeof(live_badges[row]), "%s %s<=%lus%s",
+                    kind, adv && rsp ? (use_response ? "RSP" : "ADV") : "", (unsigned long)seconds,
+                    age > CERBERUS_DUAL_BLE_RECENT_MS ? " RECENCY?" : "");
             } else snprintf(live_badges[row], sizeof(live_badges[row]), "%s / AGE UNKNOWN", kind);
+            if (response_name) snprintf(live_details[row], sizeof(live_details[row]),
+                "C5 LAST %s T%u RSP NAME", identifier, peer->address_type);
         }
         out->rssi = peer->rssi;
         out->signal_valid = cerberus_dual_ble_list_rssi_valid(peer);

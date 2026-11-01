@@ -3,8 +3,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Complementary receive-only observer. A bound session never authorizes an
- * active operation. Times below are C5 callback ages, not S3 clock values. */
+/* Complementary observer. Only explicit response modes solicit scan responses
+ * on1M; all older modes stay passive. No mode here authorizes a connection,
+ * pairing, advertising or GATT operation. Times are C5 callback ages. */
 #define CERBERUS_DUAL_BLE_LEGACY_VERSION 1U
 #define CERBERUS_DUAL_BLE_VERSION 2U
 #define CERBERUS_DUAL_BLE_MIN_FIRMWARE 61U
@@ -13,11 +14,18 @@
 #define CERBERUS_DUAL_BLE_METADATA_MIN_FIRMWARE 64U
 #define CERBERUS_DUAL_BLE_ANALYZER_MIN_FIRMWARE 65U
 #define CERBERUS_DUAL_BLE_FAMILY_MIN_FIRMWARE 66U
+#define CERBERUS_DUAL_BLE_RESPONSE_MIN_FIRMWARE 67U
 #define CERBERUS_DUAL_BLE_CAPACITY 32U
 #define CERBERUS_DUAL_BLE_RAW_BYTES 31U
 #define CERBERUS_DUAL_BLE_STALE_MS 5000U
 #define CERBERUS_DUAL_BLE_ORPHAN_MS 12000U
-enum { CERBERUS_DUAL_BLE_DISCOVERY, CERBERUS_DUAL_BLE_TRACK, CERBERUS_DUAL_BLE_ANALYZER, CERBERUS_DUAL_BLE_FAMILY };
+enum { CERBERUS_DUAL_BLE_DISCOVERY, CERBERUS_DUAL_BLE_TRACK, CERBERUS_DUAL_BLE_ANALYZER, CERBERUS_DUAL_BLE_FAMILY,
+       CERBERUS_DUAL_BLE_RESPONSE_DISCOVERY, CERBERUS_DUAL_BLE_RESPONSE_FAMILY };
+
+static inline bool cerberus_dual_ble_response_mode(uint8_t mode)
+{ return mode == CERBERUS_DUAL_BLE_RESPONSE_DISCOVERY || mode == CERBERUS_DUAL_BLE_RESPONSE_FAMILY; }
+static inline bool cerberus_dual_ble_family_mode(uint8_t mode)
+{ return mode == CERBERUS_DUAL_BLE_FAMILY || mode == CERBERUS_DUAL_BLE_RESPONSE_FAMILY; }
 enum { CERBERUS_DUAL_BLE_ATTACHED = 1U, CERBERUS_DUAL_BLE_OWNED = 2U,
        CERBERUS_DUAL_BLE_EXTENDED = 4U, CERBERUS_DUAL_BLE_READY = 8U,
        CERBERUS_DUAL_BLE_SNAPSHOTS = 16U };
@@ -34,6 +42,8 @@ enum { CERBERUS_DUAL_BLE_SNAPSHOT_OK, CERBERUS_DUAL_BLE_SNAPSHOT_BUSY,
 #define CERBERUS_DUAL_BLE_SNAPSHOT_METADATA_CHUNKS 11U
 #define CERBERUS_DUAL_BLE_SNAPSHOT_FAMILY_ROW_BYTES 158U
 #define CERBERUS_DUAL_BLE_SNAPSHOT_FAMILY_CHUNKS 16U
+#define CERBERUS_DUAL_BLE_SNAPSHOT_RESPONSE_ROW_BYTES 310U
+#define CERBERUS_DUAL_BLE_SNAPSHOT_RESPONSE_CHUNKS 31U
 
 enum { CERBERUS_DUAL_BLE_RECEIVE_UNKNOWN, CERBERUS_DUAL_BLE_RECEIVE_LEGACY,
        CERBERUS_DUAL_BLE_RECEIVE_EXTENDED };
@@ -170,7 +180,10 @@ typedef struct __attribute__((packed)) {
  * Dropped counts typed complete-original callbacks for unretained addresses
  * rejected at a full bank; stale epochs, responses, partial extended reports
  * and invalid address types are excluded. FAMILY also excludes filtered-out
- * unrelated originals. Counters saturate at UINT32_MAX. */
+ * unrelated originals. Response modes also count qualified pending-original
+ * promotions driven by a matched response when they replace/drop a slot;
+ * these are admission events, not physical devices or original-report counts.
+ * Counters saturate at UINT32_MAX. */
 enum { CERBERUS_DUAL_BLE_INVENTORY_REPLACEMENT = 1U };
 typedef struct __attribute__((packed)) {
     uint64_t handle;
@@ -225,6 +238,36 @@ typedef struct __attribute__((packed)) {
     cerberus_dual_ble_family_wire_t family;
 } cerberus_dual_ble_snapshot_family_row_t;
 
+enum { CERBERUS_DUAL_BLE_RESPONSE_UNKNOWN, CERBERUS_DUAL_BLE_RESPONSE_NONE,
+       CERBERUS_DUAL_BLE_RESPONSE_PRESENT };
+enum { CERBERUS_DUAL_BLE_RESPONSE_AGE_VALID = 1U, CERBERUS_DUAL_BLE_RESPONSE_RSSI_VALID = 2U,
+       CERBERUS_DUAL_BLE_RESPONSE_NAME_COMPLETE = 4U, CERBERUS_DUAL_BLE_RESPONSE_NAME_TRUNCATED = 8U };
+#define CERBERUS_DUAL_BLE_RESPONSE_VERSION 1U
+#define CERBERUS_DUAL_BLE_RESPONSE_INTERVAL_US 2000000U
+/* Explicit response acquisition only: active1M/passive-coded. This separate
+ * source never refreshes the retained original. Sequence/time are local C5
+ * callback correlation, not an authenticated exchange or physical identity.
+ * UNKNOWN is allzero; NONE is version/state plus the eligible retained original sequence. PRESENT uses one complete
+ * matched response, full-container hints and its separate bounded preview.
+ * Generic discovery uses family_code0 in the dedicated response domain. */
+typedef struct __attribute__((packed)) {
+    uint8_t version, state, flags, raw_length, event_type, name_length;
+    int8_t rssi;
+    uint8_t raw_flags;
+    uint64_t original_sequence, response_sequence;
+    uint32_t age_ms, interval_us;
+    cerberus_dual_ble_receive_metadata_t receive;
+    uint8_t raw[31], name[32];
+    cerberus_dual_ble_family_wire_t family;
+    uint8_t reserved_tail;
+} cerberus_dual_ble_response_wire_t;
+typedef struct __attribute__((packed)) {
+    cerberus_dual_ble_snapshot_family_row_t family;
+    cerberus_dual_ble_response_wire_t response;
+} cerberus_dual_ble_snapshot_response_row_t;
+_Static_assert(sizeof(cerberus_dual_ble_response_wire_t) == 152U, "response sidecar layout");
+_Static_assert(sizeof(cerberus_dual_ble_snapshot_response_row_t) == 310U, "response projection layout");
+
 _Static_assert(sizeof(cerberus_dual_ble_family_wire_t) == 48U, "family evidence layout");
 _Static_assert(sizeof(cerberus_dual_ble_snapshot_family_row_t) == 158U, "family snapshot row layout");
 
@@ -248,8 +291,8 @@ static inline bool cerberus_dual_ble_start_valid(const cerberus_dual_ble_start_t
 {
     if (!r || !r->boot_id || !r->job_id ||
         (r->version != CERBERUS_DUAL_BLE_VERSION && r->version != CERBERUS_DUAL_BLE_LEGACY_VERSION) ||
-        r->mode > CERBERUS_DUAL_BLE_FAMILY || r->address_type > 3U ||
-        (r->mode == CERBERUS_DUAL_BLE_FAMILY ? (r->reserved < 1U || r->reserved > 6U) : r->reserved != 0U) ||
+        r->mode > CERBERUS_DUAL_BLE_RESPONSE_FAMILY || r->address_type > 3U ||
+        (cerberus_dual_ble_family_mode(r->mode) ? (r->reserved < 1U || r->reserved > 6U) : r->reserved != 0U) ||
         (r->mode >= CERBERUS_DUAL_BLE_ANALYZER && r->version != CERBERUS_DUAL_BLE_VERSION)) return false;
     if (r->mode != CERBERUS_DUAL_BLE_TRACK) {
         if (r->address_type) return false;

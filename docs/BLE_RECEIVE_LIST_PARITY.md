@@ -1,5 +1,9 @@
 # BLE receive-list parity audit
 
+## Rev110 source checkpoint: C5 matched scan responses
+
+Opt-in response requests use active 1M and passive coded reception. Both receivers retain their independent observations. C5 now supports all-six response-only family admission, source-labelled ADV/RSP details and v6 SD retention with historical response ages. Passive is still the default. Rev109 remains installed; see [rev110](DUAL_RADIO_REV110.md) for local verification and physical limits.
+
 ## Rev109 source checkpoint: saved full-original C5 family evidence
 
 The v5 archive and offline C5 HINTS view preserve rev108's frozen decoded family

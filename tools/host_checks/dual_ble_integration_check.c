@@ -9,9 +9,9 @@
 #include "c5_ble_legacy_getters.h"
 
 typedef struct {
-    bool legacy, lose_begin, mutated, extended, old_metadata, bad_fence, bad_analyzer_binding, family;
+    bool legacy, lose_begin, mutated, extended, old_metadata, bad_fence, bad_analyzer_binding, family, response;
     uint64_t rf_started_ms, first_begin_ms, fallback_handle;
-    unsigned begin_calls, reads, releases, frames, metadata_reads, old_reads, unsupported_at, analyzer_reads, family_reads;
+    unsigned begin_calls, reads, releases, frames, metadata_reads, old_reads, unsupported_at, analyzer_reads, family_reads, response_reads;
 } integration_t;
 
 static uint64_t integration_clock(void *context) { (void)context; return now_ms; }
@@ -45,11 +45,35 @@ static void integration_family_report(uint8_t address,uint8_t type,int8_t rssi,u
     assert(!gap_event(&event,(void*)(uintptr_t)scan_callback_epoch));
 }
 
+static void integration_response_original(uint8_t address,uint8_t type,uint8_t sid,bool partial)
+{
+    uint8_t bytes[]={2,1,6};
+    struct ble_gap_event event={.type=BLE_GAP_EVENT_EXT_DISC,.ext_disc={
+        .addr={{address,2,3,4,5,6},type},.rssi=-30,.props=2,.sid=sid,.prim_phy=1,.sec_phy=1,
+        .data_status=partial?1:0,.length_data=sizeof(bytes),.data=bytes}};
+    assert(!gap_event(&event,(void*)(uintptr_t)scan_callback_epoch));
+}
+static void integration_response_packet(uint8_t address,uint8_t type,uint8_t sid,uint8_t suffix)
+{
+    uint8_t payload[255]={39,0xff,0x4c,0};
+    memcpy(payload+40,(uint8_t[]){6,9,'H','C','-','0',suffix},7);
+    struct ble_gap_event event={.type=BLE_GAP_EVENT_EXT_DISC,.ext_disc={
+        .addr={{address,2,3,4,5,6},type},.rssi=-49,.props=10,.sid=sid,.prim_phy=1,.sec_phy=1,
+        .length_data=sizeof(payload),.data=payload}};
+    assert(!gap_event(&event,(void*)(uintptr_t)scan_callback_epoch));
+}
+static void integration_response_pair(uint8_t suffix)
+{
+    integration_response_original(1,1,7,false);now_ms+=3U;
+    integration_response_packet(1,1,7,suffix);
+}
+
 static esp_err_t integration_exchange(void *context,uint8_t command_id,const void *request,
     size_t request_size,void *response,size_t response_size)
 {
     integration_t *i=context;++i->frames;
     if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY)++i->family_reads;
+    if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE)++i->response_reads;
     cerberus_dual_ble_binding_t wrong_binding;
     if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_ANALYZER_SAMPLE){
         ++i->analyzer_reads;
@@ -91,7 +115,8 @@ static esp_err_t integration_exchange(void *context,uint8_t command_id,const voi
     }
     if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_START&&starts!=old_starts){
         i->rf_started_ms=now_ms;
-        if(i->family)integration_family_report(1,1,-30,'5');
+        if(i->response)integration_response_pair('5');
+        else if(i->family)integration_family_report(1,1,-30,'5');
         else if(i->extended)integration_extended_report(1,1,-30,7);else integration_report(-30,6);
         if(dual_mode!=CERBERUS_DUAL_BLE_ANALYZER){
             memcpy(scan_results[0].name,"REAL",4);scan_results[0].name_length=4;
@@ -105,12 +130,14 @@ static esp_err_t integration_exchange(void *context,uint8_t command_id,const voi
     }
     if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ||
         command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA||
-        command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY){
+        command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY||
+        command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE){
         ++i->reads;
         /* This update occurs AFTER the first real chunk reply, while remaining
          * chunks are still in flight. No mixture may reach the S3 publisher. */
         if(!i->mutated){
-            if(i->family)integration_family_report(1,1,-90,'6');
+            if(i->response)integration_response_pair('6');
+            else if(i->family)integration_family_report(1,1,-90,'6');
             else if(i->extended||scan_status.stored_count==32)integration_extended_report(1,1,-90,12);
             else integration_report(-90,7);
             i->mutated=true;
@@ -266,6 +293,78 @@ static void integration_family(void)
     }
     puts("Actual C5 full callback -> FAMILY158 -> S3: beyond-prefix hints, frozen mutation, first-BEGIN age, dequalification, focused admission, final sweep and Stop passed");
 }
+static void integration_response(void)
+{
+    integration_t i;cerberus_dual_ble_scan_t s;
+    for(uint8_t family=0;family<=6;family+=6){
+        integration_reset(&i,&s,false);cerberus_dual_ble_stop(&s);i.response=true;i.lose_begin=true;
+        assert(cerberus_dual_ble_begin_response(&s,family)==ESP_OK);
+        for(unsigned n=0;n<300&&!s.snapshots;++n)integration_tick(&i,&s);
+        assert(s.snapshots==1&&s.count==1&&s.published_response&&s.published_family==family);
+        assert(i.response_reads==31&&!i.family_reads&&!i.metadata_reads&&!i.old_reads&&i.begin_calls==2);
+        assert(starts==1&&!s.sweeps&&dual_radio_active&&i.mutated);
+        cerberus_dual_ble_row_t selected;cerberus_dual_ble_provenance_t proof;
+        assert(cerberus_dual_ble_copy_row(&s,0,&selected,&proof));
+        cerberus_dual_ble_family_evidence_t evidence;
+        assert(cerberus_dual_ble_response_present(&selected,&proof));
+        assert(cerberus_dual_ble_response_classify(&selected,&proof,&evidence)&&evidence.hc_name==CERBERUS_BLE_HC_05);
+        assert(selected.raw_length==3&&selected.raw[2]==6&&selected.rssi==-30);
+        assert(selected.response.raw_length==31&&selected.response.raw_flags==1&&
+            selected.response.receive.callback_length==255&&selected.response.rssi==-49);
+        assert(selected.response.interval_us==3000&&selected.response.response_sequence>selected.response.original_sequence);
+        assert(selected.request_started_ms==i.first_begin_ms&&
+            selected.callback_age_ms-selected.response.age_ms==3U);
+        uint32_t age;
+        assert(cerberus_dual_ble_response_age(&selected,now_ms,&age)&&age>=selected.response.age_ms);
+        for(unsigned n=0;n<300&&s.snapshots<2;++n)integration_tick(&i,&s);
+        assert(s.snapshots==2&&cerberus_dual_ble_response_classify(&s.rows[0],&proof,&evidence)&&
+            evidence.hc_name==CERBERUS_BLE_HC_06);
+        assert(cerberus_dual_ble_response_classify(&selected,&proof,&evidence)&&evidence.hc_name==CERBERUS_BLE_HC_05);
+        /* The raw original can survive an incomplete newer callback, but its
+         * response must no longer be available under that newer context. */
+        integration_response_original(1,1,7,true);
+        integration_response_packet(1,1,7,'5');
+        for(unsigned n=0;n<300&&s.snapshots<3;++n)integration_tick(&i,&s);
+        assert(s.snapshots==3&&s.count==1&&s.rows[0].raw[2]==6&&
+            s.rows[0].response.state==CERBERUS_DUAL_BLE_RESPONSE_UNKNOWN);
+        assert(!cerberus_dual_ble_response_present(&s.rows[0],&proof));
+        assert(cerberus_dual_ble_response_present(&selected,&proof));
+        /* New valid original + mismatched SID/type cannot join; NONE means
+         * no admitted matching response, not an assertion about the air. */
+        integration_response_original(1,1,7,false);
+        integration_response_packet(1,1,8,'5');integration_response_packet(1,0,7,'5');
+        for(unsigned n=0;n<300&&s.snapshots<4;++n)integration_tick(&i,&s);
+        assert(s.snapshots==4&&s.count==1&&s.rows[0].response.state==CERBERUS_DUAL_BLE_RESPONSE_NONE);
+        assert(s.rows[0].response.original_sequence&&!s.rows[0].response.response_sequence);
+        for(unsigned n=0;n<500&&!s.sweeps;++n)integration_tick(&i,&s);
+        assert(s.sweeps==1&&s.published_response&&s.published_family==family);
+        s.enabled=false;
+        for(unsigned n=0;n<50&&!cerberus_dual_ble_released(&s);++n)integration_tick(&i,&s);
+        assert(cerberus_dual_ble_released(&s)&&!dual_attached&&!dual_radio_active&&starts==1);
+        assert(cerberus_dual_ble_response_present(&selected,&proof));
+    }
+    /* Stop at an early and final chunk, including the offset beyond255, never
+     * publishes the partially read prefix or starts another RF procedure. */
+    const unsigned stops_at[]={1,26,31};
+    for(unsigned stop=0;stop<sizeof(stops_at)/sizeof(stops_at[0]);++stop){
+        integration_reset(&i,&s,false);cerberus_dual_ble_stop(&s);i.response=true;
+        assert(cerberus_dual_ble_begin_response(&s,6)==ESP_OK);
+        for(unsigned n=0;n<300&&i.response_reads<stops_at[stop];++n)integration_tick(&i,&s);
+        assert(i.response_reads==stops_at[stop]&&!s.snapshots);
+        cerberus_dual_ble_stop(&s);
+        for(unsigned n=0;n<50&&!cerberus_dual_ble_released(&s);++n)integration_tick(&i,&s);
+        assert(cerberus_dual_ble_released(&s)&&!s.snapshots&&!s.published_response&&
+            i.response_reads==stops_at[stop]&&!dual_attached&&starts==1);
+    }
+    integration_reset(&i,&s,false);cerberus_dual_ble_stop(&s);i.response=true;i.bad_fence=true;
+    assert(cerberus_dual_ble_begin_response(&s,0)==ESP_OK);
+    for(unsigned n=0;n<300&&!s.error;++n){now_ms+=20;cerberus_dual_ble_tick(&s,now_ms);}
+    assert(s.error==ESP_ERR_INVALID_RESPONSE&&!s.snapshots&&!s.count&&!s.published_response);
+    i.bad_fence=false;cerberus_dual_ble_stop(&s);
+    for(unsigned n=0;n<50&&!cerberus_dual_ble_released(&s);++n){now_ms+=20;cerberus_dual_ble_tick(&s,now_ms);}
+    assert(cerberus_dual_ble_released(&s)&&!dual_attached&&!s.snapshots);
+    puts("Actual C5 original/response255 -> frozen310 -> S3: response-only family, preserved first-BEGIN age, immutable selection, partial/SID/type invalidation, final sweep, fence and Stop passed");
+}
 int main(void)
 {
     integration_t i;cerberus_dual_ble_scan_t s;
@@ -400,6 +499,7 @@ int main(void)
     assert(cerberus_dual_ble_released(&s)&&!dual_attached&&!s.snapshots);
     integration_analyzer();
     integration_family();
+    integration_response();
     puts("Actual C5 service/callback + S3 coordinator: live immutable readout, lost-BEGIN age, final 8s sweep, Stop and v1 completed-bank fallback passed");
     return 0;
 }

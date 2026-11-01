@@ -3,6 +3,7 @@
 #include "ble_archive.h"
 #include "dual_ble_scan.h"
 #include "ble_family_wire.h"
+#include "ble_response.h"
 #include <string.h>
 
 /* Pure copy from a frozen C5 publication. Source identity must travel with the
@@ -35,6 +36,19 @@ static inline bool cerberus_dual_ble_archive_capture_row(cerberus_ble_archive_ro
                 source->raw_length, source->event_type, source->raw_flags,
                 source->address, source->address_type, &evidence)) return false;
     }
+    if (!cerberus_dual_ble_response_source_valid(&source->response, &source->receive,
+            source->raw_length, source->event_type, source->raw_flags,
+            source->address, source->address_type,
+            source->family.version ? source->family.family_code : 0U)) return false;
+    if (source->response.state == CERBERUS_DUAL_BLE_RESPONSE_PRESENT &&
+        (source->response.flags & CERBERUS_DUAL_BLE_RESPONSE_AGE_VALID) &&
+        (source->timing_flags & CERBERUS_DUAL_BLE_SEEN)) {
+        if (source->callback_age_ms == UINT32_MAX || source->response.age_ms > source->callback_age_ms)
+            return false;
+        const uint32_t difference = source->callback_age_ms - source->response.age_ms;
+        if (difference < source->response.interval_us / 1000U ||
+            difference > (source->response.interval_us + 999U) / 1000U) return false;
+    }
     const char *end = memchr(source->name, 0, sizeof(source->name));
     if (!end) return false;
 
@@ -58,6 +72,7 @@ static inline bool cerberus_dual_ble_archive_capture_row(cerberus_ble_archive_ro
      * Never infer receive provenance from current scanner state or raw hints. */
     row.receive = source->receive;
     row.family = source->family;
+    row.c5_response = source->response;
     row.reports_seen = source->reports;
     row.generation = provenance->generation;
     row.index = provenance->index;
@@ -73,6 +88,15 @@ static inline bool cerberus_dual_ble_archive_capture_row(cerberus_ble_archive_ro
         if (elapsed <= UINT64_MAX - source->callback_age_ms) {
             row.age_upper_at_save_ms = elapsed + source->callback_age_ms;
             row.age_upper_valid = true;
+        }
+    }
+    if (source->response.state == CERBERUS_DUAL_BLE_RESPONSE_PRESENT &&
+        (source->response.flags & CERBERUS_DUAL_BLE_RESPONSE_AGE_VALID) &&
+        saved_uptime_ms >= source->request_started_ms) {
+        const uint64_t elapsed = saved_uptime_ms - source->request_started_ms;
+        if (elapsed <= UINT64_MAX - source->response.age_ms) {
+            row.c5_response_age_upper_at_save_ms = elapsed + source->response.age_ms;
+            row.c5_response_age_upper_valid = true;
         }
     }
     *out = row;
