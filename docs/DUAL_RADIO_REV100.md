@@ -1,8 +1,8 @@
 # Rev100: matched response evidence and bounded C5 discovery
 
-Rev100 is a source candidate. All 120 host suites pass on unchanged inputs;
-all five native targets pass and installation is pending. Rev99 remains installed;
-its boot and pending physical checks are recorded in the prior checkpoint.
+Rev100 is installed as a local development checkpoint. All 120 host suites and
+all five native build targets pass on unchanged inputs. Matched image writes
+and application boot are verified; physical acceptance remains pending.
 The full Marauder port remains incomplete.
 
 ## S3 response evidence
@@ -96,8 +96,47 @@ checks and 1,537 viewer assertions. Those counts do not measure physical RF or S
 behavior. S3, onboard C5, S3-to-C5 bridge, expansion WROOM and expansion XIAO
 native targets all pass; the current receipt is
 `artifacts/integration/build-report.json` with build output in
-`artifacts/build/rev100-native-all.log`. Installation and physical acceptance
-remain pending.
+`artifacts/build/rev100-native-all.log`. Physical acceptance remains pending.
+
+The full native evidence, including both onboard ELFs, SDK configurations and
+the matched-build receipt, is retained in `artifacts/rev100-final-native-evidence`.
+Package `dist/cerberus-unchained-0.1.0-dev.rev100-20261101T070835Z` passes hash,
+chip-header, partition and image-bound verification. All three packaged onboard
+application hashes match the full native matrix. Its firmware source digest is
+`6af214a91fc3b085a9881186cf303fef4fb4dc196dfe616d88f63ed57da1beb2`.
+The unchanged-input host/native and package binding is recorded in
+`artifacts/device-rev100/preflash-verification.json`. Expansion builds do not
+establish expansion-board hardware acceptance.
+
+## Local installation and boot
+
+Implementation commit `983879370325529587dde63dc6e63d8c4bef5bb4` is installed.
+Fresh first-2-MiB S3 and C5 backups match the previously installed rev99 images
+and were verified against device flash before the corresponding writes. They
+cover every sector written by this update; higher flash was preserved. The
+temporary bridge, onboard C5 and final S3 each completed three image writes
+with verified hashes and exact chip/MAC guards. Per-target write receipts bind
+the package, manifest, source, images and passing guard evidence. No release or
+PR was published.
+
+Live diagnostics report S3 `0.1.0-dev.rev100`, C5 protocol firmware 63, an active
+display buffer, mounted SD, inactive USB storage and no previous-reset fault.
+Settled S3 internal free memory is 134,428 bytes, with a 94,208-byte largest
+block, 1,428,324 free PSRAM bytes and ten tasks. After the read-only command
+sequence, the console reports 652 remaining stack bytes, unchanged from the
+rev99 sequence; this is not an exhaustive runtime stack bound. C5 reports
+59 KiB free and a 54 KiB minimum at startup. These idle measurements do not
+exercise the optional receive/archive allocations.
+
+Startup SPI retains four initial READY timeouts and four legacy fallbacks,
+with zero mutex timeouts and driver errors. The existing 26,240-byte crash
+record predates this update and remains preserved; it is not a new rev100 fault.
+Radio services and the archive worker are idle after the read-only checks.
+
+Evidence is in `artifacts/device-rev100/installation-receipt.json`,
+`boot-confirmed.txt`, `settled-boot.txt`, `final-idle.txt`, per-target write receipts and verified
+backup receipts. This establishes recoverable installation and boot, not
+touchscreen, RF, real-card save/reopen or sustained-operation acceptance.
 
 ## Pending physical acceptance
 
@@ -112,3 +151,21 @@ remain pending.
 
 The upstream develop branch was rechecked at
 `79cc6bcba1db6679baee1dab2b0c1ad5010e6363`; no new upstream revision was observed.
+
+## Next bounded receive work
+
+A read-only C5 audit identifies an eight-byte per-original metadata envelope as
+a candidate for preserving callback source, extended properties, callback length,
+SID, PHY, controller data status and full-AD validation state. Keeping 31-byte raw
+previews would add an estimated 512 bytes across the live and frozen C5 banks,
+before any layout changes. A separate gated read could fit the 102-byte row plus
+eight-byte envelope in the same eleven ten-byte chunks, preserving the existing
+read command's layout and zero tail. These are proposed storage/transport
+calculations, not implemented or measured performance improvements.
+
+The next fixtures must cover the real extended callback through normalization,
+snapshot freeze and decoding, using installed SDK field widths. Current integrated
+fixtures enter after that normalization. Incomplete reports and responses must not
+overwrite metadata belonging to an older complete original, and callback length
+must not be described as the length of a reassembled advertising train. The audit
+is retained in `artifacts/device-rev100/c5-receive-metadata-next-step.txt`.

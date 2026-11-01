@@ -9,7 +9,7 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev100` (candidate), paired with onboard
+**Current source version: `0.1.0-dev.rev100`, paired with onboard
 C5 protocol firmware revision 63. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -46,8 +46,10 @@ evidence and extends the existing archive with v3 write and v1/v2 read support.
 Selected observations retain full scan epochs. C5 v2 discovery gains bounded
 32-slot replacement and frozen replacement/drop counters; legacy scans retain
 their prior admission behavior. All 120 host suites and five native build
-targets pass on unchanged inputs. Installation and physical acceptance remain
-pending. See [the rev100 checkpoint](docs/DUAL_RADIO_REV100.md).
+targets pass on unchanged inputs. The matched local package is installed with
+verified image writes, both chips online and SD mounted. Touchscreen, live
+reception and real-card save/reopen acceptance remain pending. See
+[the rev100 checkpoint](docs/DUAL_RADIO_REV100.md).
 
 Rev99 extends the existing BLE SD archive to one report containing up to 32
 observations per receiver. New v2 files preserve receiver identity, S3 peak
