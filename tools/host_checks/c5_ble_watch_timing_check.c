@@ -73,12 +73,12 @@ static bool analyzer_callback_exhausted;
 static void dual_expire_locked(void){CHECK(locked);}
 static uint8_t diagnostic_phase;
 static int64_t clock_us,parse_delay;
-static unsigned parse_epoch_change,queued,rf_starts,timeout_stops,parse_calls;
+static unsigned parse_epoch_change,queued,rf_starts,timeout_stops,parse_calls,mutex_takes;
 static int infer_error,rf_error,callout_error;
 static void *rf_arg;
 static int (*rf_callback)(struct ble_gap_event *,void *);
 static int64_t esp_timer_get_time(void){return clock_us;}
-static void xSemaphoreTake(void *m,unsigned ticks){(void)ticks;CHECK(m==scanner_mutex&&!locked);locked=true;}
+static void xSemaphoreTake(void *m,unsigned ticks){(void)ticks;++mutex_takes;CHECK(m==scanner_mutex&&!locked);locked=true;}
 static void xSemaphoreGive(void *m){CHECK(m==scanner_mutex&&locked);locked=false;}
 static int ble_hs_adv_parse_fields(struct ble_hs_adv_fields *f,const uint8_t *p,unsigned n)
 {(void)f;(void)p;(void)n;++parse_calls;clock_us+=parse_delay;if(parse_epoch_change){++scan_callback_epoch;parse_epoch_change=0;}return 0;}
@@ -333,6 +333,30 @@ static void family_actual_lifecycle(void)
     }
     dual_attached=false;analyzer_callback_exhausted=false;
 }
+static void ordinary_dispatch_once(void)
+{
+    /* Ordinary Watch has no companion owner. Exercise the real registered SDK
+     * callback and assert one response-mode lock plus its existing two locks. */
+    CHECK(!dual_attached&&!dual_response);clock_us=19000000;start();
+    unsigned before=mutex_takes;receive();CHECK(mutex_takes==before+3U);
+    report.disc.event_type=4;before=mutex_takes;receive();CHECK(mutex_takes==before+1U);
+    report.disc.event_type=3;report.disc.data=NULL;
+    before=mutex_takes;receive();CHECK(mutex_takes==before+1U);
+#if TEST_EXTENDED
+    report.type=BLE_GAP_EVENT_EXT_DISC;
+    report.ext_disc=(struct ble_gap_ext_disc_desc){.addr={.type=1,.val={2,4,6,8,10,12}},
+        .rssi=-40,.sid=7,.prim_phy=1,.sec_phy=1,.length_data=31,.data=advertisement};
+    before=mutex_takes;receive();CHECK(mutex_takes==before+3U);
+    report.ext_disc.props=BLE_HCI_ADV_SCAN_RSP_MASK;
+    before=mutex_takes;receive();CHECK(mutex_takes==before+1U);
+    report.ext_disc.props=0;report.ext_disc.data_status=1;
+    before=mutex_takes;receive();CHECK(mutex_takes==before+3U);
+    report.ext_disc.data_status=0;report.ext_disc.data=NULL;
+    before=mutex_takes;receive();CHECK(mutex_takes==before+1U);
+#endif
+    CHECK(!dual_attached&&!dual_response);complete();
+}
+
 static void response_actual_lifecycle(void)
 {
     for(unsigned mode=4;mode<=5;++mode){
@@ -358,7 +382,7 @@ static void response_actual_lifecycle(void)
 }
 int main(void)
 {
-    entry_clock_and_qualification();stale_delivery_and_saturation();extended_admission();motion_wire();analyzer_actual_lifecycle();family_actual_lifecycle();response_actual_lifecycle();
+    entry_clock_and_qualification();stale_delivery_and_saturation();extended_admission();motion_wire();ordinary_dispatch_once();analyzer_actual_lifecycle();family_actual_lifecycle();response_actual_lifecycle();
     CHECK(!locked);printf("C5 BLE timing (%s): %u checks; actual passive start/GAP/getters, atomic motion and own Location age, partial/response/malformed exclusion, stale callback/completion, zero/negative/full-width time, replacement and epoch saturation passed.\n",TEST_EXTENDED?"extended":"legacy",checks);
     return 0;
 }

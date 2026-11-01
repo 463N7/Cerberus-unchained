@@ -244,8 +244,6 @@ static void record_advertisement_with_metadata(const struct ble_gap_disc_desc *d
     uint32_t epoch, int64_t callback_us, const cerberus_dual_ble_receive_metadata_t *receive)
 {
     if (!discovery) return;
-    if (response_receive_event(discovery,epoch,callback_us,receive,true,
-            discovery->event_type==BLE_HCI_ADV_RPT_EVTYPE_SCAN_RSP)) return;
     if ((discovery->length_data != 0U && discovery->data == NULL) ||
         discovery->event_type == BLE_HCI_ADV_RPT_EVTYPE_SCAN_RSP) return;
     uint8_t family_code = 0U;
@@ -371,15 +369,19 @@ static void record_advertisement_with_metadata(const struct ble_gap_disc_desc *d
     xSemaphoreGive(scanner_mutex);
 }
 
-/* Keep ordinary/legacy entry semantics; only passive provenance is added. */
+/* Dispatch each SDK route once, before original-only admission. EXT dispatch
+ * stays in gap_event so incomplete originals can invalidate response proof. */
 static void record_advertisement(const struct ble_gap_disc_desc *discovery,
     uint32_t epoch, int64_t callback_us)
 {
+    if (!discovery) return;
     const cerberus_dual_ble_receive_metadata_t receive = {
         .source_kind = CERBERUS_DUAL_BLE_RECEIVE_LEGACY,
-        .callback_length = discovery ? discovery->length_data : 0U,
+        .callback_length = discovery->length_data,
         .sid = 0xffU, .data_status = 0xffU,
     };
+    if (response_receive_event(discovery,epoch,callback_us,&receive,true,
+            discovery->event_type==BLE_HCI_ADV_RPT_EVTYPE_SCAN_RSP)) return;
     record_advertisement_with_metadata(discovery, epoch, callback_us, &receive);
 }
 
