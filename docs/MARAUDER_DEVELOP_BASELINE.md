@@ -9,6 +9,16 @@ Observed on 2026-10-29 from `https://github.com/justcallmekoko/ESP32Marauder.git
 
 The two commits have the **same Git tree**, `8b5d8ede62ce3e4e78941ca5b10abfb97896ec60`. An explicit fetch of `refs/heads/master` into the separate `develop` checkout followed by `git diff --quiet` returned zero. The old checkout at `../integration/marauder-source` was not changed; the new checkout is `../integration/marauder-develop-2026-10-29`. These are snapshots. Recheck the remote before future parity claims because `develop` can advance.
 
+### Rechecked on 2026-11-01
+
+The GitHub `develop` branch remains at
+`79cc6bcba1db6679baee1dab2b0c1ad5010e6363`, with tree
+`8b5d8ede62ce3e4e78941ca5b10abfb97896ec60`. The clean local reference at
+`../integration/marauder-develop-2026-10-29` reports the same commit and tree.
+The rev97 ledger was regenerated and checked against that local reference,
+including the five recorded source-file hashes. This recheck updates source
+attribution; it does not establish implementation or hardware parity.
+
 ## Source difference, `develop` versus pinned `master`
 
 | Surface | `develop` | Added | Removed | Changed |

@@ -91,6 +91,7 @@ static sentinel_scan_session_t session;
 static sentinel_scan_session_t live_session;
 static bool live_ble_session_initialized,ui_capability_blocked,live_scan_observation_valid,live_ble_observation_valid;
 static cerberus_wifi_scan_status_payload_t wifi_scan_status;
+static uint8_t wifi_snapshot_band;
 static struct { uint8_t state; } wifi_defense_status;
 static unsigned live_commands,live_observations;
 static esp_err_t live_command_error;
@@ -811,6 +812,7 @@ static void check_start_publication_lifecycle(void)
 
 static void seed_wifi_recent(void)
 {
+    wifi_snapshot_band=CERBERUS_WIFI_SCAN_BAND_ALL;
     seed_list();current_page=UI_PAGE_WIFI;wifi_mode=UI_WIFI_MODE_LIST;
     c5_status.firmware_version=CERBERUS_WIFI_OBSERVATION_MIN_FIRMWARE;
     c5_online=true;live_radio_busy=false;wifi_attack_selecting=false;
@@ -830,6 +832,25 @@ static void seed_wifi_recent(void)
             .request_started_us=40000000,.source_age_ms=ages[i],.valid=i!=3&&i!=5};
     }
     live_make_view();drawn[0]='\0';assert(live_paint(true)==ESP_OK);
+}
+
+static void check_wifi_restricted_coverage(void)
+{
+    seed_wifi_recent();
+    for(unsigned i=0;i<10;++i)store.wifi[i].channel=36;
+    wifi_snapshot_band=CERBERUS_WIFI_SCAN_BAND_5G;
+    cerberus_scan_display_store_t original=store;
+    uint32_t captured=live_records[SENTINEL_SCAN_WIFI].captured_ms;
+    live_make_view();
+    assert(strstr(live_view.hint,"5 GHZ ONLY")&&!strcmp(live_view.count_label,"ALL STORED >"));
+    assert(live_view.total_count==10);
+    live_wifi_band=CERBERUS_S3_WIFI_BAND_24_GHZ;live_make_view();
+    assert(!live_view.total_count&&!strcmp(live_view.message,"BAND NOT SCANNED"));
+    live_wifi_band=CERBERUS_S3_WIFI_BAND_5_GHZ;live_make_view();
+    assert(live_view.total_count==10&&strstr(live_view.hint,"5 GHZ ONLY"));
+    assert(!memcmp(&original,&store,sizeof(store))&&live_records[SENTINEL_SCAN_WIFI].captured_ms==captured);
+    assert(!live_commands&&!starts&&!passive_starts);
+    seed_wifi_recent();
 }
 
 static void check_wifi_recent_ui(const char *prefix)
@@ -1479,6 +1500,7 @@ int main(int argc,char **argv)
     check_wifi_list_geometry_and_cache();
     printf("Wi-Fi list UI: %u checks; actual sort/band/age, immutable maps, successful-paint binding, failure recovery, hit regions and cache-only controls passed\n",wifi_list_ui_checks);
     check_wifi_readout_error_ui(argv[1]);
+    check_wifi_restricted_coverage();
     check_owned_wifi_observation_view();
     check_analyzer_window_ui(argv[1]);
     check_analyzer_family_ui(argv[1]);

@@ -37,6 +37,7 @@ end = live.index("} live_scan_record_t;", start) + len("} live_scan_record_t;")
     function(live, "static esp_err_t live_analyze_selected_wifi_ssid(void)"),
     function(ui, "static esp_err_t analyze_selected_wifi_ssid(void)"),
     function(ui, "static void make_ssid_display_safe(char *ssid)"),
+    function(ui, "static const char *wifi_scan_coverage_text(uint8_t band)"),
     function(ui, "static uint8_t count_wifi_security_modes(uint16_t mask)"),
     function(ui, "static const char *wifi_security_text(uint8_t security)"),
     function(ui, "static uint16_t text_width(const char *text, uint8_t scale)"),

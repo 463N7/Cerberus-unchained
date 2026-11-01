@@ -32,7 +32,7 @@ static live_scan_record_t live_records[SENTINEL_SCAN_TOOL_COUNT];
 static uint32_t live_capture_pending;
 _Static_assert(SENTINEL_SCAN_TOOL_COUNT <= 32, "Capture pending mask capacity");
 static cerberus_scan_display_store_t *live_store;
-static int64_t live_wifi_published_us; /* S3 commit time, never RF time or UTC. */
+static int64_t live_wifi_published_us; /* Original bank receipt, never reopen/RF time or UTC. */
 static cerberus_findmy_monitor_record_t *live_ble_evidence; /* Frozen sweep in PSRAM. */
 static uint8_t live_ble_focus_bits[CERBERUS_BLE_SCAN_MAX_RESULTS];
 static uint8_t live_ble_indexes[CERBERUS_BLE_SCAN_MAX_RESULTS];
@@ -109,7 +109,8 @@ static bool live_wifi_baseline_current(void)
         wifi_baseline_publication && wifi_baseline_publication == wifi_relation_publication &&
         record->saved_generation == wifi_baseline.generation &&
         record->saved_generation == wifi_relation_generation &&
-        wifi_baseline_published_us >= 0 && wifi_baseline_published_us == live_wifi_published_us;
+        wifi_baseline_published_us >= 0 && wifi_baseline_published_us == live_wifi_published_us &&
+        wifi_baseline_band == wifi_snapshot_band;
 }
 
 static esp_err_t live_compare_wifi_baseline(void)
@@ -129,6 +130,7 @@ static esp_err_t live_compare_wifi_baseline(void)
     if (error == ESP_OK) {
         wifi_baseline_publication = wifi_relation_publication;
         wifi_baseline_published_us = live_wifi_published_us;
+        wifi_baseline_band = wifi_snapshot_band;
     }
     return error;
 }
@@ -617,7 +619,7 @@ static void live_make_view(void)
             live_view.sort_label = live_wifi_sort == CERBERUS_S3_WIFI_SORT_SIGNAL_DESC ? "SIGNAL >" :
                 live_wifi_sort == CERBERUS_S3_WIFI_SORT_NAME_ASC ? "NAME A-Z >" : "CHANNEL >";
             live_view.band_control = true;
-            live_view.count_label = live_wifi_band == CERBERUS_S3_WIFI_BAND_ALL ? "ALL BANDS >" :
+            live_view.count_label = live_wifi_band == CERBERUS_S3_WIFI_BAND_ALL ? "ALL STORED >" :
                 live_wifi_band == CERBERUS_S3_WIFI_BAND_24_GHZ ? "2.4 GHZ >" : "5 GHZ >";
             live_wifi_built.publication = wifi_relation_publication;
             live_wifi_built.generation = record->saved_generation;
@@ -662,7 +664,8 @@ static void live_make_view(void)
         record->state == SENTINEL_SCAN_RUNNING ? "LISTENING" : "PREPARING ONE SWEEP");
     if (record->captured) snprintf(live_hint, sizeof(live_hint), "LATEST SWEEP %lus AGO / %s",
         (unsigned long)((uint32_t)(esp_timer_get_time() / 1000 - record->captured_ms) / 1000),
-        tool == SENTINEL_SCAN_WIFI || tool == SENTINEL_SCAN_BLE ? "TAP TO EXPLORE" : "PASSIVE OBSERVATION");
+        tool == SENTINEL_SCAN_WIFI ? wifi_scan_coverage_text(wifi_snapshot_band) :
+        tool == SENTINEL_SCAN_BLE ? "TAP TO EXPLORE" : "PASSIVE OBSERVATION");
     else snprintf(live_hint, sizeof(live_hint), "FIRST RESULTS APPEAR AFTER A FULL SWEEP");
     if(tool==SENTINEL_SCAN_WIFI&&wifi_attack_selecting&&record->captured){
         snprintf(live_subtitle,sizeof(live_subtitle),"TAP NETWORKS TO TOGGLE / THEN ATTACKS");
@@ -693,9 +696,9 @@ static void live_make_view(void)
             ble_discovery_live->binding_overflows);
     }
     if (tool == SENTINEL_SCAN_WIFI && live_view.age_label && record->captured)
-        snprintf(live_hint, sizeof(live_hint), live_wifi_recent_only ?
-            "RECENT MATCHING FRAMES / %u IN SWEEP" :
-            "AGE FILTER ABOVE / %u IN SWEEP", record->count);
+        snprintf(live_hint, sizeof(live_hint), "%s / %s / %u IN SWEEP",
+            live_wifi_recent_only ? "RECENT FRAMES" : "AGE FILTER ABOVE",
+            wifi_scan_coverage_text(wifi_snapshot_band), record->count);
     if (tool == SENTINEL_SCAN_WIFI && live_wifi_capture_busy()) {
         const cerberus_scan_wifi_transfer_t *transfer = &live_store->wifi_transfer;
         snprintf(live_subtitle, sizeof(live_subtitle), "READING RESULTS %u / %u",
@@ -736,6 +739,10 @@ static void live_make_view(void)
     if (ordinary_wifi && live_wifi_band != CERBERUS_S3_WIFI_BAND_ALL && record->captured)
         live_view.message = live_wifi_recent_only && live_view.age_label ?
             "NO RECENT APS IN BAND" : "NO NETWORKS IN BAND";
+    if (ordinary_wifi && record->captured &&
+        ((wifi_snapshot_band == CERBERUS_WIFI_SCAN_BAND_5G && live_wifi_band == CERBERUS_S3_WIFI_BAND_24_GHZ) ||
+         (wifi_snapshot_band == CERBERUS_WIFI_SCAN_BAND_2G && live_wifi_band == CERBERUS_S3_WIFI_BAND_5_GHZ)))
+        live_view.message = "BAND NOT SCANNED";
     if (tool == SENTINEL_SCAN_ENERGY) {
         if (record->captured) {
             memcpy(live_view.energy_dbm, live_energy, sizeof(live_energy));
@@ -966,6 +973,7 @@ static void live_reset_observations(void)
     memset(&live_wifi_built, 0, sizeof(live_wifi_built));
     memset(&live_wifi_painted, 0, sizeof(live_wifi_painted));
     live_wifi_published_us = 0;
+    wifi_snapshot_band = CERBERUS_WIFI_SCAN_BAND_ALL;
     /* C5 restarts do not invalidate a completed S3 BLE generation. */
     for (sentinel_scan_tool_t tool = SENTINEL_SCAN_WIFI; tool < SENTINEL_SCAN_TOOL_COUNT; ++tool) {
         if (tool == SENTINEL_SCAN_BLE) continue;

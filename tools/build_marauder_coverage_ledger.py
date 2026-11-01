@@ -133,9 +133,11 @@ def markdown(ledger: dict) -> str:
     def cell(text: str) -> str:
         return text.replace("|", "\\|").replace("\n", " ")
     lines = ["# Marauder coverage ledger", "",
+        f"Current editorial checkpoint: **{ledger['audit_checkpoint']}**. "
         "This is a source/workflow audit, not a claim that all modes work or a completion percentage. "
-        "[Rev93 contribution](CONTRIBUTION_REV93.md) separates the installed local Unified checkpoint "
-        "from the Unchained adaptation and its independent validation. "
+        "[Dual-radio development](DUAL_RADIO_SCANNING.md) separates current source/host checks "
+        "from installation and physical acceptance. "
+        "[Rev93 contribution](CONTRIBUTION_REV93.md) retains its original contribution scope. "
         "[Earlier contribution evidence](CONTRIBUTION_REV81.md) keeps its original scope.", "",
         "The inventory contains **95 mode symbols, 265 literal menu entries and 58 top-level CLI entries**. "
         "These overlap. Some symbols are control states or dormant legacy modes; labels alone do not prove reachable services.", "",
@@ -164,7 +166,8 @@ def markdown(ledger: dict) -> str:
         lines.append(f"| {row['name']} | {row['status']} | {cell(row['next_gap'])} |")
     lines += ["", "Integrated Wardriving references separate Cerberus firmware through its "
         "[source contract](WARDRIVE_RECENT_SOURCE_CONTRACT.md), not an extra Marauder mode. "
-        "Active engines are unchanged by this contribution. Earlier active Wi-Fi errors, native extended BLE, "
+        "Active engines are unchanged by this receive-side milestone. Earlier active Wi-Fi errors, "
+        "disabled S3 native extended reception, C5 extended-receive hardware acceptance, "
         "physical GPS/expansion validation and full parity remain open.", ""]
     return "\n".join(lines)
 

@@ -10,7 +10,7 @@
 #define DUAL_WIFI_POLL_MS 100U
 enum { DUAL_PHASE_IDLE, DUAL_PHASE_LOCAL, DUAL_PHASE_START, DUAL_PHASE_RESOLVE_START, DUAL_PHASE_WAIT,
     DUAL_PHASE_PROOF, DUAL_PHASE_ROWS, DUAL_PHASE_STATUS, DUAL_PHASE_FINAL_PROOF,
-    DUAL_PHASE_FINAL_OWNER, DUAL_PHASE_LOCAL_WAIT, DUAL_PHASE_CLEANUP };
+    DUAL_PHASE_FINAL_OWNER, DUAL_PHASE_LOCAL_WAIT, DUAL_PHASE_CLEANUP, DUAL_PHASE_CACHED_OWNER };
 
 typedef struct {
     cerberus_dual_wifi_row_t retained[CERBERUS_DUAL_WIFI_CAPACITY];
@@ -22,16 +22,21 @@ typedef struct {
     cerberus_c5_wifi_relation_reader_t proof_reader;
     cerberus_c5_wifi_scan_reader_t row_reader;
     uint64_t c5_session;
+    int64_t bank_received_us;
     uint32_t started_ms, deadline_ms, poll_ms, s3_job;
+    uint32_t bank_publication;
     uint8_t phase, band, c5_index, matched_index;
     bool s3_started, s3_done, s3_owned, c5_possible, c5_stop_next, stopping;
+    bool bank_eligible;
 } dual_wifi_store_t;
 static dual_wifi_store_t *store;
 
 static uint32_t dual_now(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 static bool dual_active(void) { return store && store->phase != DUAL_PHASE_IDLE; }
+static bool dual_cached_match(const cerberus_dual_wifi_row_t *target, uint8_t *index);
 static void dual_cleanup(esp_err_t error)
 {
+    if (error != ESP_OK) store->bank_eligible = false;
     if (error != ESP_OK && store->status.error == ESP_OK) store->status.error = error;
     store->status.rebind_ready = false;
     c5_spi_link_wifi_scan_result_cancel(&store->row_reader);
@@ -55,7 +60,12 @@ static esp_err_t dual_begin(bool rebinding)
         store = heap_caps_calloc(1U, sizeof(*store), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!store) return ESP_ERR_NO_MEM;
     }
+    /* A new attempt invalidates staging eligibility even if INFO fails or the
+     * attempt is cancelled before START. Retained rows remain historical. */
+    store->bank_eligible = false;
+    store->bank_received_us = -1;
     store->status.rebind_ready = false;
+    store->status.rebind_cached = false;
     if (!rebinding && store->status.generation == UINT32_MAX) return ESP_ERR_INVALID_STATE;
     cerberus_wifi_scan_band_response_t info;
     esp_err_t error = c5_spi_link_wifi_scan_band_info(&info);
@@ -115,6 +125,24 @@ esp_err_t cerberus_dual_wifi_scan_begin_rebind(const cerberus_dual_wifi_row_t *t
         (target->source != CERBERUS_DUAL_WIFI_SOURCE_S3 && target->source != CERBERUS_DUAL_WIFI_SOURCE_C5) ||
         !memchr(target->ap.ssid, 0, sizeof(target->ap.ssid))) return ESP_ERR_INVALID_ARG;
     cerberus_dual_wifi_row_t copy = *target;
+    if (dual_active()) return ESP_ERR_INVALID_STATE;
+    uint8_t index;
+    if (dual_cached_match(&copy, &index)) {
+        store->target = copy;
+        store->matched_index = index;
+        store->status.rebind_ready = false;
+        store->status.rebinding = store->status.rebind_cached = true;
+        store->status.state = CERBERUS_DUAL_WIFI_READING;
+        store->status.error = store->status.c5_error = ESP_OK;
+        store->status.elapsed_ms = 0U;
+        store->started_ms = dual_now();
+        store->deadline_ms = store->started_ms + DUAL_WIFI_DEADLINE_MS;
+        store->stopping = false;
+        /* This phase only validates immutable state. It never acquires a
+         * radio, so cancellation must not send STOP to either receiver. */
+        store->phase = DUAL_PHASE_CACHED_OWNER;
+        return ESP_OK;
+    }
     esp_err_t error = dual_begin(true);
     if (error == ESP_OK) store->target = copy;
     return error;
@@ -124,6 +152,28 @@ static bool dual_same_ap(const cerberus_c5_wifi_result_t *a, const cerberus_c5_w
 {
     return a->channel == b->channel && a->security == b->security &&
         !memcmp(a->bssid, b->bssid, 6U) && !strcmp(a->ssid, b->ssid);
+}
+
+static bool dual_cached_match(const cerberus_dual_wifi_row_t *target, uint8_t *index)
+{
+    if (!store || !store->bank_eligible || store->bank_received_us < 0 ||
+        store->bank_publication != store->status.generation ||
+        store->status.cleanup_pending || store->s3_owned || store->c5_possible ||
+        !store->s3_done || target->source != CERBERUS_DUAL_WIFI_SOURCE_C5 ||
+        !store->c5_status.stored_count || store->c5_status.stored_count > CERBERUS_WIFI_SCAN_MAX_RESULTS)
+        return false;
+    unsigned matches = 0U;
+    uint8_t found = 0U;
+    for (uint8_t i = 0U; i < store->c5_status.stored_count; ++i) {
+        if (dual_same_ap(&target->ap, &store->pending[32U + i].ap)) { found = i; ++matches; }
+    }
+    if (matches != 1U) return false;
+    const cerberus_dual_wifi_row_t *row = &store->pending[32U + found];
+    if (row->source != CERBERUS_DUAL_WIFI_SOURCE_C5 || row->source_index != found ||
+        target->source_index != found || target->source_generation != row->source_generation ||
+        target->received_ms != row->received_ms) return false;
+    *index = found;
+    return true;
 }
 
 static bool dual_same_status(const cerberus_wifi_scan_status_payload_t *a,
@@ -179,9 +229,18 @@ static esp_err_t dual_collect_local(void)
 
 static void dual_finish(void)
 {
+    if (!store->status.rebind_cached) {
+        store->bank_received_us = esp_timer_get_time();
+        if (store->bank_received_us < 0) { dual_cleanup(ESP_ERR_INVALID_STATE); return; }
+    }
     store->status.elapsed_ms = dual_now() - store->started_ms;
     store->status.cleanup_pending = false;
     if (store->status.rebinding) {
+        uint8_t cached_index;
+        if (store->status.rebind_cached &&
+            (!dual_cached_match(&store->target, &cached_index) || cached_index != store->matched_index)) {
+            dual_cleanup(ESP_ERR_INVALID_STATE); return;
+        }
         unsigned matches = 0;
         for (uint8_t i = 0; i < store->c5_status.stored_count; ++i) {
             if (dual_same_ap(&store->target.ap, &store->pending[32U + i].ap)) {
@@ -203,6 +262,10 @@ static void dual_finish(void)
         store->status.count = count; ++store->status.generation;
         store->status.completed_ms = dual_now();
         store->status.state = CERBERUS_DUAL_WIFI_COMPLETE;
+        /* Only ordinary publication gives retained64 rows this staging bank's
+         * identity. Fresh AP rebind leaves retained64 unchanged and ineligible. */
+        store->bank_publication = store->status.generation;
+        store->bank_eligible = true;
     }
     store->status.rebinding = false;
     store->phase = DUAL_PHASE_IDLE;
@@ -249,6 +312,22 @@ void cerberus_dual_wifi_scan_step(void)
     }
     esp_err_t error = dual_collect_local();
     if (error != ESP_OK) { store->status.s3_error = error; dual_cleanup(error); return; }
+    if (store->phase == DUAL_PHASE_CACHED_OWNER) {
+        if (esp_timer_get_time() < store->bank_received_us) {
+            dual_cleanup(ESP_ERR_INVALID_STATE); return;
+        }
+        cerberus_wifi_scan_status_payload_t current;
+        error = c5_spi_link_wifi_scan_band_status(store->band, store->c5_session, &current);
+        if (error != ESP_OK || !dual_same_status(&store->c5_status, &current)) {
+            store->status.c5_error = error != ESP_OK ? error : ESP_ERR_INVALID_STATE;
+            dual_cleanup(store->status.c5_error); return;
+        }
+        error = c5_spi_link_wifi_relation_begin_check_expected(&store->proof_reader,
+            &store->proof, store->deadline_ms);
+        if (error != ESP_OK) { store->status.c5_error = error; dual_cleanup(error); return; }
+        store->phase = DUAL_PHASE_FINAL_PROOF;
+        return;
+    }
     if (store->phase == DUAL_PHASE_LOCAL) {
         if (!store->status.rebinding) {
             cerberus_s3_wifi_scan_status_t local;
@@ -377,25 +456,37 @@ void cerberus_dual_wifi_scan_step(void)
 esp_err_t cerberus_dual_wifi_scan_copy_legacy_bank(cerberus_c5_wifi_result_t *rows,
     cerberus_s3_wifi_observation_t *observations, size_t capacity,
     cerberus_wifi_scan_status_payload_t *status, cerberus_c5_wifi_relation_bank_t *proof,
-    uint8_t *selected_index)
+    uint8_t *selected_index, cerberus_dual_wifi_handoff_t *handoff)
 {
-    if (!rows || !observations || !status || !proof || !selected_index || capacity < CERBERUS_WIFI_SCAN_MAX_RESULTS)
+    if (!rows || !observations || !status || !proof || !selected_index || !handoff ||
+        capacity < CERBERUS_WIFI_SCAN_MAX_RESULTS)
         return ESP_ERR_INVALID_ARG;
     memset(rows, 0, CERBERUS_WIFI_SCAN_MAX_RESULTS * sizeof(*rows));
     memset(observations, 0, CERBERUS_WIFI_SCAN_MAX_RESULTS * sizeof(*observations));
     memset(status, 0, sizeof(*status)); memset(proof, 0, sizeof(*proof)); *selected_index = 0U;
-    if (!store || dual_active() || !store->status.rebind_ready || store->status.cleanup_pending)
+    memset(handoff, 0, sizeof(*handoff));
+    if (!store || dual_active() || !store->status.rebind_ready || store->status.cleanup_pending ||
+        store->bank_received_us < 0)
         return ESP_ERR_INVALID_STATE;
+    uint8_t cached_index;
+    if (store->status.rebind_cached &&
+        (esp_timer_get_time() < store->bank_received_us ||
+         !dual_cached_match(&store->target, &cached_index) || cached_index != store->matched_index)) {
+        store->status.rebind_ready = store->bank_eligible = false;
+        return ESP_ERR_INVALID_STATE;
+    }
     cerberus_wifi_scan_status_payload_t current;
     esp_err_t error = c5_spi_link_wifi_scan_band_status(store->band, store->c5_session, &current);
     if (error != ESP_OK || !dual_same_status(&store->c5_status, &current)) {
-        store->status.rebind_ready = false;
+        store->status.rebind_ready = store->bank_eligible = false;
         return error != ESP_OK ? error : ESP_ERR_INVALID_STATE;
     }
     for (uint8_t i = 0; i < store->c5_status.stored_count; ++i) {
         rows[i] = store->pending[32U + i].ap; observations[i] = store->pending[32U + i].observation;
     }
     *status = store->c5_status; *proof = store->proof; *selected_index = store->matched_index;
+    *handoff = (cerberus_dual_wifi_handoff_t){.received_us = store->bank_received_us,
+        .session_id = store->c5_session, .band = store->band, .reused = store->status.rebind_cached};
     return ESP_OK;
 }
 
@@ -417,6 +508,7 @@ void cerberus_dual_wifi_scan_publish_diagnostics(int32_t ui_error)
         .split = status.split, .fallback = status.fallback,
         .cleanup_pending = status.cleanup_pending,
         .rebinding = status.rebinding, .rebind_ready = status.rebind_ready,
+        .rebind_cached = status.rebind_cached,
         .s3_status_valid = local_valid,
         .s3_wifi_owner = (uint8_t)cerberus_s3_wifi_owner(),
     };

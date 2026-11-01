@@ -594,6 +594,7 @@ static bool wifi_observation_valid;
 static sentinel_baseline_t wifi_baseline;
 static uint64_t wifi_baseline_publication;
 static int64_t wifi_baseline_published_us;
+static uint8_t wifi_baseline_band;
 static ui_wifi_mode_t wifi_mode = UI_WIFI_MODE_LIST;
 static cerberus_wifi_radio_stats_payload_t wifi_radio_stats;
 static esp_err_t wifi_radio_stats_error = ESP_ERR_INVALID_STATE;
@@ -632,6 +633,18 @@ static int8_t wifi_channel_history_strongest[UI_WIFI_HISTORY_SAMPLES][256];
 static uint8_t wifi_channel_history_sample_count;
 static uint8_t wifi_channel_history_next_sample;
 static uint8_t wifi_channel_history_last_generation;
+/* History describes completed banks, not how often a retained bank is opened.
+ * Keep the full proof/token for imported banks; gen8 alone can wrap or reboot. */
+typedef struct {
+    cerberus_c5_wifi_relation_bank_t proof;
+    uint64_t session_id;
+    uint8_t band;
+    bool valid;
+} wifi_history_identity_t;
+static wifi_history_identity_t wifi_channel_current_identity;
+static wifi_history_identity_t wifi_channel_history_identities[UI_WIFI_HISTORY_SAMPLES];
+static uint8_t wifi_channel_history_bands[UI_WIFI_HISTORY_SAMPLES];
+static uint8_t wifi_snapshot_band = CERBERUS_WIFI_SCAN_BAND_ALL;
 static cerberus_wifi_channel_survey_status_payload_t wifi_channel_survey_status;
 static cerberus_wifi_channel_survey_result_payload_t
     wifi_channel_survey_rows[UI_WIFI_VISIBLE_ROWS];
@@ -1223,6 +1236,9 @@ static void make_ssid_display_safe(char *ssid)
 
 static esp_err_t load_wifi_results(void)
 {
+    /* An imported bank is immutable and full-proof bound. A gen8-only read
+     * cannot refresh it or safely repaginate it after a link interruption. */
+    if (wifi_channel_current_identity.valid) return ESP_ERR_INVALID_STATE;
     wifi_result_count = 0;
     if (wifi_scan_status.state != CERBERUS_WIFI_SCAN_COMPLETE) {
         return ESP_ERR_INVALID_STATE;
@@ -1252,8 +1268,41 @@ static esp_err_t load_wifi_results(void)
     return ESP_OK;
 }
 
+static const char *wifi_scan_coverage_text(uint8_t band)
+{
+    return band == CERBERUS_WIFI_SCAN_BAND_5G ? "5 GHZ ONLY" :
+        band == CERBERUS_WIFI_SCAN_BAND_2G ? "2.4 GHZ ONLY" : "2.4 + 5 GHZ";
+}
+
+static bool wifi_history_same_identity(const wifi_history_identity_t *a,
+    const wifi_history_identity_t *b)
+{
+    const cerberus_c5_wifi_relation_bank_t *x = &a->proof, *y = &b->proof;
+    return a->valid && b->valid && a->session_id == b->session_id && a->band == b->band &&
+        !memcmp(&x->status, &y->status, sizeof(x->status)) &&
+        x->request_started_us == y->request_started_us && x->source_now_us == y->source_now_us &&
+        x->firmware_version == y->firmware_version && x->capabilities == y->capabilities &&
+        x->peer_uptime_ms == y->peer_uptime_ms && x->protocol_version == y->protocol_version &&
+        x->reset_reason == y->reset_reason && x->boot_count == y->boot_count &&
+        x->clock_valid == y->clock_valid;
+}
+
+static uint8_t wifi_channel_history_band_samples(uint8_t band)
+{
+    uint8_t count = 0U;
+    for (uint8_t i = 0U; i < wifi_channel_history_sample_count; ++i)
+        if (wifi_channel_history_bands[i] == CERBERUS_WIFI_SCAN_BAND_ALL ||
+            wifi_channel_history_bands[i] == band) ++count;
+    return count;
+}
+
 static void record_wifi_channel_history(bool new_publication)
 {
+    if (new_publication && wifi_channel_current_identity.valid) {
+        for (uint8_t i = 0U; i < wifi_channel_history_sample_count; ++i)
+            if (wifi_history_same_identity(&wifi_channel_current_identity,
+                &wifi_channel_history_identities[i])) return;
+    }
     if (!new_publication && wifi_channel_history_sample_count > 0U &&
         wifi_channel_history_last_generation == wifi_scan_status.generation) {
         return;
@@ -1267,6 +1316,8 @@ static void record_wifi_channel_history(bool new_publication)
         wifi_channel_history_strongest[wifi_channel_history_next_sample],
         wifi_channel_strongest,
         sizeof(wifi_channel_strongest));
+    wifi_channel_history_identities[wifi_channel_history_next_sample] = wifi_channel_current_identity;
+    wifi_channel_history_bands[wifi_channel_history_next_sample] = wifi_snapshot_band;
     wifi_channel_history_last_generation = wifi_scan_status.generation;
     wifi_channel_history_next_sample =
         (uint8_t)((wifi_channel_history_next_sample + 1U) % UI_WIFI_HISTORY_SAMPLES);
@@ -1279,6 +1330,8 @@ static void clear_wifi_channel_history(void)
 {
     memset(wifi_channel_history_counts, 0, sizeof(wifi_channel_history_counts));
     memset(wifi_channel_history_strongest, INT8_MIN, sizeof(wifi_channel_history_strongest));
+    memset(wifi_channel_history_identities, 0, sizeof(wifi_channel_history_identities));
+    memset(wifi_channel_history_bands, 0, sizeof(wifi_channel_history_bands));
     wifi_channel_history_sample_count = 0U;
     wifi_channel_history_next_sample = 0U;
     wifi_channel_history_last_generation = 0U;
@@ -1290,6 +1343,8 @@ static void reset_wifi_channel_history_to_current(void)
     clear_wifi_channel_history();
     memcpy(wifi_channel_history_counts[0], wifi_channel_counts, sizeof(wifi_channel_counts));
     memcpy(wifi_channel_history_strongest[0], wifi_channel_strongest, sizeof(wifi_channel_strongest));
+    wifi_channel_history_identities[0] = wifi_channel_current_identity;
+    wifi_channel_history_bands[0] = wifi_snapshot_band;
     wifi_channel_history_sample_count = 1;
     wifi_channel_history_next_sample = 1;
     wifi_channel_history_last_generation = wifi_channel_generation;
@@ -1328,6 +1383,10 @@ static int8_t wifi_channel_history_best_rssi(uint8_t channel)
 
 static esp_err_t rebuild_wifi_channel_summary(void)
 {
+    if (wifi_channel_current_identity.valid)
+        return wifi_channel_error == ESP_OK &&
+            wifi_channel_generation == wifi_channel_current_identity.proof.status.generation ?
+            ESP_OK : ESP_ERR_INVALID_STATE;
     memset(wifi_channel_counts, 0, sizeof(wifi_channel_counts));
     for (size_t channel = 0; channel < sizeof(wifi_channel_strongest); ++channel) {
         wifi_channel_strongest[channel] = INT8_MIN;
@@ -1355,6 +1414,8 @@ static esp_err_t rebuild_wifi_channel_summary(void)
         }
     }
     wifi_channel_generation = wifi_scan_status.generation;
+    wifi_snapshot_band = CERBERUS_WIFI_SCAN_BAND_ALL;
+    memset(&wifi_channel_current_identity, 0, sizeof(wifi_channel_current_identity));
     record_wifi_channel_history(false);
     return ESP_OK;
 }
@@ -1362,8 +1423,9 @@ static esp_err_t rebuild_wifi_channel_summary(void)
 /* Hydrate the older detail/summary views from the already committed AP bank.
  * This path performs no SPI/SD reads and never turns display sanitization into
  * a mutation of the frozen SSID bytes. A publication may reuse gen8. */
-static void wifi_commit_cached_results(const cerberus_c5_wifi_result_t *rows,
-    uint16_t count, uint8_t generation)
+static void wifi_commit_cached_results_at(const cerberus_c5_wifi_result_t *rows,
+    uint16_t count, uint8_t generation, int64_t received_us, uint8_t band,
+    const cerberus_c5_wifi_relation_bank_t *proof, uint64_t session_id)
 {
     wifi_result_count = 0U;
     memset(wifi_results, 0, sizeof(wifi_results));
@@ -1385,8 +1447,14 @@ static void wifi_commit_cached_results(const cerberus_c5_wifi_result_t *rows,
     }
     wifi_channel_generation = generation;
     wifi_channel_error = ESP_OK;
+    wifi_snapshot_band = band;
+    memset(&wifi_channel_current_identity, 0, sizeof(wifi_channel_current_identity));
+    if (proof && session_id) {
+        wifi_channel_current_identity = (wifi_history_identity_t){
+            .proof = *proof, .session_id = session_id, .band = band, .valid = true};
+    }
     record_wifi_channel_history(true);
-    wifi_observed_at_seconds = (uint32_t)(esp_timer_get_time() / 1000000LL);
+    wifi_observed_at_seconds = (uint32_t)(received_us / 1000000LL);
     wifi_observed_generation = generation;
     wifi_observation_valid = true;
     wifi_scan_checked = true;
@@ -1394,6 +1462,14 @@ static void wifi_commit_cached_results(const cerberus_c5_wifi_result_t *rows,
     wifi_baseline.checked = false;
     wifi_radio_stats_checked = false;
     wifi_analysis_error = ESP_ERR_INVALID_STATE;
+}
+
+/* Ordinary legacy publications are new all-band sweeps, including gen8 reuse. */
+static void wifi_commit_cached_results(const cerberus_c5_wifi_result_t *rows,
+    uint16_t count, uint8_t generation)
+{
+    wifi_commit_cached_results_at(rows, count, generation, esp_timer_get_time(),
+        CERBERUS_WIFI_SCAN_BAND_ALL, NULL, 0U);
 }
 
 static esp_err_t analyze_selected_wifi_ssid(void)
@@ -1429,6 +1505,17 @@ static esp_err_t refresh_wifi_radio_stats(void)
 
 static esp_err_t refresh_wifi_scan_status(void)
 {
+    if (wifi_channel_current_identity.valid) {
+        /* Keep an already hydrated frozen bank usable without I/O. Telemetry
+         * invalidation requires an explicit proved publication/Scan Again;
+         * an eight-bit status cannot establish the original bank or coverage. */
+        if (wifi_scan_checked && wifi_scan_error == ESP_OK && wifi_channel_error == ESP_OK &&
+            wifi_channel_generation == wifi_channel_current_identity.proof.status.generation)
+            return ESP_OK;
+        wifi_scan_checked = true;
+        wifi_scan_error = ESP_ERR_INVALID_STATE;
+        return wifi_scan_error;
+    }
     wifi_scan_checked = true;
     wifi_scan_error = c5_spi_link_get_wifi_scan_status(&wifi_scan_status);
     if (wifi_scan_error == ESP_OK && wifi_scan_status.state == CERBERUS_WIFI_SCAN_COMPLETE) {
@@ -2267,6 +2354,8 @@ static esp_err_t draw_wifi_channel_occupancy(void)
         ESP_RETURN_ON_ERROR(draw_centered(184, line, UI_MUTED, 1), TAG, "Wi-Fi channel error failed");
     } else {
         uint8_t top_channels[UI_WIFI_VISIBLE_ROWS] = {0};
+        const uint8_t covered_samples = wifi_channel_history_band_samples(
+            wifi_mode == UI_WIFI_MODE_CHANNELS_24 ? CERBERUS_WIFI_SCAN_BAND_2G : CERBERUS_WIFI_SCAN_BAND_5G);
         uint16_t band_ap_observations = 0;
         uint16_t active_channel_count = 0;
         uint16_t maximum_observations = 0;
@@ -2312,18 +2401,17 @@ static esp_err_t draw_wifi_channel_occupancy(void)
             sizeof(line),
             "%s %u/%u AVG %u.%u APS %u CH",
             wifi_mode == UI_WIFI_MODE_CHANNELS_24 ? "2.4 GHZ" : "5 GHZ",
-            (unsigned)wifi_channel_history_sample_count,
+            (unsigned)covered_samples,
             (unsigned)UI_WIFI_HISTORY_SAMPLES,
-            wifi_channel_history_sample_count == 0U
+            covered_samples == 0U
                 ? 0U
-                : (unsigned)(band_ap_observations / wifi_channel_history_sample_count),
-            wifi_channel_history_sample_count == 0U
+                : (unsigned)(band_ap_observations / covered_samples),
+            covered_samples == 0U
                 ? 0U
-                : (unsigned)((band_ap_observations * 10U / wifi_channel_history_sample_count) % 10U),
+                : (unsigned)((band_ap_observations * 10U / covered_samples) % 10U),
             (unsigned)active_channel_count);
         ESP_RETURN_ON_ERROR(draw_centered(54, line, UI_GOOD, 1), TAG, "Wi-Fi channel summary failed");
-        snprintf(line, sizeof(line), "LATEST %lus AGO / NOT AIRTIME USE",
-            (unsigned long)((uint32_t)(esp_timer_get_time() / 1000000LL) - wifi_observed_at_seconds));
+        snprintf(line, sizeof(line), "SWEEPS COVERING THIS BAND / NOT AIRTIME");
         ESP_RETURN_ON_ERROR(
             draw_centered(68, line, UI_MUTED, 1),
             TAG,
@@ -2331,7 +2419,8 @@ static esp_err_t draw_wifi_channel_occupancy(void)
 
         if (active_channel_count == 0U) {
             ESP_RETURN_ON_ERROR(
-                draw_centered(180, "NO APS IN THIS BAND", UI_MUTED, 2),
+                draw_centered(180, covered_samples ? "NO APS IN THIS BAND" :
+                    "BAND NOT SCANNED", UI_MUTED, 2),
                 TAG,
                 "Wi-Fi channel empty failed");
         } else {
@@ -2351,16 +2440,16 @@ static esp_err_t draw_wifi_channel_occupancy(void)
                     line,
                     sizeof(line),
                     "%u.%u AVG  %u/%u SEEN  BEST %dDB",
-                    wifi_channel_history_sample_count == 0U
+                    covered_samples == 0U
                         ? 0U
                         : (unsigned)(wifi_channel_history_total(channel) /
-                            wifi_channel_history_sample_count),
-                    wifi_channel_history_sample_count == 0U
+                            covered_samples),
+                    covered_samples == 0U
                         ? 0U
                         : (unsigned)((wifi_channel_history_total(channel) * 10U /
-                            wifi_channel_history_sample_count) % 10U),
+                            covered_samples) % 10U),
                     (unsigned)wifi_channel_history_seen(channel),
-                    (unsigned)wifi_channel_history_sample_count,
+                    (unsigned)covered_samples,
                     wifi_channel_history_best_rssi(channel));
                 ESP_RETURN_ON_ERROR(
                     cerberus_display_draw_text(86, y + 5U, line, UI_MUTED, UI_PANEL, 1),
@@ -2513,8 +2602,11 @@ static esp_err_t draw_wifi_detail(void)
         cerberus_display_fill_rect(8, 130, 304, 188, UI_PANEL),
         TAG,
         "Wi-Fi review panel failed");
+    if (wifi_analysis_error == ESP_OK)
+        snprintf(line, sizeof(line), "PASSIVE REVIEW / %s", wifi_scan_coverage_text(wifi_snapshot_band));
+    else snprintf(line, sizeof(line), "PASSIVE SSID REVIEW");
     ESP_RETURN_ON_ERROR(
-        cerberus_display_draw_text(14, 140, "PASSIVE SSID REVIEW", UI_TEXT, UI_PANEL, 1),
+        cerberus_display_draw_text(14, 140, line, UI_TEXT, UI_PANEL, 1),
         TAG,
         "Wi-Fi review title failed");
 
@@ -2532,13 +2624,15 @@ static esp_err_t draw_wifi_detail(void)
             TAG,
             "Wi-Fi hidden guidance failed");
     } else {
-        snprintf(
-            line,
-            sizeof(line),
-            "MATCHING ROWS: %u  2G:%u  5G:%u",
-            wifi_ssid_analysis.total_bssids,
-            wifi_ssid_analysis.count_24_ghz,
-            wifi_ssid_analysis.count_5_ghz);
+        if (wifi_snapshot_band == CERBERUS_WIFI_SCAN_BAND_5G)
+            snprintf(line, sizeof(line), "MATCHING ROWS: %u  2G:N/A  5G:%u",
+                wifi_ssid_analysis.total_bssids, wifi_ssid_analysis.count_5_ghz);
+        else if (wifi_snapshot_band == CERBERUS_WIFI_SCAN_BAND_2G)
+            snprintf(line, sizeof(line), "MATCHING ROWS: %u  2G:%u  5G:N/A",
+                wifi_ssid_analysis.total_bssids, wifi_ssid_analysis.count_24_ghz);
+        else snprintf(line, sizeof(line), "MATCHING ROWS: %u  2G:%u  5G:%u",
+                wifi_ssid_analysis.total_bssids, wifi_ssid_analysis.count_24_ghz,
+                wifi_ssid_analysis.count_5_ghz);
         ESP_RETURN_ON_ERROR(
             cerberus_display_draw_text(14, 164, line, UI_MUTED, UI_PANEL, 1),
             TAG,
@@ -2901,14 +2995,16 @@ static esp_err_t export_wifi_baseline(void)
         "snapshot_uptime_us,%llu\r\n"
         "saved_baselines,%u\r\ncompared_stored_records,%u\r\n"
         "exact_matches,%u\r\nrelated_trust_differences,%u\r\nother_records,%u\r\n"
+        "coverage,%s\r\n"
         "scope,Only retained access points in this completed snapshot\r\n"
-        "time_scope,S3 snapshot publication time is not RF receive time or UTC\r\n"
+        "time_scope,Original S3 snapshot receipt time is not RF receive time or UTC\r\n"
         "interpretation,A difference is a review clue and is not proof of an attack\r\n"
         "privacy,No network names or device identifiers included\r\n",
         esp_app_get_description()->version,
         (unsigned long long)wifi_baseline_publication,
         (unsigned long long)wifi_baseline_published_us, (unsigned)wifi_baseline.saved,
-        wifi_baseline.compared, wifi_baseline.exact, wifi_baseline.review, wifi_baseline.other),
+        wifi_baseline.compared, wifi_baseline.exact, wifi_baseline.review, wifi_baseline.other,
+        wifi_scan_coverage_text(wifi_baseline_band)),
         TAG, "baseline report");
     esp_err_t err = cerberus_storage_write_wifi_report(wifi_report_buffer, length,
         wifi_report_file_name, sizeof(wifi_report_file_name));
@@ -2923,7 +3019,11 @@ static esp_err_t draw_wifi_baseline(void)
 {
     /* Bounded local comparison also reflects trust edits and invalidated banks. */
     (void)refresh_wifi_baseline();
-    ESP_RETURN_ON_ERROR(draw_centered(55, "TRUSTED BASELINE / PASSIVE COMPARISON", UI_MUTED, 1),
+    char coverage[64];
+    if (wifi_baseline.error == ESP_OK)
+        snprintf(coverage, sizeof(coverage), "TRUSTED BASELINE / %s", wifi_scan_coverage_text(wifi_baseline_band));
+    else snprintf(coverage, sizeof(coverage), "TRUSTED BASELINE / PASSIVE COMPARISON");
+    ESP_RETURN_ON_ERROR(draw_centered(55, coverage, UI_MUTED, 1),
         TAG, "baseline subtitle");
     if (wifi_baseline.error == ESP_OK) {
         ESP_RETURN_ON_ERROR(draw_baseline_metric(12, 79, "SAVED BY YOU", (unsigned)wifi_baseline.saved,
@@ -2947,7 +3047,8 @@ static esp_err_t draw_wifi_baseline(void)
             "name, radio ID or security needs review.",
             "Mesh nodes or router changes can explain it.",
             "Other networks are not automatically unsafe.",
-            "An unseen saved network is not proof of loss.",
+            wifi_snapshot_band == CERBERUS_WIFI_SCAN_BAND_ALL ?
+                "An unseen saved network is not proof of loss." : "Other bands were not compared.",
         };
         for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); ++i) {
             ESP_RETURN_ON_ERROR(cerberus_display_draw_text(18, 258 + (uint16_t)i * 15,
@@ -8885,8 +8986,15 @@ static void handle_wifi_tap(uint16_t x, uint16_t y)
         } else if (x >= 160U && x < 228U) {
             (void)export_wifi_radio_stats();
         } else if (x >= 236U && x < 312U) {
-            wifi_mode = UI_WIFI_MODE_LIST;
-            wifi_scan_error = load_wifi_results();
+            if (wifi_channel_current_identity.valid) {
+                /* Imported C5 rows belong to the retained dual list. Returning
+                 * there must not rehydrate them through the unfenced legacy
+                 * reader or renew their original receipt/history. */
+                dual_wifi_live_open(false);
+            } else {
+                wifi_mode = UI_WIFI_MODE_LIST;
+                wifi_scan_error = load_wifi_results();
+            }
         } else {
             return;
         }

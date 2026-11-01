@@ -1,6 +1,6 @@
 # Cerberus Unchained
 
-Experimental Cerberus firmware for the expanded rev96 feature set: integrated
+Experimental Cerberus firmware for the expanded rev97 feature set: integrated
 wardriving, C5 Wi-Fi capture and analysis, S3 BLE discovery and tools, Remote ID
 receive workflows, AP/client navigation, and optional expansion radios.
 
@@ -9,7 +9,7 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev96` (candidate), paired with onboard
+**Current source version: `0.1.0-dev.rev97` (candidate), paired with onboard
 C5 protocol firmware revision 61. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -40,6 +40,20 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev97 adds a verified reuse path for a selected C5 Wi-Fi result: its completed
+scan session, full relationship proof and exact AP identity must still match
+before the original bank can reach the AP tools. Valid reuse starts no new
+scan and retains the original observation age. S3 results still require fresh
+C5 reacquisition. Analysis labels and channel-history denominators follow the
+actual band coverage; reopening one proven bank cannot create another sample.
+The separate C5 Bluetooth list gains signal/name/scan-order sorting, a
+conservative recent filter and visible age bounds/unknown timing. These presentation
+controls retain copied device identities and do not restart either radio.
+All 120 host suites and five native targets pass on matching unchanged inputs.
+The linked internal-memory increase is 528 bytes. Package verification and
+on-device acceptance are being recorded in the
+[rev97 checkpoint](docs/DUAL_RADIO_REV97.md).
 
 Rev96 moves the three CPU-only directory-list banks to lazy, stable PSRAM
 allocations to preserve internal radio memory. Their payload totals 21,760

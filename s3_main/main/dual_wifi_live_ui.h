@@ -1,8 +1,9 @@
 #pragma once
 
 /* Include immediately after sentinel_live_ui.h. The merged receive-only list
- * never supplies an index to a C5 tool. Its explicit handoff first obtains a
- * fresh, fenced ordinary C5 bank and binds the copied AP identity to that bank. */
+ * never supplies an index to a C5 tool. Its explicit handoff obtains a fenced
+ * C5 bank, either the proven original C5 bank or a fresh S3-target reacquisition,
+ * and binds the copied AP identity without refreshing retained observation age. */
 static bool dual_wifi_live_handoff_pending;
 static cerberus_dual_wifi_row_t dual_wifi_live_target;
 
@@ -71,17 +72,18 @@ static void dual_wifi_live_open(bool start_scan)
     (void)dual_wifi_ui_enter(start_scan && !ui_capability_blocked);
 }
 
-static esp_err_t dual_wifi_live_publish(uint32_t now)
+static esp_err_t dual_wifi_live_publish(void)
 {
     if (!dual_wifi_live_selection_current() || !dual_wifi_live_released() ||
         live_wifi_capture_busy()) return ESP_ERR_INVALID_STATE;
     if (!live_store_acquire()) return ESP_ERR_NO_MEM;
     cerberus_wifi_scan_status_payload_t status;
     cerberus_c5_wifi_relation_bank_t proof;
+    cerberus_dual_wifi_handoff_t handoff;
     uint8_t selected = 0U;
     esp_err_t error = cerberus_dual_wifi_scan_copy_legacy_bank(live_store->wifi_staging,
         live_store->wifi_staging_observations, CERBERUS_WIFI_SCAN_MAX_RESULTS,
-        &status, &proof, &selected);
+        &status, &proof, &selected, &handoff);
     if (error != ESP_OK) return error;
     if (status.state != CERBERUS_WIFI_SCAN_COMPLETE || status.error_code != ESP_OK ||
         !status.stored_count || status.stored_count > CERBERUS_WIFI_SCAN_MAX_RESULTS ||
@@ -89,6 +91,18 @@ static esp_err_t dual_wifi_live_publish(uint32_t now)
         !cerberus_s3_wifi_relation_meta_valid(&proof) ||
         !dual_wifi_live_same_ap(&live_store->wifi_staging[selected], &dual_wifi_live_target.ap))
         return ESP_ERR_INVALID_RESPONSE;
+    const int64_t now_us = esp_timer_get_time();
+    if (handoff.received_us < 0 || handoff.received_us > now_us || !handoff.session_id ||
+        !cerberus_wifi_scan_band_valid(handoff.band) ||
+        (handoff.reused && dual_wifi_live_target.source != CERBERUS_DUAL_WIFI_SOURCE_C5) ||
+        (!handoff.reused && handoff.band != CERBERUS_WIFI_SCAN_BAND_ALL))
+        return ESP_ERR_INVALID_RESPONSE;
+    for (uint8_t i = 0U; i < status.stored_count; ++i) {
+        const uint8_t channel = live_store->wifi_staging[i].channel;
+        if ((handoff.band == CERBERUS_WIFI_SCAN_BAND_5G && channel <= 14U) ||
+            (handoff.band == CERBERUS_WIFI_SCAN_BAND_2G && channel > 14U))
+            return ESP_ERR_INVALID_RESPONSE;
+    }
     if (wifi_relation_exhausted || wifi_relation_publication == UINT64_MAX)
         return ESP_ERR_INVALID_STATE;
 
@@ -102,13 +116,15 @@ static esp_err_t dual_wifi_live_publish(uint32_t now)
     live_records[SENTINEL_SCAN_WIFI] = (live_scan_record_t){
         .valid = true, .captured = true, .state = SENTINEL_SCAN_COMPLETE,
         .generation = status.generation, .saved_generation = status.generation,
-        .count = status.stored_count, .captured_ms = now, .error = ESP_OK};
-    live_wifi_published_us = esp_timer_get_time(); /* Receipt only, never RF time. */
+        .count = status.stored_count, .captured_ms = (uint32_t)(handoff.received_us / 1000LL),
+        .error = ESP_OK};
+    live_wifi_published_us = handoff.received_us; /* Original receipt, never RF time. */
     live_capture_pending &= ~(UINT32_C(1) << SENTINEL_SCAN_WIFI);
     memset(&live_wifi_built, 0, sizeof(live_wifi_built));
     memset(&live_wifi_painted, 0, sizeof(live_wifi_painted));
     live_page[SENTINEL_SCAN_WIFI] = selected / 4U;
-    wifi_commit_cached_results(live_store->wifi, status.stored_count, status.generation);
+    wifi_commit_cached_results_at(live_store->wifi, status.stored_count, status.generation,
+        handoff.received_us, handoff.band, &proof, handoff.session_id);
     wifi_relation_publish(status.generation, &proof, ESP_OK);
     /* This explicit single-AP choice supersedes any previous multi-select.
      * Otherwise the old menu may silently replace it with that set's first AP. */
@@ -197,7 +213,7 @@ static void dual_wifi_live_tick(uint32_t now, bool asleep)
         cerberus_dual_wifi_scan_get_status(&status);
         if (!dual_wifi_live_selection_current()) dual_wifi_live_cancel_handoff();
         else if (status.rebind_ready && !status.cleanup_pending && !status.rebinding && released) {
-            esp_err_t error = dual_wifi_live_publish(now);
+            esp_err_t error = dual_wifi_live_publish();
             if (error != ESP_OK) {
                 dual_wifi_live_cancel_handoff();
                 dual_wifi_ui_set_error(error);

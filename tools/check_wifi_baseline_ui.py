@@ -52,6 +52,7 @@ parts = [function(live, signature) for signature in (
     "static esp_err_t live_compare_wifi_baseline(void)",
     "static void live_reset_observations(void)")]
 parts += [function(ui, signature) for signature in (
+    "static const char *wifi_scan_coverage_text(uint8_t band)",
     "static uint16_t text_width(const char *text, uint8_t scale)",
     "static esp_err_t draw_centered(uint16_t y, const char *text, uint16_t color, uint8_t scale)",
     "static esp_err_t draw_small_button(uint16_t x, uint16_t y, uint16_t width, uint16_t height, const char *label)",

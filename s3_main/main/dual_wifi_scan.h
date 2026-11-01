@@ -43,7 +43,15 @@ typedef struct {
     bool cleanup_pending;
     bool rebind_ready;
     bool rebinding;
+    bool rebind_cached; /* Validating an existing completed bank; no new RF. */
 } cerberus_dual_wifi_status_t;
+
+typedef struct {
+    int64_t received_us; /* Original full-bank local receipt, never RF time. */
+    uint64_t session_id;
+    uint8_t band; /* CERBERUS_WIFI_SCAN_BAND_* coverage of this C5 bank. */
+    bool reused;
+} cerberus_dual_wifi_handoff_t;
 
 /* One UI consumer. start/stop schedule work; call step regularly even after
  * leaving a page until cleanup_pending clears. No added coordinator task.
@@ -56,16 +64,20 @@ void cerberus_dual_wifi_scan_stop(void);
 void cerberus_dual_wifi_scan_get_status(cerberus_dual_wifi_status_t *out);
 esp_err_t cerberus_dual_wifi_scan_get_row(uint8_t index, cerberus_dual_wifi_row_t *out);
 
-/* Reacquire an immutable displayed AP with a fresh receive-only C5 all-band
- * scan. The retained64 view remains unchanged. A match requires exact BSSID,
- * channel, security and SSID, plus current full-width C5 bank proof.
+/* A C5-origin row in the eligible completed ordinary bank can be rebound using
+ * owned-status / expected-proof / owned-status validation without new RF.
+ * Other rows use a fresh receive-only C5 all-band scan. The retained64 view
+ * remains unchanged. A match requires exact BSSID, channel, security and SSID;
+ * cached reuse additionally requires the original source generation/index.
  * copy_legacy_bank performs one bounded owned-status fence before export;
- * the receiving AP workflow must retain and validate the returned bank proof. */
+ * the receiving AP workflow must retain/validate its proof and preserve the
+ * mandatory handoff receipt time and band. Failed runtime validation does not
+ * silently start RF or stop a foreign session. */
 esp_err_t cerberus_dual_wifi_scan_begin_rebind(const cerberus_dual_wifi_row_t *target);
 esp_err_t cerberus_dual_wifi_scan_copy_legacy_bank(cerberus_c5_wifi_result_t *rows,
     cerberus_s3_wifi_observation_t *observations, size_t capacity,
     cerberus_wifi_scan_status_payload_t *status, cerberus_c5_wifi_relation_bank_t *proof,
-    uint8_t *selected_index);
+    uint8_t *selected_index, cerberus_dual_wifi_handoff_t *handoff);
 
 /* UI task only: publish local aggregates after the UI tick, including
  * hidden cleanup. The console must use diagnostics_get instead. */

@@ -6,7 +6,8 @@
 
 enum { UI_PAGE_WIFI=1, UI_WIFI_MODE_MENU=2, UI_WIFI_MODE_DUAL, UI_WIFI_MODE_MULTISSID,
     UI_WIFI_MODE_PINESCAN, UI_WIFI_MODE_FIELD_SURVEY, UI_WIFI_MODE_STATS, UI_WIFI_MODE_PACKET_MONITOR,
-    UI_WIFI_MODE_BASELINE, UI_WIFI_MODE_DEFENSE, UI_WIFI_MODE_CONNECTION, UI_WIFI_MODE_CHANNELS_24 };
+    UI_WIFI_MODE_BASELINE, UI_WIFI_MODE_DEFENSE, UI_WIFI_MODE_CONNECTION, UI_WIFI_MODE_CHANNELS_24,
+    UI_WIFI_MODE_LIST };
 enum { SENTINEL_GUIDE_OPEN_WIFI=1, SENTINEL_GUIDE_OPEN_WIFI_CHANNELS, SENTINEL_GUIDE_OPEN_WIFI_BASELINE };
 enum { CERBERUS_WIFI_CONNECTION_STAGING=1, CERBERUS_WIFI_CONNECTION_CONNECTED, CERBERUS_WIFI_CONNECTION_CONNECTING };
 #define SENTINEL_HUB_WIFI 1
@@ -14,11 +15,13 @@ enum { CERBERUS_WIFI_CONNECTION_STAGING=1, CERBERUS_WIFI_CONNECTION_CONNECTED, C
 static unsigned current_page, wifi_mode, menu_item, dual_opens, dual_leaves, tap_count, scan_refreshes, surveys;
 static bool ui_capability_blocked, wifi_attack_selecting, pending_start, wifi_selection_valid;
 static struct { bool checked; } wifi_baseline;
+static struct { bool valid; } wifi_channel_current_identity;
 static struct { unsigned state; } wifi_connection_status;
 static bool packet_monitor_from_target, packet_monitor_attempted;
 static unsigned packet_monitor_channel, packet_monitor_last_poll;
 static char wifi_export_message[10];
-static int wifi_connection_error;
+static int wifi_connection_error, wifi_scan_error;
+static unsigned legacy_loads;
 static void dual_wifi_live_open(bool start)
 { ++dual_opens; current_page=UI_PAGE_WIFI; wifi_mode=UI_WIFI_MODE_DUAL; pending_start=start; }
 static void dual_wifi_live_tap(uint16_t x,uint16_t y) { (void)x;(void)y;++tap_count; }
@@ -29,6 +32,8 @@ static void multissid_enter(void) {}
 static void pinescan_enter(void) {}
 static int refresh_wifi_scan_status(void) { ++scan_refreshes; return 0; }
 static int refresh_wifi_defense_survey(void) { return 0; }
+static int export_wifi_radio_stats(void) { return 0; }
+static int load_wifi_results(void) { ++legacy_loads; return -23; }
 static int c5_spi_link_get_wifi_connection_status(void *status) { (void)status;return 0; }
 static void packet_monitor_start_ui(void) {}
 static void wifi_channel_survey_start_ui(void) { assert(!pending_start);++surveys; }
@@ -41,6 +46,7 @@ static void reset(void)
     dual_opens=dual_leaves=tap_count=scan_refreshes=surveys=0;
     ui_capability_blocked=wifi_attack_selecting=pending_start=wifi_selection_valid=false;
     wifi_connection_status.state=0;
+    wifi_channel_current_identity.valid=false;legacy_loads=0;wifi_scan_error=0;
 }
 int main(void)
 {
@@ -66,6 +72,16 @@ int main(void)
     reset();menu_item=5;wifi_connection_status.state=CERBERUS_WIFI_CONNECTION_CONNECTED;root_wifi_tap(10,10);
     assert(wifi_mode==UI_WIFI_MODE_CONNECTION&&!dual_opens);
     reset();menu_item=1;root_wifi_tap(10,10);assert(wifi_mode==UI_WIFI_MODE_STATS&&!dual_opens&&scan_refreshes==1);
+    reset();wifi_mode=UI_WIFI_MODE_STATS;wifi_channel_current_identity.valid=true;
+    root_wifi_tap(260,380);
+    assert(wifi_mode==UI_WIFI_MODE_DUAL&&dual_opens==1&&!pending_start&&!legacy_loads&&!wifi_scan_error&&!scan_refreshes);
+    /* Actual link invalidation remains an error until an explicit Scan Again;
+       opening the retained list neither clears it nor starts another scan. */
+    reset();wifi_mode=UI_WIFI_MODE_STATS;wifi_channel_current_identity.valid=true;wifi_scan_error=-17;
+    root_wifi_tap(260,380);
+    assert(wifi_mode==UI_WIFI_MODE_DUAL&&dual_opens==1&&!pending_start&&!legacy_loads&&wifi_scan_error==-17);
+    reset();wifi_mode=UI_WIFI_MODE_STATS;root_wifi_tap(260,380);
+    assert(wifi_mode==UI_WIFI_MODE_LIST&&!dual_opens&&legacy_loads==1&&wifi_scan_error==-23);
     puts("Dual Wi-Fi root routes: launcher/menu/guide use split view; special/connected/blocked routes preserve their behavior.");
     return 0;
 }

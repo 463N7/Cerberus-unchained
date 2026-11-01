@@ -263,6 +263,9 @@ static esp_err_t dual_wifi_ui_draw(void)
             if (error != ESP_OK) {
                 snprintf(line, sizeof(line), "SCAN: %.40s", esp_err_to_name(error));
                 ESP_RETURN_ON_ERROR(draw_centered(278, line, UI_BAD, 1), TAG, "dual selected error");
+                if (status.rebind_cached)
+                    ESP_RETURN_ON_ERROR(draw_centered(300, "C5 RESULT NOT VERIFIED / SCAN AGAIN",
+                        UI_MUTED, 1), TAG, "dual selected recovery");
             }
             ESP_RETURN_ON_ERROR(draw_button(8, 326, 304, 44,
                 status.rebinding ? "CHECKING AP" : "OPEN AP TOOLS"), TAG, "dual selected tools");

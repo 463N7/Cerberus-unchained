@@ -715,6 +715,7 @@ static void print_wifi_dual(void)
         (unsigned)v->state, (unsigned)v->phase, v->generation, (unsigned)v->count,
         v->split ? 1U : 0U, v->fallback ? 1U : 0U, v->elapsed_ms,
         v->cleanup_pending ? 1U : 0U, v->rebinding ? 1U : 0U, v->rebind_ready ? 1U : 0U);
+    console_printf("wifi_dual_rebind_cached=%u\r\n", v->rebind_cached ? 1U : 0U);
     console_printf("wifi_dual_s3_count=%u\r\nwifi_dual_s3_total=%u\r\n"
         "wifi_dual_c5_count=%u\r\nwifi_dual_c5_total=%u\r\n"
         "wifi_dual_error=%" PRId32 "\r\nwifi_dual_ui_error=%" PRId32 "\r\n"

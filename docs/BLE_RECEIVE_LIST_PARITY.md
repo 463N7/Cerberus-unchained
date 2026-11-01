@@ -1,8 +1,60 @@
 # BLE receive-list parity audit
 
+## Rev97 source milestone: C5 list controls
+
+Ordinary BLE discovery now uses S3 and C5 concurrently, with separate source
+banks. The rev94 companion implementation retains up to 32 C5 typed addresses,
+latest original-ADV RSSI, conservative timing and a 31-byte raw preview. Its
+results publish after completed eight-second sweeps; these controls do not
+change that latency or the S3 live-discovery workflow.
+
+Rev97 adds `SIGNAL`, `NAME A-Z` and `SCAN ORDER` controls to the C5 pane, with
+signal ordering and all ages selected initially. A bounded 32-entry index map
+sorts valid signal values before unavailable values and compares sanitized,
+bounded display names case-insensitively. Equal keys preserve scan order;
+unnamed peers remain separate typed observations. Source packets, timestamps,
+addresses and address types are never reordered in place or merged.
+
+`WITHIN 30S` accepts a row only when its conservative C5 age upper bound is
+known and at most 30,000 ms. The normal view shows the rounded-up age bound,
+`RECENCY?` when the bound cannot establish recency, or `AGE UNKNOWN` when no
+usable bound exists. A bound above 30 seconds does not prove the report is
+actually older than 30 seconds. An empty recent view says
+`NO CONFIRMED RECENT C5 RESULTS`; it does not claim nearby devices are absent.
+Age expiry is checked on each paint, even without a new sweep. Controls reset
+pagination, and a smaller replacement bank clamps it. Taps copy the frozen
+painted row, so sorting or publication cannot silently change the selected
+typed identity.
+
+The C5 pane remains a complementary source view. It does not borrow S3 family
+classifications, scan-response evidence, SD archive eligibility or per-source
+packet counts. Selecting `FOX THIS ADDRESS` uses the existing release barriers
+and exact typed target to obtain separate S3/C5 RSSI readings. Two receivers
+on one handheld do not establish direction, distance or triangulation.
+
+The pure helper is `s3_main/main/dual_ble_list.h`; the actual drawing/tap paths
+are in `dual_ble_ui.h`. The pinned Python 3.14.2 / Zig 0.14.1 run of
+`tools/check_dual_ble_ui.py` passes, including the production Find My Monitor
+fixture. Tests cover mixed signal validity, bounded/nonprintable names,
+typed-address collisions, stable ties, inclusive age boundaries, unknown or
+rewound clocks, expiration, publication between paint and tap, privacy and
+pagination shrinkage. Rendered normal, sorted, uncertain-age and empty-filter
+views were inspected. Sorting/filtering calls no SPI or scanner operations.
+The change adds no heap allocation or task. These are source/host checks;
+rev97 native-build, installation and physical control acceptance are separate.
+
+S3 native extended advertisement reception remains disabled. The C5 has an
+extended 1M/coded receive path, but controlled extended-advertiser acceptance
+is still pending. Raw saved S3 ADV remains capped at 31 bytes, raw scan-response
+payloads are not archived, and C5 observations are not included in that archive.
+Full BLE parity, physical dual Fox Hunt, prolonged coexistence and the rev96
+SD file/log/script-list acceptance are not completed by this milestone. See
+[dual-radio scanning](DUAL_RADIO_SCANNING.md) for the cached C5-origin Wi-Fi
+handoff and the separately scoped warm-transition evidence.
+
 ## Rev93 source contribution
 
-The contribution adds independent Find My/Flipper Analyzer facts, completed-sweep Recon recording and inventory, and saved BLE snapshots with an offline viewer. Raw saved ADV is capped at 31 bytes; scan-response payloads are not retained. Current native extended reception is still disabled. See [BLE snapshots](BLE_SD_SNAPSHOTS.md), [Recon inventory](RECON_INVENTORY.md) and [the native gap](BLE_EXTENDED_RECEIVE_GAP.md).
+The contribution adds independent Find My/Flipper Analyzer facts, completed-sweep Recon recording and inventory, and saved BLE snapshots with an offline viewer. Raw saved ADV is capped at 31 bytes; scan-response payloads are not retained. S3 native extended reception remains disabled. See [BLE snapshots](BLE_SD_SNAPSHOTS.md), [Recon inventory](RECON_INVENTORY.md) and [the native gap](BLE_EXTENDED_RECEIVE_GAP.md).
 
 See [CONTRIBUTION_REV93.md](CONTRIBUTION_REV93.md) for validation boundaries and [the coverage ledger](MARAUDER_COVERAGE_LEDGER.md) for remaining work. The following sections retain the earlier contribution history.
 
@@ -127,7 +179,9 @@ and older acceptance scopes remain unchanged.
 
 Baseline: Marauder `develop` commit
 [`79cc6bcba1db6679baee1dab2b0c1ad5010e6363`](https://github.com/justcallmekoko/ESP32Marauder/tree/79cc6bcba1db6679baee1dab2b0c1ad5010e6363),
-rechecked against the remote on 2026-10-30. The local reference is
+rechecked against the remote on 2026-10-30 and again on 2026-11-01 without a
+branch change. The clean local reference has tree
+`8b5d8ede62ce3e4e78941ca5b10abfb97896ec60` and is
 `../integration/marauder-develop-2026-10-29`. This audit concerns receive-side
 inventory and selection; no transmitter or sound/GATT write paths changed.
 

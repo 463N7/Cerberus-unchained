@@ -1,0 +1,80 @@
+# Rev97: retained Wi-Fi handoff and C5 Bluetooth list
+
+This checkpoint improves passive discovery and selected-result navigation.
+It does not establish full Marauder parity or hardware acceptance of every
+feature. Rev96 remains the installed build until the installation evidence
+below is updated.
+
+## Behavior
+
+- A selected C5-origin AP can reuse its original completed bank after an
+  owned session check, an expected full relationship-proof check, a second
+  owned status check, and an export check. Its source index, generation,
+  receipt, BSSID, channel, security and SSID must match exactly and uniquely.
+  A valid reuse issues no RF START/STOP and transfers no AP rows again.
+- Starting any replacement scan or fresh rebind invalidates eligibility
+  before staging or INFO, even when that attempt is canceled or fails.
+  A runtime stale session/proof fails explicitly. A canceled validation does
+  not stop another service's radio. Locally ineligible targets, including
+  S3-origin results, retain fresh C5 reacquisition.
+- Reuse preserves the original full-bank receipt, source observations and
+  actual band coverage. Reopening the same proven C5 bank cannot fabricate
+  a channel-history sample. Mixed 5 GHz/all-band history uses the appropriate
+  per-band denominator. Saved trust entries retain their existing format;
+  comparisons describe the current bank's coverage.
+- A transient C5 link interruption cannot send an imported bank through
+  the older generation-byte-only reader and relabel its coverage. Uncertain
+  refreshes fail before transport or metadata mutation. Statistics → AP List
+  returns to the retained dual list without scanning or poisoning a healthy
+  cache; a new verified publication restores the ordinary refresh path.
+- The C5 Bluetooth companion offers SIGNAL, NAME A-Z and SCAN ORDER, plus
+  ALL AGES and WITHIN 30S. Recent filtering uses an upper bound on age;
+  unknown or invalid timing, and bounds above 30 seconds, are excluded.
+  A bound above 30 seconds shows `RECENCY?`, because it cannot prove the
+  actual observation is stale. Visible rows retain copied
+  typed-address identities, so a refreshed bank cannot redirect a tap.
+  Sorting/filtering does not allocate memory or start/stop/query radios.
+- `wifi_dual_rebind_cached` identifies cached validation in the local
+  diagnostic snapshot. `wifi_dual_elapsed_ms` is coordinator operation time,
+  not physical touch latency; during reuse it describes validation, not the
+  original scan duration. The fixed snapshot contains no AP identities.
+  Failed cached validation retains the exact error and displays
+  `C5 RESULT NOT VERIFIED / SCAN AGAIN`.
+
+## Verification
+
+All 120 host suites passed on unchanged inputs using Python 3.14.2 and
+Zig 0.14.1. The receipt and individual logs are retained under
+`artifacts/host-checks/rev97-full-run`. All five native targets also pass on
+unchanged inputs matching that host receipt: S3, onboard C5, temporary bridge,
+expansion WROOM and expansion XIAO. The isolated toolchain uses PlatformIO
+6.2.0, ESP-IDF 6.0.1 and GCC 15.2.0. Full native receipts/logs and the S3 ELF
+are retained under `artifacts/rev97-final-native-evidence`. Rendered C5 list previews were
+inspected for normal rows, name sorting, uncertain/unknown timing and an empty
+recent filter. These checks do not establish RF performance.
+
+The S3 native build passes its interrupt-placement and console-stack checks.
+Compared with the retained rev96 ELF, `.dram0.bss` grows from 145,376 to
+145,904 bytes (+528), while `.dram0.data` remains 26,412 bytes. The existing
+PSRAM directory banks remain four-byte pointers in internal memory. Native
+debug types show the coordinator's optional PSRAM store at 10,784 bytes
+(rev96: 10,776), the unchanged Wi-Fi view at 5,648 bytes, and the diagnostic
+snapshot at 88 bytes (rev96: 80). The measured subset of the console call
+chain uses 2,896 of 4,096 bytes, leaving 1,200 bytes; this is not a whole-SDK
+or interrupt-stack bound. Evidence is under `artifacts/device-rev97` and
+`artifacts/integration/s3-console-stack.json`.
+
+## Physical acceptance still needed
+
+- C5/5 GHz AP tools and Back: same selected AP, original observation age,
+  no additional C5 scan, followed by a successful normal split scan.
+- S3/2.4 GHz AP tools: fresh C5 reacquisition, correct target and normal Back.
+- C5 Bluetooth sort/filter/page controls and selected-device identity;
+  Stop/Back followed by split Wi-Fi scanning.
+- Rev96's SD-files/folder/Back, saved-log list, script list and following
+  scan check remains pending. The owner reported both warm BLE-to-Wi-Fi
+  repetitions working on rev96; only one completed transition was captured
+  independently in the console.
+
+GPS and six-radio expansion, dual-receiver Fox Hunt, BLE archive contents,
+extended BLE report acceptance and sustained load remain separate open work.

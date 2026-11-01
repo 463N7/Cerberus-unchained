@@ -19,7 +19,7 @@ typedef struct {
     int32_t error, ui_error, s3_error, c5_error, s3_cleanup_error;
     uint16_t s3_total, c5_total;
     uint8_t state, phase, count, s3_count, c5_count, s3_state, s3_wifi_owner;
-    bool split, fallback, cleanup_pending, rebinding, rebind_ready;
+    bool split, fallback, cleanup_pending, rebinding, rebind_ready, rebind_cached;
     bool s3_status_valid, s3_radio_owned, scan_s3_owned, c5_may_own;
 } cerberus_dual_wifi_diagnostic_values_t;
 

@@ -22,6 +22,7 @@ static const cerberus_ui_widget_theme_t theme = {UI_BACKGROUND, UI_PANEL, UI_GOO
 typedef cerberus_s3_wifi_ssid_analysis_t ui_wifi_ssid_analysis_t;
 static ui_wifi_ssid_analysis_t wifi_ssid_analysis;
 static uint8_t wifi_analysis_generation, wifi_selected_index, wifi_relation_generation;
+static uint8_t wifi_snapshot_band;
 static bool wifi_selection_valid;
 static uint64_t wifi_relation_publication, wifi_relation_selected_publication;
 static uint8_t wifi_relation_selected_bssid[6], wifi_relation_selected_channel;
@@ -34,7 +35,7 @@ static esp_err_t wifi_analysis_error, wifi_trust_error;
 static struct { bool settings_available; } ui_config;
 static struct { recon_db_result_t result; char name[64]; } vendor_cache;
 static unsigned checks, vendor_calls, trust_calls;
-static char title[64], summary[80], notice[80];
+static char title[64], summary[80], notice[80], coverage[80];
 #define CHECK(value) do { ++checks; assert(value); } while (0)
 
 static void detail_text(uint16_t y, const char *text)
@@ -43,6 +44,7 @@ static void detail_text(uint16_t y, const char *text)
         CHECK(*p >= 32U && *p <= 126U);
     if (y == 54U) snprintf(title, sizeof(title), "%s", text);
     if (y == 164U) snprintf(summary, sizeof(summary), "%s", text);
+    if (y == 140U) snprintf(coverage, sizeof(coverage), "%s", text);
     if (y == 172U || y == 190U) snprintf(notice, sizeof(notice), "%s", text);
 }
 static bool privacy_addresses_masked(void) { return false; }
@@ -81,6 +83,7 @@ static void select_row(uint8_t index, bool ordinary)
 }
 static void prepare(const char *name, uint8_t count)
 {
+    wifi_snapshot_band = CERBERUS_WIFI_SCAN_BAND_ALL;
     memset(&store, 0, sizeof(store));
     memset(live_records, 0, sizeof(live_records));
     live_store = &store;
@@ -177,6 +180,18 @@ int main(int argc, char **argv)
     CHECK(!strcmp(summary, "MATCHING ROWS: 32  2G:16  5G:16"));
     CHECK(wifi_ssid_analysis.peer_count == 4U);
     save(argv[1], "maximum-bank");
+    prepare("five only", 3U);
+    for (unsigned i = 0; i < 3; ++i) store.wifi[i].channel = 36;
+    wifi_snapshot_band = CERBERUS_WIFI_SCAN_BAND_5G;
+    select_row(0U, true); draw_expected(ESP_OK);
+    CHECK(!strcmp(summary, "MATCHING ROWS: 3  2G:N/A  5G:3"));
+    CHECK(!strcmp(coverage, "PASSIVE REVIEW / 5 GHZ ONLY"));
+    save(argv[1], "five-only");
+    for (unsigned i = 0; i < 3; ++i) store.wifi[i].channel = 6;
+    wifi_snapshot_band = CERBERUS_WIFI_SCAN_BAND_2G;
+    select_row(0U, true); draw_expected(ESP_OK);
+    CHECK(!strcmp(summary, "MATCHING ROWS: 3  2G:3  5G:N/A"));
+    CHECK(!strcmp(coverage, "PASSIVE REVIEW / 2.4 GHZ ONLY"));
     prepare("N?me", 3U);
     store.wifi[0].ssid[1] = store.wifi[2].ssid[1] = (char)0x81;
     select_row(0U, true); draw_expected(ESP_OK);

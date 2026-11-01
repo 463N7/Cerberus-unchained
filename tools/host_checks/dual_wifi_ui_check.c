@@ -252,12 +252,33 @@ static void idle_redraw_budget(void)
     reset();
 }
 
+static void cached_validation_recovery_hint(void)
+{
+    reset(); publish(2, 3);
+    assert(dual_wifi_ui_enter(false) == ESP_OK); draw_ok();
+    assert(dual_wifi_ui_tap(20, 220) == DUAL_WIFI_UI_REDRAW);
+    mock_status.rebind_cached = true;
+    mock_status.error = ESP_ERR_INVALID_STATE;
+    draw_ok();
+    assert(has_text("SCAN: TEST_ERROR"));
+    assert(has_text("C5 RESULT NOT VERIFIED / SCAN AGAIN"));
+    assert(has_text("SCAN AGAIN") && !start_calls && !stop_calls);
+    mock_status.rebind_cached = false;
+    draw_ok();
+    assert(has_text("SCAN: TEST_ERROR") && !has_text("C5 RESULT NOT VERIFIED / SCAN AGAIN"));
+    mock_status.rebind_cached = true; mock_status.error = ESP_OK;
+    draw_ok();
+    assert(!has_text("C5 RESULT NOT VERIFIED / SCAN AGAIN") && !start_calls);
+    reset();
+}
+
 int main(void)
 {
     admission_and_cleanup();
     painted_identity_and_handoff();
     filters_and_fail_closed_paint();
     idle_redraw_budget();
+    cached_validation_recovery_hint();
     printf("Dual Wi-Fi UI: geometry, 64-row filters/pages, frozen identities, deferred admission, single handoff, hidden cleanup and OOM Back/Stop passed. PSRAM store=%zu bytes\n", sizeof(dual_wifi_ui_store_t));
     return 0;
 }

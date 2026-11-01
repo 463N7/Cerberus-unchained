@@ -2,6 +2,7 @@
  * does not insert C5 packets into S3's evidence, archive or action namespace. */
 #pragma once
 #include "dual_ble_scan.h"
+#include "dual_ble_list.h"
 #include "esp_heap_caps.h"
 
 enum { DUAL_BLE_UI_NONE, DUAL_BLE_UI_REDRAW, DUAL_BLE_UI_BACK_S3,
@@ -9,6 +10,9 @@ enum { DUAL_BLE_UI_NONE, DUAL_BLE_UI_REDRAW, DUAL_BLE_UI_BACK_S3,
 static cerberus_dual_ble_scan_t *dual_ble_ui_store;
 static cerberus_dual_ble_row_t dual_ble_ui_painted[4], dual_ble_ui_selected;
 static uint8_t dual_ble_ui_painted_count, dual_ble_ui_offset;
+static uint8_t dual_ble_ui_visible_count;
+static cerberus_dual_ble_sort_t dual_ble_ui_sort = CERBERUS_DUAL_BLE_SORT_SIGNAL;
+static bool dual_ble_ui_recent_only;
 static uint8_t dual_ble_ui_target[6], dual_ble_ui_type;
 static int dual_ble_ui_mode = -1;
 static bool dual_ble_ui_attempted, dual_ble_ui_detail;
@@ -82,6 +86,7 @@ static bool dual_ble_ui_selected_peer(cerberus_c5_ble_result_t *out)
     memcpy(out->address, dual_ble_ui_selected.address, 6U);
     out->address_type = dual_ble_ui_selected.address_type;
     memcpy(out->name, dual_ble_ui_selected.name, sizeof(out->name));
+    out->name[sizeof(out->name) - 1U] = '\0';
     out->rssi = dual_ble_ui_selected.rssi;
     out->manufacturer_id = dual_ble_ui_selected.manufacturer_id;
     /* Address and display fields only: no connection or sound eligibility. */
@@ -90,22 +95,27 @@ static bool dual_ble_ui_selected_peer(cerberus_c5_ble_result_t *out)
 
 static esp_err_t dual_ble_ui_draw(bool s3_enabled)
 {
-    char line[64], identifier[24];
+    char line[64], identifier[24], name[CERBERUS_BLE_NAME_MAX_LENGTH + 1U];
+    const uint64_t now = dual_ble_ui_clock(NULL);
     cerberus_dual_ble_view_t view; dual_ble_ui_get_view(&view);
     ESP_RETURN_ON_ERROR(draw_small_button(8, 50, 304, 30, "BACK TO S3 RECEIVER"), TAG, "C5 BLE back");
     if (dual_ble_ui_detail) {
         const cerberus_dual_ble_row_t *row = &dual_ble_ui_selected;
-        snprintf(line, sizeof(line), "C5 / %.33s", row->name[0] ? row->name : "<UNNAMED>");
+        cerberus_dual_ble_list_label(row, name);
+        snprintf(line, sizeof(line), "C5 / %s", name);
         ESP_RETURN_ON_ERROR(draw_centered(96, line, UI_TEXT, 1), TAG, "C5 BLE name");
         cerberus_privacy_format_ble_identifier(row->address, privacy_addresses_masked(), identifier, sizeof(identifier));
         ESP_RETURN_ON_ERROR(draw_centered(118, identifier, UI_TEXT, 1), TAG, "C5 BLE address");
         snprintf(line, sizeof(line), "ADDRESS TYPE %u / C5 OBSERVATIONS ONLY", row->address_type);
         ESP_RETURN_ON_ERROR(draw_centered(140, line, UI_MUTED, 1), TAG, "C5 BLE type");
-        uint32_t age = cerberus_dual_ble_age_upper(row->callback_age_ms, row->request_started_ms, dual_ble_ui_clock(NULL));
-        if ((row->timing_flags & (CERBERUS_DUAL_BLE_SEEN | CERBERUS_DUAL_BLE_RSSI_VALID)) ==
-            (CERBERUS_DUAL_BLE_SEEN | CERBERUS_DUAL_BLE_RSSI_VALID))
-            snprintf(line, sizeof(line), "LAST ADV %d dBm / AGE <= %lu ms", row->rssi, (unsigned long)age);
-        else snprintf(line, sizeof(line), "LAST ADV RSSI / TIME UNAVAILABLE");
+        uint32_t age;
+        bool known_age = cerberus_dual_ble_list_age(row, now, &age);
+        if (cerberus_dual_ble_list_rssi_valid(row)) snprintf(line, sizeof(line), "LAST ADV %d dBm", row->rssi);
+        else snprintf(line, sizeof(line), "LAST ADV RSSI N/A");
+        size_t used = strlen(line);
+        if (known_age) snprintf(line + used, sizeof(line) - used, " / AGE <= %lu ms%s", (unsigned long)age,
+            age > CERBERUS_DUAL_BLE_RECENT_MS ? " / RECENCY?" : "");
+        else snprintf(line + used, sizeof(line) - used, " / AGE UNKNOWN");
         ESP_RETURN_ON_ERROR(draw_centered(162, line, UI_MUTED, 1), TAG, "C5 BLE timing");
         snprintf(line, sizeof(line), "REPORTS %u / VENDOR ID %04X", row->reports, row->manufacturer_id);
         ESP_RETURN_ON_ERROR(draw_centered(186, line, UI_TEXT, 1), TAG, "C5 BLE metadata");
@@ -120,30 +130,49 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
         ESP_RETURN_ON_ERROR(draw_small_button(8, 316, 148, 38, "BACK TO C5 LIST"), TAG, "C5 BLE list back");
         ESP_RETURN_ON_ERROR(draw_small_button(164, 316, 148, 38, "FOX THIS ADDRESS"), TAG, "C5 BLE fox");
     } else {
-        snprintf(line, sizeof(line), "C5 PASSIVE RECEIVER / %u STORED", view.count);
-        ESP_RETURN_ON_ERROR(draw_centered(90, line, UI_TEXT, 1), TAG, "C5 BLE source");
+        uint8_t order[CERBERUS_DUAL_BLE_CAPACITY];
+        dual_ble_ui_visible_count = cerberus_dual_ble_list_order(dual_ble_ui_store ? dual_ble_ui_store->rows : NULL,
+            view.count, dual_ble_ui_sort, dual_ble_ui_recent_only, now, order);
+        snprintf(line, sizeof(line), "C5 PASSIVE / %u OF %u STORED", dual_ble_ui_visible_count, view.count);
+        ESP_RETURN_ON_ERROR(draw_centered(84, line, UI_TEXT, 1), TAG, "C5 BLE source");
         if (view.error) snprintf(line, sizeof(line), "C5 ERROR %ld / S3 VIEW AVAILABLE", (long)view.error);
         else snprintf(line, sizeof(line), "%s / %lu SWEEPS%s", view.stopping ? "STOPPING" :
             view.reading ? "READING" : view.enabled ? "SCANNING" : "STOPPED",
             (unsigned long)view.sweeps, view.extended ? " / EXT ENABLED" : "");
-        ESP_RETURN_ON_ERROR(draw_centered(110, line, view.error ? UI_BAD : UI_MUTED, 1), TAG, "C5 BLE status");
-        if (dual_ble_ui_offset >= view.count) dual_ble_ui_offset = 0U;
+        ESP_RETURN_ON_ERROR(draw_centered(99, line, view.error ? UI_BAD : UI_MUTED, 1), TAG, "C5 BLE status");
+        const char *sort_label = dual_ble_ui_sort == CERBERUS_DUAL_BLE_SORT_SIGNAL ? "SIGNAL >" :
+            dual_ble_ui_sort == CERBERUS_DUAL_BLE_SORT_NAME ? "NAME A-Z >" : "SCAN ORDER >";
+        ESP_RETURN_ON_ERROR(draw_small_button(8, 114, 148, 30, sort_label), TAG, "C5 BLE sort");
+        ESP_RETURN_ON_ERROR(draw_small_button(164, 114, 148, 30, dual_ble_ui_recent_only ?
+            "WITHIN 30S >" : "ALL AGES >"), TAG, "C5 BLE recent");
+        if (dual_ble_ui_offset >= dual_ble_ui_visible_count) dual_ble_ui_offset = 0U;
         dual_ble_ui_painted_count = 0U;
         for (uint8_t i = 0U; i < 4U; ++i) {
             cerberus_dual_ble_row_t *row = &dual_ble_ui_painted[i];
-            if (!cerberus_dual_ble_row(dual_ble_ui_store, dual_ble_ui_offset + i, row)) break;
-            uint16_t y = (uint16_t)(132U + i * 46U);
-            ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(8, y, 304, 42, UI_PANEL), TAG, "C5 BLE row");
-            snprintf(line, sizeof(line), "%.30s", row->name[0] ? row->name : "<UNNAMED>");
-            ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 5U, line, UI_TEXT, UI_PANEL, 1), TAG, "C5 BLE row name");
+            if (dual_ble_ui_offset + i >= dual_ble_ui_visible_count ||
+                !cerberus_dual_ble_row(dual_ble_ui_store, order[dual_ble_ui_offset + i], row)) break;
+            uint16_t y = (uint16_t)(150U + i * 42U);
+            ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(8, y, 304, 40, UI_PANEL), TAG, "C5 BLE row");
+            cerberus_dual_ble_list_label(row, name);
+            ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 3U, name, UI_TEXT, UI_PANEL, 1), TAG, "C5 BLE row name");
             cerberus_privacy_format_ble_identifier(row->address, privacy_addresses_masked(), identifier, sizeof(identifier));
-            if (row->timing_flags & CERBERUS_DUAL_BLE_RSSI_VALID)
-                snprintf(line, sizeof(line), "%s T%u / C5 %d dBm", identifier, row->address_type, row->rssi);
-            else snprintf(line, sizeof(line), "%s T%u / C5 RSSI N/A", identifier, row->address_type);
-            ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 23U, line, UI_MUTED, UI_PANEL, 1), TAG, "C5 BLE row address");
+            snprintf(line, sizeof(line), "%s T%u", identifier, row->address_type);
+            ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 15U, line, UI_MUTED, UI_PANEL, 1), TAG, "C5 BLE row address");
+            if (cerberus_dual_ble_list_rssi_valid(row)) snprintf(line, sizeof(line), "C5 %d dBm", row->rssi);
+            else snprintf(line, sizeof(line), "C5 RSSI N/A");
+            uint32_t age;
+            size_t used = strlen(line);
+            if (cerberus_dual_ble_list_age(row, now, &age)) {
+                /* Round upwards; a bound >30s does not prove actual staleness. */
+                uint32_t seconds = age / 1000U + (age % 1000U != 0U);
+                snprintf(line + used, sizeof(line) - used, " / AGE<=%lus%s", (unsigned long)seconds,
+                    age > CERBERUS_DUAL_BLE_RECENT_MS ? " RECENCY?" : "");
+            } else snprintf(line + used, sizeof(line) - used, " / AGE UNKNOWN");
+            ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 27U, line, UI_MUTED, UI_PANEL, 1), TAG, "C5 BLE row age");
             ++dual_ble_ui_painted_count;
         }
-        if (!view.count) ESP_RETURN_ON_ERROR(draw_centered(208, "WAITING FOR A COMPLETED C5 SWEEP", UI_MUTED, 1), TAG, "C5 BLE empty");
+        if (!dual_ble_ui_visible_count) ESP_RETURN_ON_ERROR(draw_centered(208, view.count ?
+            "NO CONFIRMED RECENT C5 RESULTS" : "WAITING FOR A COMPLETED C5 SWEEP", UI_MUTED, 1), TAG, "C5 BLE empty");
         ESP_RETURN_ON_ERROR(draw_small_button(8, 326, 148, 32, "PREVIOUS"), TAG, "C5 BLE previous");
         ESP_RETURN_ON_ERROR(draw_small_button(164, 326, 148, 32, "NEXT"), TAG, "C5 BLE next");
     }
@@ -160,16 +189,24 @@ static int dual_ble_ui_tap(uint16_t x, uint16_t y)
             if (x >= 164U && x < 312U) return DUAL_BLE_UI_FOX;
         }
     } else {
-        if (x >= 8U && x < 312U && y >= 132U && y < 316U) {
-            uint8_t row = (uint8_t)((y - 132U) / 46U);
-            if (row < dual_ble_ui_painted_count && (y - 132U) % 46U < 42U) {
+        if (y >= 114U && y < 144U) {
+            if (x >= 8U && x < 156U) dual_ble_ui_sort =
+                (cerberus_dual_ble_sort_t)(((unsigned)dual_ble_ui_sort + 1U) % CERBERUS_DUAL_BLE_SORT_COUNT);
+            else if (x >= 164U && x < 312U) dual_ble_ui_recent_only = !dual_ble_ui_recent_only;
+            else return DUAL_BLE_UI_NONE;
+            dual_ble_ui_offset = 0U;
+            return DUAL_BLE_UI_REDRAW;
+        }
+        if (x >= 8U && x < 312U && y >= 150U && y < 318U) {
+            uint8_t row = (uint8_t)((y - 150U) / 42U);
+            if (row < dual_ble_ui_painted_count && (y - 150U) % 42U < 40U) {
                 dual_ble_ui_selected = dual_ble_ui_painted[row]; dual_ble_ui_detail = true;
                 return DUAL_BLE_UI_REDRAW;
             }
         }
         if (y >= 326U && y < 358U) {
             if (x >= 8U && x < 156U && dual_ble_ui_offset >= 4U) dual_ble_ui_offset -= 4U;
-            else if (x >= 164U && x < 312U && dual_ble_ui_store && dual_ble_ui_offset + 4U < dual_ble_ui_store->count)
+            else if (x >= 164U && x < 312U && dual_ble_ui_offset + 4U < dual_ble_ui_visible_count)
                 dual_ble_ui_offset += 4U;
             else return DUAL_BLE_UI_NONE;
             return DUAL_BLE_UI_REDRAW;

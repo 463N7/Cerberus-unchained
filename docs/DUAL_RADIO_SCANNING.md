@@ -1,9 +1,11 @@
 # Adaptive two-radio scanning
 
-This rev94 development work follows the rev93 contribution on a separate
-branch. It requires the matched S3 rev94 application and onboard C5 protocol
-firmware 61. The implementation below is not a measured performance claim;
-physical acceptance remains separate from host checks and native builds.
+The rev97 source milestone extends the two-radio scanning introduced in rev94
+after the rev93 contribution. It retains onboard C5 protocol firmware 61.
+Rev97's cached C5 handoff and BLE list controls have source review and focused
+host checks; their native-build, installation and physical acceptance are
+separate. The historical rev94-rev96 results below keep their original scope.
+No comparison of speed, coverage or full Marauder parity is claimed.
 
 ## Using the views
 
@@ -15,16 +17,30 @@ Back remain available during scan and result transfer. A clean refusal by S3
 before starting uses the existing C5 all-band scan with an explicit fallback
 label; uncertain cleanup is an error, not permission to steal the radio.
 
-Tap a row for a frozen result. `OPEN AP TOOLS` performs a fresh C5 all-band
-scan and checks the chosen network before entering the established AP tools.
-A disappeared or changed AP reports failure. `BACK TO SCAN` returns to the
-retained dual-radio list without starting another scan. The existing multi-AP
-selection path remains separate from this single-AP handoff.
+Tap a row for a frozen result. `OPEN AP TOOLS` can now reuse a C5-origin row's
+eligible completed C5 bank after checking its owned session, full-width bank
+proof and exact AP identity. Successful cached handoff performs no new scan
+or row retransfer and preserves the original receipt time and band coverage.
+It validates retained evidence, not the AP's current over-the-air presence.
+An S3-origin row or locally ineligible bank still uses the existing fresh C5
+all-band scan. A failed runtime proof/owner check reports failure rather than
+silently starting another scan. `BACK TO SCAN` returns to the retained
+dual-radio list without starting a scan. The existing multi-AP selection path
+remains separate from this single-AP handoff.
 
 In ordinary BLE discovery, tap the receiver line below the filter/header to
 open the C5 companion. S3 discovery continues while that pane is displayed.
 The C5 pane shows its own 32-row bank, typed addresses, latest original-ADV
-RSSI, timing and a bounded 31-byte advertisement preview. Its selected row
+RSSI, timing and a bounded 31-byte advertisement preview. Rev97 adds `SIGNAL`,
+`NAME A-Z` and `SCAN ORDER` controls, plus `ALL AGES` / `WITHIN 30S`.
+The recent view admits only observations whose known conservative age upper
+bound is at most 30,000 ms. Unknown, rewound or saturated timing is excluded.
+Rows display an age bound, `RECENCY?` when that bound no longer proves recency,
+or `AGE UNKNOWN`. Sort/filter operations perform no radio work. A tap retains
+the exact painted typed observation even if a new bank arrives meanwhile.
+An empty recent view reports `NO CONFIRMED RECENT C5 RESULTS`; absence from
+that filter does not prove an old report or an absent device.
+Its selected row
 can enter `FOX THIS ADDRESS`; S3 rows retain their existing Fox Hunt route.
 Fox Hunt displays separate S3 and C5 signals. Start/Stop on the companion
 controls both receiver sessions. Counts remain per receiver rather than being
@@ -34,11 +50,18 @@ presented as a deduplicated count of physical devices.
 
 The S3 Wi-Fi worker is temporary and uses an exclusive Wi-Fi owner plus BLE
 admission guards. Its normalized result bank and SDK readout buffer use
-PSRAM. The Wi-Fi view uses 5,648 bytes of optional PSRAM and avoids repeatedly
+PSRAM. The rev94 Wi-Fi view store measured 5,648 bytes of optional PSRAM. The separate
+coordinator host model grows from 10,784 to 10,792 bytes (+8) for cached-handoff
+state. These are distinct stores, not one combined allocation. The view avoids repeatedly
 repainting an unchanged completed page. The optional BLE companion store
 uses 7,336 bytes of PSRAM and adds no worker task. These sizes describe the
 host-compiled model structures; live driver heap and stack headroom require
 device measurements.
+
+The BLE list addition allocates no heap and adds no task. It uses a 32-byte
+stack index map, bounded display-name scratch space and six declared bytes
+of static control state before linker alignment. It neither moves packet
+records in place nor merges C5 data into S3 classification or SD archives.
 
 C5 Wi-Fi leases use a C5-issued 64-bit epoch; BLE uses a boot identity,
 C5-issued monotonic job ID and a full-width session epoch. Stale commands do
@@ -73,10 +96,15 @@ protocol on both chips continuously is therefore not the default policy.
 ## Identity and evidence
 
 Wi-Fi rows retain their receiver provenance. An S3 observation has no C5 scan
-index or generation. Before passing a chosen row to existing C5-dependent AP
-tools, acquire and verify a new C5 snapshot and resolve the exact chosen
-BSSID, channel, security and SSID within that snapshot. Never reuse a position
-from a merged or sorted display as a C5 command index.
+index or generation. A handoff resolves the exact chosen BSSID, channel,
+security and SSID in a proven C5 snapshot. Cached reuse additionally binds
+the original source generation, source index and receipt, and requires a
+matching completed ordinary publication. Starting a new attempt invalidates
+that eligibility before even the INFO exchange; failed validation invalidates
+it too. Canceling cached validation stops no radio because it owns none.
+The receiving AP workflow retains the original band, receipt and full-width
+proof; a 5 GHz-only bank cannot satisfy an all-band inventory request. Never
+reuse a position from a merged or sorted display as a C5 command index.
 
 The S3 Wi-Fi SDK inventory supplies aggregate scan records. Its readout time
 is a receipt time, not a beacon callback timestamp; it must not enable the
@@ -90,10 +118,14 @@ necessarily represent two transmitted packets. A C5 observation must not
 borrow S3 raw-advertisement, scan-response or action-eligibility evidence.
 
 The existing C5 scanner can request extended 1M and coded-PHY observation in
-the current build configuration. The S3's existing legacy scan path can
-retain names and scan responses through its own discovery workflow. Actual
-coverage depends on broadcasters, the installed SDK/controller, antennas and
-RF conditions. It must be validated with suitable test advertisers.
+the current build configuration, but this path has not received physical
+acceptance with controlled extended/coded advertisers. S3 native extended
+advertisement reception remains disabled; its existing legacy scan path
+retains names and scan-response evidence through its own discovery workflow.
+This is a per-receiver limitation, not a claim that the whole device lacks
+extended receive code. Actual coverage depends on broadcasters, the installed
+SDK/controller, antennas and RF conditions. See the
+[S3 native receive gap](BLE_EXTENDED_RECEIVE_GAP.md).
 
 Two receivers on the same handheld are not a calibrated direction-finding
 array. Fox hunting presents each receiver's signal and age independently;
@@ -107,7 +139,9 @@ it does not infer bearing, exact distance or triangulation from their RSSI.
 - Verify Stop, Back, failed starts, C5 resets and repeated restart, including
   transitions to ordinary AP tools, mixed Recon and Wardriving.
 - Verify that sorting and refreshing cannot change the selected identity;
-  disappearing or changed APs must fail reacquisition explicitly.
+  disappearing or changed APs must fail fresh reacquisition explicitly.
+  Verify cached handoff rejects changed bank/session proof without implying
+  it has reobserved the AP, and retains the original age and band coverage.
 - Compare BLE observations on each receiver using controlled legacy and coded
   advertisers. Check duplicate handling, address types, report age and buffer
   truncation without assuming every address is a different device.
@@ -117,7 +151,7 @@ it does not infer bearing, exact distance or triangulation from their RSSI.
 Faster discovery and improved coverage are goals to measure. Compilation and
 host fixtures alone cannot establish either result on the Cerberus board.
 
-## Recorded validation — 2026-11-01 UTC
+## Rev94 recorded validation — 2026-11-01 UTC
 
 The final Windows checkpoint passed 22 targeted runners against stable inputs.
 This includes all eight new radio suites and the affected scan observation,
@@ -143,7 +177,7 @@ repeat build:
 The matched S3/C5/bridge development package passed the verify-only package
 checks for hashes, chip headers, partitions and image bounds. Its three app
 hashes match the stable native report. The final native and targeted-host
-input fingerprints match the current checkout. Generated receipts are
+input fingerprints matched that rev94 checkout. Generated receipts are
 `artifacts/integration/build-report.json`,
 `artifacts/host-checks/rev94-radio-checks.json` and
 `artifacts/build/matched-build.json`.
@@ -240,3 +274,46 @@ receipts are retained locally. These host results do not override the hardware
 memory limitation recorded above. No additional native build was needed for
 the fixture/documentation changes; the installed firmware inputs remain
 identical to the already-built matched rev94 package.
+
+## Rev95-rev96 warm-transition follow-up
+
+Rev95 introduced cached local dual-radio diagnostics and changed eligible
+NimBLE host allocations to the supported external-memory configuration.
+Rev96 then moved three directory metadata banks to stable, lazy PSRAM storage,
+reclaiming 21,744 linked internal bytes. Both revisions were built and
+installed; their native, host and installation details remain in
+[radio memory recovery](RADIO_MEMORY_RECOVERY.md).
+
+On rev96, the owner confirmed two warm BLE Stop/Back-to-Wi-Fi cycles with the
+split assignment. The independently captured console record contains one
+completed job: 19 S3 APs and 11 C5 APs in 4,609 ms, with split enabled,
+fallback disabled, no scan/UI/radio error, and all owners/cleanup released.
+Free internal RAM settled at 88,036 bytes, 22,500 above admission. This is
+one measured console job plus the owner's two-cycle confirmation, not two
+independently measured jobs or a sustained-load result. The SD-files/folder/
+Back, saved-log list, script list and following-scan acceptance remains pending.
+
+## Rev97 source and focused-host checkpoint
+
+Cached C5-origin AP handoff validates owned status, expected full-width proof
+and owned status again, with a final export fence. Tests exercise cancellation
+without foreign radio Stop, failed/replaced sessions and banks, preserved
+receipt/band metadata, and invalidation when a new scan attempt begins. The
+receiving cache rejects narrower coverage for an all-band request. An
+S3-origin target retains fresh C5 all-band reacquisition.
+
+The focused `check_dual_wifi_scan.py`, `check_dual_wifi_live.py` and
+`check_wifi_scan_cache.py` fixtures cover the coordinator, actual UI handoff
+and receiving cache. `check_dual_ble_ui.py` covers actual C5 list controls,
+bounded ordering, uncertain timing, frozen typed selection and no radio work
+on sorting/filtering. These focused checks pass with Python 3.14.2 and
+Zig 0.14.1. The rev97 ledger generator and `--check --upstream` pass against
+the clean pinned develop reference; its 95 statuses remain 73 partial,
+8 pending, 10 needs-review and 4 hardware-limited. No status was promoted to
+complete and these counts are not a completion percentage.
+
+This checkpoint records source review, host fixtures and inspected UI previews.
+Rev97 native-build, package, installation and physical acceptance remain
+separate from this record. Dual Fox Hunt, controlled C5 extended/coded receive,
+S3 native extended reception, SD-list acceptance, sustained load and full
+Marauder parity remain open. See [the rev97 milestone](DUAL_RADIO_REV97.md).

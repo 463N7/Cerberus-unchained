@@ -78,7 +78,7 @@ static void adapter_and_console(void)
 {
     reset();current=(cerberus_dual_wifi_status_t){.state=CERBERUS_DUAL_WIFI_ERROR,.generation=17,.count=64,
         .elapsed_ms=4100,.error=-12,.s3_error=-13,.c5_error=-14,.split=true,.cleanup_pending=true,
-        .s3_count=32,.c5_count=32,.s3_total=40,.c5_total=48};
+        .s3_count=32,.c5_count=32,.s3_total=40,.c5_total=48,.rebind_cached=true};
     backing.s3_job=35;backing.phase=12;backing.s3_owned=true;backing.c5_possible=true;store=&backing;
     local=(cerberus_s3_wifi_scan_status_t){.job_id=35,.state=CERBERUS_S3_WIFI_SCAN_ERROR,.radio_owned=true,.cleanup_error=-15};
     owner=CERBERUS_S3_WIFI_SCAN;clock_us=9000;cerberus_dual_wifi_scan_publish_diagnostics(-16);
@@ -88,6 +88,7 @@ static void adapter_and_console(void)
     assert(strstr(output,"wifi_dual_scope=ui_published_aggregates_no_spi\r\n"));
     assert(strstr(output,"wifi_dual_scan_s3_job=35\r\n")&&strstr(output,"wifi_dual_ui_error=-16\r\n"));
     assert(strstr(output,"wifi_dual_s3_cleanup_error=-15\r\n")&&strstr(output,"wifi_dual_retained=64\r\n"));
+    assert(out.value.rebind_cached&&strstr(output,"wifi_dual_rebind_cached=1\r\n"));
     assert(!strstr(output,"ssid")&&!strstr(output,"address")&&!strstr(output,"token"));
     ++local.job_id;cerberus_dual_wifi_scan_publish_diagnostics(0);out=read_snapshot();assert(!out.value.scan_s3_owned&&out.value.s3_radio_owned&&out.value.scan_s3_job==35&&out.value.s3_job==36);
     local_status_error=ESP_FAIL;cerberus_dual_wifi_scan_publish_diagnostics(0);out=read_snapshot();assert(!out.value.s3_status_valid&&!out.value.scan_s3_owned&&!out.value.s3_job);

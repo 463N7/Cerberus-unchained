@@ -33,6 +33,7 @@ static bool learning_tool_active;
 static sentinel_baseline_t wifi_baseline;
 static uint64_t wifi_baseline_publication, wifi_relation_publication;
 static uint8_t wifi_relation_generation;
+static uint8_t wifi_snapshot_band, wifi_baseline_band;
 static int64_t wifi_baseline_published_us, live_wifi_published_us, clock_us;
 static cerberus_scan_display_store_t store, *live_store;
 static live_scan_record_t live_records[SENTINEL_SCAN_TOOL_COUNT];
@@ -98,6 +99,7 @@ static void prepare(uint8_t count)
     live_store = &store;
     wifi_relation_publication = UINT64_C(0x1234567800000042);
     wifi_relation_generation = 7U;
+    wifi_snapshot_band = wifi_baseline_band = CERBERUS_WIFI_SCAN_BAND_ALL;
     live_wifi_published_us = INT64_C(4294967296000) + 1234567;
     clock_us = live_wifi_published_us + 1999999;
     live_records[SENTINEL_SCAN_WIFI] = (live_scan_record_t){.valid=true, .captured=true,
@@ -238,6 +240,31 @@ static void held_snapshot_and_time(void)
     live_wifi_published_us = clock_us = INT64_MAX; draw_ok();
     CHECK(strstr(painted, "AGE AT COMPARE 0s"));
 }
+static void restricted_coverage(void)
+{
+    prepare(2U); trust_row(0U); trust_row(1U);
+    const wifi_trusted_record_t original = wifi_trusted;
+    const int64_t received = live_wifi_published_us;
+    /* Present only the 5GHz bank; the older saved 2.4GHz trust entry survives. */
+    store.wifi[0] = store.wifi[1];
+    live_records[SENTINEL_SCAN_WIFI].count = 1;
+    wifi_snapshot_band = CERBERUS_WIFI_SCAN_BAND_5G;
+    clock_us = received + INT64_C(900000000);
+    draw_ok();
+    CHECK(wifi_baseline.saved == 2 && wifi_baseline.compared == 1 && wifi_baseline.exact == 1);
+    CHECK(!memcmp(&wifi_trusted, &original, sizeof(original)));
+    CHECK(strstr(painted, "TRUSTED BASELINE / 5 GHZ ONLY"));
+    CHECK(strstr(painted, "Other bands were not compared."));
+    CHECK(strstr(painted, "AGE AT COMPARE 900s"));
+    CHECK(export_wifi_baseline() == ESP_OK && strstr(written, "coverage,5 GHZ ONLY\r\n"));
+    CHECK(strstr(written, "Original S3 snapshot receipt time"));
+    wifi_snapshot_band = CERBERUS_WIFI_SCAN_BAND_ALL;
+    CHECK(!live_wifi_baseline_current());
+    CHECK(export_wifi_baseline() == ESP_ERR_INVALID_STATE);
+    draw_ok();
+    CHECK(export_wifi_baseline() == ESP_OK && strstr(written, "coverage,2.4 + 5 GHZ\r\n"));
+    CHECK(!memcmp(&wifi_trusted, &original, sizeof(original)));
+}
 static void controls(void)
 {
     prepare(2U); draw_ok();
@@ -269,7 +296,7 @@ static void controls(void)
 int main(int argc, char **argv)
 {
     CHECK(argc == 2);
-    guard_faults(); publication_and_export(); held_snapshot_and_time(); controls();
+    guard_faults(); publication_and_export(); held_snapshot_and_time(); restricted_coverage(); controls();
     prepare(32U); for (unsigned i = 0; i < 16U; ++i) trust_row(i);
     draw_ok(); save_preview(argv[1], "maximum-bank");
     prepare(3U); draw_ok(); CHECK(wifi_baseline.saved == 0U && wifi_baseline.other == 3U);
