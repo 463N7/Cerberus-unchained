@@ -1,8 +1,18 @@
 #define main inherited_monitor_suite
+#define cerberus_display_fill_rect companion_original_fill_rect
 #include "s3_findmy_monitor_ui_check.c"
+#undef cerberus_display_fill_rect
 #undef main
+static unsigned companion_fail_fill_after;
+static bool companion_fail_final_control;
+esp_err_t cerberus_display_fill_rect(uint16_t x,uint16_t y,uint16_t w,uint16_t h,uint16_t color)
+{
+    if(companion_fail_fill_after&&! --companion_fail_fill_after)return ESP_FAIL;
+    return companion_original_fill_rect(x,y,w,h,color);
+}
 static esp_err_t draw_button(uint16_t x,uint16_t y,uint16_t w,uint16_t h,const char *s)
-{return draw_small_button(x,y,w,h,s);}
+{if(companion_fail_final_control&&y==370){companion_fail_final_control=false;return ESP_FAIL;}
+ return draw_small_button(x,y,w,h,s);}
 static unsigned companion_exchanges;
 esp_err_t c5_spi_link_dual_ble_exchange(uint8_t cmd,const void *q,size_t qn,void *r,size_t rn)
 {(void)cmd;(void)q;(void)qn;memset(r,0,rn);++companion_exchanges;return ESP_ERR_NOT_SUPPORTED;}
@@ -269,6 +279,43 @@ static void check_receive_metadata(const char *prefix)
     assert(!memcmp(&s3_before,&ble_selected_result,sizeof(s3_before)));
 }
 
+static void check_paint_failure_and_unified_selection(const char *prefix)
+{
+    unsigned exchanges=companion_exchanges,radio_starts=starts,radio_stops=stops;
+    dual_ble_ui_open(true);dual_ble_ui_offset=0;dual_ble_ui_recent_only=false;
+    dual_ble_ui_store->count=4;dual_ble_ui_store->published_boot_id=101;
+    dual_ble_ui_store->published_epoch=202;dual_ble_ui_store->published_generation=0;
+    for(unsigned i=0;i<4;++i){
+        cerberus_dual_ble_row_t *row=&dual_ble_ui_store->rows[i];memset(row,0,sizeof(*row));
+        memcpy(row->address,"ABCDEF",6);row->address_type=(uint8_t)i;row->rssi=-40-(int)i;
+        snprintf(row->name,sizeof(row->name),"Frozen source %u",i);
+        row->timing_flags=3;row->request_started_ms=(uint64_t)clock_ms;
+    }
+    paint_list();assert(dual_ble_ui_painted_count==4);
+    companion_fail_fill_after=2;assert(dual_ble_ui_draw(false)==ESP_FAIL);
+    assert(!dual_ble_ui_painted_count&&dual_ble_ui_tap(20,160)==DUAL_BLE_UI_NONE);
+    paint_list();assert(dual_ble_ui_painted_count==4);
+    companion_fail_final_control=true;assert(dual_ble_ui_draw(false)==ESP_FAIL);
+    assert(!dual_ble_ui_painted_count&&dual_ble_ui_tap(20,160)==DUAL_BLE_UI_NONE);
+    paint_list();assert(dual_ble_ui_painted_count==4);
+    cerberus_dual_ble_row_t row,expected;
+    cerberus_dual_ble_provenance_t proof,expected_proof;
+    assert(cerberus_dual_ble_copy_row(dual_ble_ui_store,2,&row,&proof));
+    expected=row;expected_proof=proof;
+    dual_ble_ui_select_frozen(&row,&proof);
+    memset(&row,0,sizeof(row));memset(&proof,0,sizeof(proof));
+    memset(dual_ble_ui_store->rows,0,sizeof(dual_ble_ui_store->rows));
+    ++dual_ble_ui_store->published_epoch;++dual_ble_ui_store->published_boot_id;
+    assert(dual_ble_ui_detail&&dual_ble_ui_from_unified&&!dual_ble_ui_receive_info);
+    assert(!memcmp(&expected,&dual_ble_ui_selected,sizeof(expected)));
+    assert(!memcmp(&expected_proof,&dual_ble_ui_selected_provenance,sizeof(expected_proof)));
+    paint_list();assert(strstr(drawn,"BACK TO BLE LIST"));save(prefix,"unified-frozen-detail");
+    assert(dual_ble_ui_tap(40,335)==DUAL_BLE_UI_BACK_S3);
+    assert(!memcmp(&expected,&dual_ble_ui_selected,sizeof(expected))); /* Retained detail is inert off-page. */
+    dual_ble_ui_open(false);assert(!dual_ble_ui_from_unified);
+    assert(companion_exchanges==exchanges&&starts==radio_starts&&stops==radio_stops);
+}
+
 int main(int argc,char **argv)
 {
     check_list_order();
@@ -346,6 +393,7 @@ int main(int argc,char **argv)
     check_list_controls(argv[1]);
     check_reader_metrics(argv[1]);
     check_receive_metadata(argv[1]);
+    check_paint_failure_and_unified_selection(argv[1]);
     heap_caps_free(dual_ble_ui_store);dual_ble_ui_store=NULL;
     puts("Dual BLE UI: stable ordering/age controls, frozen typed rows/receive metadata, raw/info tabs without RF calls, bounded callback/PHY/framing labels, live reader metrics, and old-target sample isolation passed");
     return 0;

@@ -1,5 +1,15 @@
 # BLE receive-list parity audit
 
+## Rev104 source checkpoint: unified ordinary discovery
+
+Ordinary ALL-device discovery now presents both committed receiver banks in
+one list with ALL/S3/C5 source filtering and frozen source-specific selection.
+This is a local source milestone; rev103 remains installed. Family admission,
+RF scheduling, protocol revision and v4 archives are unchanged. Saved-report
+source filters, C5 scan responses, full payloads and complete upstream parity
+remain open. See [the rev104 checkpoint](DUAL_RADIO_REV104.md) for exact scope
+and validation limits. Earlier sections retain their revision-specific scope.
+
 ## Rev102 checkpoint: C5 receive metadata in saved reports
 
 The v4 archive retains the frozen C5 receive envelope alongside the

@@ -8109,7 +8109,7 @@ static esp_err_t draw_detail_page(void)
     if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_DUAL && !ui_capability_blocked)
         return ESP_OK; /* This view owns both its Back and Stop controls. */
     if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5) {
-        ESP_RETURN_ON_ERROR(draw_button(8, UI_BACK_Y, 148, UI_BACK_HEIGHT, "BACK TO S3"), TAG, "C5 BLE back");
+        ESP_RETURN_ON_ERROR(draw_button(8, UI_BACK_Y, 148, UI_BACK_HEIGHT, "BLE LIST"), TAG, "C5 BLE back");
         return draw_button(164, UI_BACK_Y, 148, UI_BACK_HEIGHT,
             dual_ble_ui_detail ? "SAVE SD" : "SAVE BOTH");
     }

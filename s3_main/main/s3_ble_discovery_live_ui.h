@@ -2,6 +2,7 @@
  * producer callbacks only touch the separately locked scanner snapshot. */
 #include "s3_ble_discovery_inventory.h"
 #include "s3_ble_discovery_session.h"
+#include "ble_discovery_list.h"
 
 typedef struct {
     cerberus_ble_discovery_session_t session;
@@ -9,6 +10,17 @@ typedef struct {
     cerberus_s3_ble_discovery_inventory_t inventory;
     cerberus_s3_ble_discovery_bank_t staging;
     cerberus_s3_ble_discovery_entry_t painted[4], selected;
+    /* Only four displayed C5 proofs, not a third observation bank. All of
+     * this optional presentation state shares the existing PSRAM lifetime. */
+    cerberus_dual_ble_row_t painted_c5[4];
+    cerberus_dual_ble_provenance_t painted_c5_provenance[4];
+    cerberus_ble_discovery_list_ref_t order[CERBERUS_BLE_DISCOVERY_LIST_CAPACITY];
+    cerberus_ble_discovery_list_source_t source_filter;
+    uint8_t painted_source[4], built_count;
+    uint64_t order_s3_epoch, order_s3_revision, order_c5_boot, order_c5_epoch;
+    uint32_t order_c5_snapshots;
+    uint8_t order_s3_count, order_c5_count, order_count, order_sort, order_source;
+    bool order_valid;
     live_scan_record_t presentation;
     uint64_t last_draw_ms;
     uint16_t binding_overflows, producer_replacements;
@@ -31,6 +43,13 @@ static bool ble_discovery_page(void)
 static bool ble_discovery_presenting(void)
 {
     return ble_discovery_page() && ble_mode == UI_BLE_MODE_LIST && ble_discovery_live != NULL;
+}
+
+static bool ble_discovery_unified(void)
+{
+    /* Family selection controls S3 admission. Generic C5 rows have no proof
+     * that they satisfy that classifier, so only ALL uses the combined list. */
+    return ble_discovery_presenting() && ble_filter == CERBERUS_S3_BLE_FILTER_ALL;
 }
 
 static bool ble_discovery_keeps_awake(void)
@@ -179,6 +198,13 @@ static void ble_discovery_select_painted(unsigned row)
 {
     ble_discovery_live_store_t *store = ble_discovery_live;
     if (!store || !ble_discovery_presenting() || row >= store->painted_count) return;
+    if (store->painted_source[row] == CERBERUS_BLE_DISCOVERY_LIST_C5) {
+        store->selection_pending = false;
+        store->destination = 0U;
+        dual_ble_ui_select_frozen(&store->painted_c5[row], &store->painted_c5_provenance[row]);
+        ble_mode = UI_BLE_MODE_C5;
+        return;
+    }
     store->selected = store->painted[row];
     store->selection_pending = true;
     store->destination = 0U;
@@ -279,4 +305,92 @@ static uint32_t ble_discovery_visible_mask(uint64_t now_ms)
         mask |= UINT32_C(1) << i;
     }
     return mask;
+}
+
+static uint8_t ble_discovery_combined_order(void)
+{
+    ble_discovery_live_store_t *store = ble_discovery_live;
+    const cerberus_s3_ble_discovery_inventory_t *s3 =
+        store->inventory.family == CERBERUS_S3_BLE_FILTER_ALL ? &store->inventory : NULL;
+    const cerberus_dual_ble_scan_t *c5 = dual_ble_ui_store;
+    uint64_t epoch = s3 ? s3->epoch : 0U, revision = s3 ? s3->revision : 0U;
+    uint64_t boot = c5 ? c5->published_boot_id : 0U, c5_epoch = c5 ? c5->published_epoch : 0U;
+    uint32_t snapshots = c5 ? c5->snapshots : 0U;
+    uint8_t s3_count = s3 ? s3->count : 0U, c5_count = c5 ? c5->count : 0U;
+    /* No age predicate is exposed here. Re-sort only when a committed bank
+     * or a presentation choice changes; the four visible ages still repaint. */
+    if (!store->order_valid || snapshots == UINT32_MAX || revision == UINT64_MAX ||
+        store->order_s3_epoch != epoch || store->order_s3_revision != revision ||
+        store->order_c5_boot != boot || store->order_c5_epoch != c5_epoch ||
+        store->order_c5_snapshots != snapshots || store->order_s3_count != s3_count ||
+        store->order_c5_count != c5_count || store->order_sort != (uint8_t)live_ble_sort ||
+        store->order_source != (uint8_t)store->source_filter) {
+        store->order_count = cerberus_ble_discovery_list_order(s3, c5 ? c5->rows : NULL, c5_count,
+            store->source_filter,
+            live_ble_sort == CERBERUS_S3_BLE_SORT_SIGNAL_DESC ? CERBERUS_BLE_DISCOVERY_LIST_SIGNAL :
+            live_ble_sort == CERBERUS_S3_BLE_SORT_NAME_ASC ? CERBERUS_BLE_DISCOVERY_LIST_NAME :
+            CERBERUS_BLE_DISCOVERY_LIST_SOURCE_ORDER, false, 0U, store->order);
+        store->order_s3_epoch = epoch; store->order_s3_revision = revision;
+        store->order_c5_boot = boot; store->order_c5_epoch = c5_epoch;
+        store->order_c5_snapshots = snapshots;
+        store->order_s3_count = s3_count; store->order_c5_count = c5_count;
+        store->order_sort = (uint8_t)live_ble_sort; store->order_source = (uint8_t)store->source_filter;
+        store->order_valid = true;
+    }
+    return store->order_count;
+}
+
+/* Freeze the four displayed proofs while building their strings. A later
+ * inventory update cannot change the row authorized by a successful paint. */
+static bool ble_discovery_build_unified_row(unsigned row, size_t position, uint64_t now_ms)
+{
+    ble_discovery_live_store_t *store = ble_discovery_live;
+    if (!store || row >= 4U || position >= CERBERUS_BLE_DISCOVERY_LIST_CAPACITY) return false;
+    const cerberus_ble_discovery_list_ref_t ref = store->order[position];
+    sentinel_scan_row_t *out = &live_view.rows[row];
+    char identifier[24];
+    if (ref.source == CERBERUS_BLE_DISCOVERY_LIST_S3) {
+        if (!cerberus_s3_ble_discovery_inventory_copy(&store->inventory, ref.index,
+                &store->painted[row])) return false;
+        const cerberus_s3_ble_discovery_entry_t *entry = &store->painted[row];
+        const cerberus_c5_ble_result_t *peer = &entry->record.peer;
+        cerberus_privacy_format_ble_identifier(peer->address, privacy_addresses_masked(), identifier, sizeof(identifier));
+        if (peer->name[0]) (void)cerberus_s3_ble_list_label(peer, live_names[row], sizeof(live_names[row]));
+        else snprintf(live_names[row], sizeof(live_names[row]), "%s",
+            privacy_addresses_masked() ? "Unnamed device" : identifier);
+        bool earlier = !cerberus_s3_ble_discovery_inventory_current(&store->inventory, ref.index) ||
+            entry->epoch != store->session.epoch;
+        snprintf(live_details[row], sizeof(live_details[row]), "%s T%u%s", identifier,
+            peer->address_type, earlier ? " / EARLIER" : "");
+        uint64_t age;
+        if (cerberus_s3_ble_discovery_entry_age_ms(entry, now_ms, &age))
+            snprintf(live_badges[row], sizeof(live_badges[row]), "S3 PEAK / ADV %llus",
+                (unsigned long long)(age / 1000U));
+        else snprintf(live_badges[row], sizeof(live_badges[row]), "S3 PEAK / ADV AGE UNKNOWN");
+        out->rssi = peer->rssi;
+        out->signal_valid = cerberus_ble_rssi_valid(peer->rssi);
+        out->marked = cerberus_settings_ble_is_favorite(peer->address, peer->address_type);
+    } else if (ref.source == CERBERUS_BLE_DISCOVERY_LIST_C5) {
+        cerberus_dual_ble_row_t *peer = &store->painted_c5[row];
+        if (!cerberus_dual_ble_copy_row(dual_ble_ui_store, ref.index, peer,
+                &store->painted_c5_provenance[row])) return false;
+        cerberus_privacy_format_ble_identifier(peer->address, privacy_addresses_masked(), identifier, sizeof(identifier));
+        if (peer->name[0]) cerberus_dual_ble_list_label(peer, live_names[row]);
+        else snprintf(live_names[row], sizeof(live_names[row]), "%s",
+            privacy_addresses_masked() ? "Unnamed device" : identifier);
+        snprintf(live_details[row], sizeof(live_details[row]), "%s T%u", identifier, peer->address_type);
+        uint32_t age;
+        if (cerberus_dual_ble_list_age(peer, now_ms, &age)) {
+            uint32_t seconds = age / 1000U + (age % 1000U != 0U);
+            snprintf(live_badges[row], sizeof(live_badges[row]), "C5 LAST / AGE<=%lus%s",
+                (unsigned long)seconds, age > CERBERUS_DUAL_BLE_RECENT_MS ? " RECENCY?" : "");
+        } else snprintf(live_badges[row], sizeof(live_badges[row]), "C5 LAST / ADV AGE UNKNOWN");
+        out->rssi = peer->rssi;
+        out->signal_valid = cerberus_dual_ble_list_rssi_valid(peer);
+        out->marked = cerberus_settings_ble_is_favorite(peer->address, peer->address_type);
+    } else return false;
+    store->painted_source[row] = ref.source;
+    out->name = live_names[row]; out->detail = live_details[row]; out->badge = live_badges[row];
+    ++store->built_count;
+    return true;
 }

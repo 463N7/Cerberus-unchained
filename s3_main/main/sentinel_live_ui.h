@@ -175,6 +175,7 @@ static esp_err_t live_paint(bool full)
     const bool ordinary_wifi = current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_LIST &&
         !wifi_attack_selecting;
     const bool wifi_bindable = ordinary_wifi && live_wifi_paint_map_current(&live_wifi_built);
+    if (ble_discovery_presenting()) ble_discovery_live->painted_count = 0U;
     esp_err_t error = full ? sentinel_scan_view_draw(&live_view, live_frame) :
         sentinel_scan_view_update(&live_view, live_frame);
     if (ordinary_wifi) {
@@ -185,14 +186,7 @@ static esp_err_t live_paint(bool full)
             live_wifi_painted = live_wifi_built;
     }
     if (error == ESP_OK && ble_discovery_presenting()) {
-        ble_discovery_live->painted_count = 0U;
-        for (uint8_t row = 0U; row < live_view.row_count && row < 4U; ++row) {
-            size_t position = (size_t)live_view.page * 4U + row;
-            if (position >= live_ble_filtered_count) break;
-            if (!cerberus_s3_ble_discovery_inventory_copy(&ble_discovery_live->inventory,
-                    live_ble_indexes[position], &ble_discovery_live->painted[row])) break;
-            ++ble_discovery_live->painted_count;
-        }
+        ble_discovery_live->painted_count = ble_discovery_live->built_count;
     }
     return error;
 }
@@ -528,6 +522,11 @@ static void live_make_view(void)
     sentinel_scan_tool_t tool = live_page_tool();
     live_scan_record_t *record = live_display_record(tool);
     sentinel_scan_session_t *session = live_session_for(tool);
+    const bool unified_ble = tool == SENTINEL_SCAN_BLE && ble_discovery_unified();
+    if (ble_discovery_presenting()) {
+        ble_discovery_live->built_count = 0U;
+        ble_discovery_live->painted_count = 0U;
+    }
     const bool ordinary_wifi = tool == SENTINEL_SCAN_WIFI && current_page == UI_PAGE_WIFI &&
         wifi_mode == UI_WIFI_MODE_LIST && !wifi_attack_selecting;
     memset(&live_wifi_built, 0, sizeof(live_wifi_built));
@@ -557,6 +556,14 @@ static void live_make_view(void)
     }
     live_view.total_count = record->count;
     if (tool == SENTINEL_SCAN_BLE) {
+        if (unified_ble) {
+            live_ble_recent_only = false;
+            live_ble_order_dirty = true; /* The legacy 32-index family cache has a different count. */
+            ble_discovery_live_store_t *store = ble_discovery_live;
+            live_ble_filtered_count = ble_discovery_combined_order();
+            live_view.age_label = store->source_filter == CERBERUS_BLE_DISCOVERY_LIST_S3 ? "SOURCE S3 >" :
+                store->source_filter == CERBERUS_BLE_DISCOVERY_LIST_C5 ? "SOURCE C5 >" : "SOURCE ALL >";
+        } else {
         if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_LIST &&
             !cerberus_s3_ble_recent_supported(ble_filter)) live_ble_recent_only = false;
         const uint32_t visible_mask = live_ble_recent_mask(esp_timer_get_time() / 1000LL);
@@ -585,13 +592,14 @@ static void live_make_view(void)
             live_ble_order_revision = revision;
             live_ble_order_dirty = false;
         }
+        }
         live_view.total_count = (uint16_t)live_ble_filtered_count;
         if ((size_t)live_page[tool] * 4U >= live_ble_filtered_count) live_page[tool] = 0U;
         snprintf(live_ble_filter_label, sizeof(live_ble_filter_label), "%.15s >", ble_filter_name(ble_filter));
         live_view.tools_label = ble_filter == CERBERUS_S3_BLE_FILTER_FIND_MY && !ble_attack_selecting ? "MONITOR" : "TOOLS";
         live_view.sort_label = live_ble_sort == CERBERUS_S3_BLE_SORT_SIGNAL_DESC ? "SIGNAL >" :
-            live_ble_sort == CERBERUS_S3_BLE_SORT_NAME_ASC ? "NAME A-Z >" : "SCAN ORDER >";
-        if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_LIST &&
+            live_ble_sort == CERBERUS_S3_BLE_SORT_NAME_ASC ? "NAME A-Z >" : unified_ble ? "SOURCE ORDER" : "SCAN ORDER >";
+        if (!unified_ble && current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_LIST &&
             cerberus_s3_ble_recent_supported(ble_filter))
             live_view.age_label = live_ble_recent_only ? "WITHIN 30S >" : "ALL AGES >";
     }
@@ -694,6 +702,10 @@ static void live_make_view(void)
             ble_discovery_live->inventory.count,
             (unsigned long)ble_discovery_live->inventory.replacements,
             ble_discovery_live->binding_overflows);
+        if (unified_ble)
+            snprintf(live_hint, sizeof(live_hint), "S3 %u + C5 %u OBS / SOURCE FILTER ABOVE",
+                ble_discovery_live->inventory.family == CERBERUS_S3_BLE_FILTER_ALL ?
+                    ble_discovery_live->inventory.count : 0U, companion.count);
     }
     if (tool == SENTINEL_SCAN_WIFI && live_view.age_label && record->captured)
         snprintf(live_hint, sizeof(live_hint), "%s / %s / %u IN SWEEP",
@@ -753,6 +765,11 @@ static void live_make_view(void)
     for (uint16_t row = 0; row < 4; ++row) {
         uint16_t index = live_page[tool] * 4 + row;
         if (index >= live_view.total_count) break;
+        if (unified_ble) {
+            if (!ble_discovery_build_unified_row(row, index, (uint64_t)(esp_timer_get_time() / 1000LL))) break;
+            ++live_view.row_count;
+            continue;
+        }
         if (tool == SENTINEL_SCAN_BLE) index = live_ble_indexes[index];
         else if (tool == SENTINEL_SCAN_WIFI) index = live_wifi_indexes[index];
         if (ordinary_wifi && live_wifi_built.valid)
@@ -844,6 +861,12 @@ static void live_make_view(void)
             snprintf(live_badges[row], sizeof(live_badges[row]), "FRAMES");
         }
         out->name = live_names[row]; out->detail = live_details[row]; out->badge = live_badges[row];
+        if (tool == SENTINEL_SCAN_BLE && ble_discovery_presenting()) {
+            if (!cerberus_s3_ble_discovery_inventory_copy(&ble_discovery_live->inventory,
+                    (uint8_t)index, &ble_discovery_live->painted[row])) break;
+            ble_discovery_live->painted_source[row] = CERBERUS_BLE_DISCOVERY_LIST_S3;
+            ++ble_discovery_live->built_count;
+        }
         ++live_view.row_count;
     }
 }
@@ -1032,7 +1055,7 @@ static void handle_live_scan_tap(uint16_t x, uint16_t y)
     /* Hit-test the last painted snapshot, never a newly fetched row ordering. */
     sentinel_scan_tool_t tool = live_page_tool();
     if (tool == SENTINEL_SCAN_BLE && ble_discovery_presenting() &&
-        x >= 8U && x < 312U && y >= 102U && y < 132U) {
+        x >= 8U && x < 312U && y >= 102U && y < 126U) {
         ble_discovery_live->selection_pending = false;
         ble_discovery_live->destination = 0U;
         ble_mode = UI_BLE_MODE_C5;
@@ -1065,6 +1088,12 @@ static void handle_live_scan_tap(uint16_t x, uint16_t y)
     else if (action == SENTINEL_VIEW_BAND && tool == SENTINEL_SCAN_WIFI &&
         current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_LIST && !wifi_attack_selecting) {
         live_wifi_band = (cerberus_s3_wifi_band_t)(((unsigned)live_wifi_band + 1U) % CERBERUS_S3_WIFI_BAND_COUNT);
+        live_page[tool] = 0U;
+    }
+    else if (action == SENTINEL_VIEW_AGE && tool == SENTINEL_SCAN_BLE &&
+        ble_discovery_unified()) {
+        ble_discovery_live->source_filter = (cerberus_ble_discovery_list_source_t)
+            (((unsigned)ble_discovery_live->source_filter + 1U) % CERBERUS_BLE_DISCOVERY_LIST_SOURCE_COUNT);
         live_page[tool] = 0U;
     }
     else if (action == SENTINEL_VIEW_AGE && tool == SENTINEL_SCAN_BLE &&
@@ -1111,6 +1140,10 @@ static void handle_live_scan_tap(uint16_t x, uint16_t y)
     } else if (action >= SENTINEL_VIEW_ROW0 && action <= SENTINEL_VIEW_ROW3) {
         if (tool == SENTINEL_SCAN_BLE && ble_discovery_presenting()) {
             ble_discovery_select_painted((unsigned)(action - SENTINEL_VIEW_ROW0));
+            if (ble_mode == UI_BLE_MODE_C5) {
+                ESP_ERROR_CHECK(draw_detail_page());
+                return;
+            }
             live_make_view();
             ESP_ERROR_CHECK(live_paint(false));
             return;

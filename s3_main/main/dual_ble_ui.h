@@ -20,6 +20,7 @@ static uint8_t dual_ble_ui_target[6], dual_ble_ui_type;
 static int dual_ble_ui_mode = -1;
 static bool dual_ble_ui_attempted, dual_ble_ui_detail;
 static bool dual_ble_ui_receive_info;
+static bool dual_ble_ui_from_unified;
 static esp_err_t dual_ble_ui_error;
 
 static uint64_t dual_ble_ui_clock(void *context)
@@ -81,7 +82,22 @@ static bool dual_ble_ui_released(void)
 { return cerberus_dual_ble_released(dual_ble_ui_store); }
 
 static void dual_ble_ui_open(bool reset_detail)
-{ if (reset_detail) { dual_ble_ui_detail = false; dual_ble_ui_receive_info = false; } }
+{
+    dual_ble_ui_from_unified = false;
+    if (reset_detail) { dual_ble_ui_detail = false; dual_ble_ui_receive_info = false; }
+}
+
+static void dual_ble_ui_select_frozen(const cerberus_dual_ble_row_t *row,
+    const cerberus_dual_ble_provenance_t *provenance)
+{
+    /* A UI-owned copy of exactly the displayed source proof. No scanner or
+     * clock query may replace its identity, payload or receive metadata. */
+    dual_ble_ui_selected = *row;
+    dual_ble_ui_selected_provenance = *provenance;
+    dual_ble_ui_detail = true;
+    dual_ble_ui_receive_info = false;
+    dual_ble_ui_from_unified = true;
+}
 
 static bool dual_ble_ui_selected_peer(cerberus_c5_ble_result_t *out)
 {
@@ -107,9 +123,11 @@ static esp_err_t dual_ble_ui_draw_receive(const cerberus_dual_ble_row_t *row)
 static esp_err_t dual_ble_ui_draw(bool s3_enabled)
 {
     char line[64], identifier[24], name[CERBERUS_BLE_NAME_MAX_LENGTH + 1U];
+    uint8_t painted_count = 0U;
+    dual_ble_ui_painted_count = 0U;
     const uint64_t now = dual_ble_ui_clock(NULL);
     cerberus_dual_ble_view_t view; dual_ble_ui_get_view(&view);
-    ESP_RETURN_ON_ERROR(draw_small_button(8, 50, 304, 30, "BACK TO S3 RECEIVER"), TAG, "C5 BLE back");
+    ESP_RETURN_ON_ERROR(draw_small_button(8, 50, 304, 30, "BACK TO BLE LIST"), TAG, "C5 BLE back");
     if (dual_ble_ui_detail) {
         const cerberus_dual_ble_row_t *row = &dual_ble_ui_selected;
         cerberus_dual_ble_list_label(row, name);
@@ -146,7 +164,8 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
                 ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(254U + part * 14U), line, UI_TEXT, 1), TAG, "C5 BLE bytes");
             }
         }
-        ESP_RETURN_ON_ERROR(draw_small_button(8, 316, 148, 38, "BACK TO C5 LIST"), TAG, "C5 BLE list back");
+        ESP_RETURN_ON_ERROR(draw_small_button(8, 316, 148, 38,
+            dual_ble_ui_from_unified ? "BACK TO BLE LIST" : "BACK TO C5 LIST"), TAG, "C5 BLE list back");
         ESP_RETURN_ON_ERROR(draw_small_button(164, 316, 148, 38, "FOX THIS ADDRESS"), TAG, "C5 BLE fox");
     } else {
         uint8_t order[CERBERUS_DUAL_BLE_CAPACITY];
@@ -167,7 +186,6 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
         ESP_RETURN_ON_ERROR(draw_small_button(164, 114, 148, 30, dual_ble_ui_recent_only ?
             "WITHIN 30S >" : "ALL AGES >"), TAG, "C5 BLE recent");
         if (dual_ble_ui_offset >= dual_ble_ui_visible_count) dual_ble_ui_offset = 0U;
-        dual_ble_ui_painted_count = 0U;
         for (uint8_t i = 0U; i < 4U; ++i) {
             cerberus_dual_ble_row_t *row = &dual_ble_ui_painted[i];
             if (dual_ble_ui_offset + i >= dual_ble_ui_visible_count ||
@@ -191,7 +209,7 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
                     age > CERBERUS_DUAL_BLE_RECENT_MS ? " RECENCY?" : "");
             } else snprintf(line + used, sizeof(line) - used, " / AGE UNKNOWN");
             ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 27U, line, UI_MUTED, UI_PANEL, 1), TAG, "C5 BLE row age");
-            ++dual_ble_ui_painted_count;
+            ++painted_count;
         }
         if (!dual_ble_ui_visible_count) ESP_RETURN_ON_ERROR(draw_centered(208, view.count ?
             "NO CONFIRMED RECENT C5 RESULTS" : view.live_updates ? "WAITING FOR C5 DISCOVERIES" :
@@ -206,7 +224,10 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
         else snprintf(line, sizeof(line), "NO NEW RESULTS THIS RUN");
         ESP_RETURN_ON_ERROR(draw_centered(360, line, UI_MUTED, 1), TAG, "C5 BLE reader latency");
     }
-    return draw_button(20, 370, 280, 40, s3_enabled ? "STOP BOTH RECEIVERS" : "START BOTH RECEIVERS");
+    ESP_RETURN_ON_ERROR(draw_button(20, 370, 280, 40,
+        s3_enabled ? "STOP BOTH RECEIVERS" : "START BOTH RECEIVERS"), TAG, "C5 BLE control");
+    dual_ble_ui_painted_count = painted_count;
+    return ESP_OK;
 }
 
 static int dual_ble_ui_tap(uint16_t x, uint16_t y)
@@ -221,7 +242,10 @@ static int dual_ble_ui_tap(uint16_t x, uint16_t y)
             return DUAL_BLE_UI_REDRAW;
         }
         if (y >= 316U && y < 354U) {
-            if (x >= 8U && x < 156U) { dual_ble_ui_detail = false; return DUAL_BLE_UI_REDRAW; }
+            if (x >= 8U && x < 156U) {
+                if (dual_ble_ui_from_unified) return DUAL_BLE_UI_BACK_S3;
+                dual_ble_ui_detail = false; return DUAL_BLE_UI_REDRAW;
+            }
             if (x >= 164U && x < 312U) return DUAL_BLE_UI_FOX;
         }
     } else {

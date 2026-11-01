@@ -6,6 +6,7 @@
 #include "s3_wifi_list.h"
 #include "s3_ble_discovery_inventory.h"
 #include "s3_ble_discovery_session.h"
+#include "ble_discovery_list.h"
 #include "sentinel_scan_view.h"
 #include "sentinel_scan_session.h"
 #include "ble_live_wifi_map_type.h"
@@ -63,7 +64,8 @@ sentinel_view_action_t sentinel_scan_view_hit_test(const sentinel_scan_view_t*v,
 esp_err_t sentinel_scan_view_update(const sentinel_scan_view_t*v,uint32_t f){(void)v;(void)f;return ESP_OK;}
 static esp_err_t draw_current_page(void){return ESP_OK;}
 static esp_err_t draw_ble(void){return ESP_OK;}
-static void dual_ble_ui_open(bool reset_detail){(void)reset_detail;}
+static esp_err_t draw_detail_page(void){assert(!"C5 detail in legacy BLE route");return ESP_FAIL;}
+static void dual_ble_ui_open(bool reset_detail){(void)reset_detail;assert(!"C5 open in legacy BLE route");}
 static void dual_ble_live_tap(uint16_t x,uint16_t y){(void)x;(void)y;assert(!"C5 view in legacy BLE route");}
 static void ble_findmy_monitor_open(void){++monitor_opened;ble_mode=UI_BLE_MODE_FINDMY_MONITOR;}
 static void ble_findmy_monitor_tap(uint16_t x,uint16_t y){(void)x;(void)y;++monitor_tapped;}
@@ -79,16 +81,20 @@ static void wifi_relation_bind_selection(bool ordinary)
 static esp_err_t cerberus_s3_ble_scanner_start_active(cerberus_ble_scan_status_payload_t*s){(void)s;++active_starts;return ESP_OK;}
 static esp_err_t cerberus_s3_ble_scanner_start(cerberus_ble_scan_status_payload_t*s){(void)s;++passive_starts;return ESP_OK;}
 static esp_err_t cerberus_s3_ble_scanner_stop(cerberus_ble_scan_status_payload_t*s){(void)s;++stop_count;return ESP_OK;}
-/* This fixture exercises the retained completed-bank route. The separate
- * discovery-live suite compiles the actual active controller and adapter. */
-static struct {
+/* This fixture exercises only the retained completed-bank route, with no
+ * active discovery store. Compile the actual unified gate and keep every new
+ * receiver boundary fail-fast; the discovery-live suite owns unified parity. */
+typedef struct {
     cerberus_s3_ble_discovery_inventory_t inventory;
     cerberus_ble_discovery_session_t session;
     bool selection_pending;
     uint8_t destination;
-} *ble_discovery_live;
+    cerberus_ble_discovery_list_source_t source_filter;
+} ble_discovery_live_store_t;
+static ble_discovery_live_store_t *ble_discovery_live;
 static bool ble_discovery_presenting(void){return false;}
 static bool ble_discovery_page(void){return false;}
+static size_t ble_discovery_combined_order(void){assert(!"combined ordering in legacy fixture");return 0U;}
 static uint32_t ble_discovery_visible_mask(uint64_t now){(void)now;assert(!"live mask in legacy fixture");return 0U;}
 static void ble_discovery_toggle(void){assert(!"live toggle in legacy fixture");}
 static void ble_discovery_select_painted(unsigned row){(void)row;assert(!"live selection in legacy fixture");}
@@ -108,7 +114,7 @@ int main(void)
     live_wifi_painted.token=16;
     live_wifi_paint_map_t wifi_built_before=live_wifi_built,wifi_painted_before=live_wifi_painted;
     assert(live_is_view());
-    for(unsigned i=0;i<CERBERUS_S3_BLE_FILTER_COUNT;++i){handle_ble_tap(100,60);assert(ble_filter==(i+1)%CERBERUS_S3_BLE_FILTER_COUNT);}
+    for(unsigned i=0;i<CERBERUS_S3_BLE_FILTER_COUNT;++i){handle_ble_tap(100,60);assert(ble_filter==(i+1)%CERBERUS_S3_BLE_FILTER_COUNT);assert(!ble_discovery_unified());}
     ble_filter=CERBERUS_S3_BLE_FILTER_FIND_MY;action=SENTINEL_VIEW_TOOLS;handle_ble_tap(250,380);
     assert(monitor_opened==1 && !live_is_view());handle_ble_tap(20,90);assert(monitor_tapped==1);
     ble_mode=UI_BLE_MODE_LIST;live_ble_filtered_count=2;live_ble_indexes[0]=9;live_ble_indexes[1]=2;
@@ -144,6 +150,17 @@ int main(void)
     live_ble_focus_bits[0]=CERBERUS_S3_BLE_FOCUS_FIND_MY;live_ble_focus_bits[2]=CERBERUS_S3_BLE_FOCUS_FIND_MY;
     ble_filter=CERBERUS_S3_BLE_FILTER_FIND_MY;live_make_view();
     assert(live_ble_filtered_count==2&&live_ble_indexes[0]==0&&live_ble_indexes[1]==2);
+    /* AGE is still the retained-bank recency control, not the unified source
+     * selector. Its new branch must not dereference the absent live store. */
+    assert(!ble_discovery_live && !ble_discovery_unified());
+    action=SENTINEL_VIEW_AGE;handle_ble_tap(250,85);
+    assert(live_ble_recent_only&&!strcmp(live_view.age_label,"WITHIN 30S >"));
+    handle_ble_tap(250,85);
+    assert(!live_ble_recent_only&&!strcmp(live_view.age_label,"ALL AGES >"));
+    assert(live_ble_filtered_count==2&&ble_mode==UI_BLE_MODE_LIST);
+    live_view.state=SENTINEL_VIEW_LIVE;action=SENTINEL_VIEW_PAUSE;handle_ble_tap(250,380);
+    assert(session.paused&&session.desired==SENTINEL_SCAN_BLE);
+    assert(active_starts==0&&passive_starts==0&&stop_count==0);
     assert(actual_ble_start(true)==ESP_OK && active_starts==1);
     current_page=UI_PAGE_WATCH;assert(actual_ble_start(true)==ESP_OK && passive_starts==1);
     assert(actual_ble_start(false)==ESP_OK && stop_count==1);

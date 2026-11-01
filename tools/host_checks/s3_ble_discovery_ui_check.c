@@ -31,6 +31,8 @@ esp_err_t cerberus_display_fill_rect(uint16_t x,uint16_t y,uint16_t w,uint16_t h
 #include "s3_ble_discovery_session.h"
 #include "s3_ble_discovery_inventory.h"
 #include "dual_ble_scan.h"
+#include "dual_ble_list.h"
+#include "ble_discovery_list.h"
 #define UI_BLE_MODE_C5 99U
 
 enum { UI_WIFI_MODE_LIST, UI_WIFI_MODE_MENU, UI_WIFI_MODE_BASELINE, UI_WIFI_MODE_STATS,
@@ -141,13 +143,23 @@ static bool ble_fox_hunt_from_c5,ble_fox_hunt_start_pending;
 static uint32_t ble_fox_hunt_start_requested_ms;
 static cerberus_c5_ble_result_t ble_fox_hunt_target;
 static bool companion_released=true;
-static void dual_ble_ui_get_view(cerberus_dual_ble_view_t *out){memset(out,0,sizeof(*out));}
-static void dual_ble_ui_open(bool reset_detail){(void)reset_detail;}
-static void dual_ble_ui_retry(void){}
+static cerberus_dual_ble_scan_t companion_store;
+static unsigned companion_syncs,companion_retries,companion_exchanges;
+#include "discovery_companion_impl.h"
+static void dual_ble_ui_retry(void){++companion_retries;}
 static bool dual_ble_ui_released(void){return companion_released;}
 static void dual_ble_ui_sync(int mode,const uint8_t *address,uint8_t type,uint64_t now)
-{assert(mode==-1);(void)address;(void)type;(void)now;}
-static void dual_ble_live_tap(uint16_t x,uint16_t y){(void)x;(void)y;assert(!"C5 pane routed into S3 fixture");}
+{assert(mode==-1);(void)address;(void)type;(void)now;++companion_syncs;
+ (void)dual_ble_ui_target;(void)dual_ble_ui_type;(void)dual_ble_ui_mode;(void)dual_ble_ui_attempted;}
+static bool dual_ble_live_enabled(void);
+static void dual_ble_live_tap(uint16_t x,uint16_t y);
+static unsigned archive_save_calls;
+static bool archive_save_selected;
+static cerberus_dual_ble_row_t archive_saved_c5;
+static cerberus_dual_ble_provenance_t archive_saved_provenance;
+static void ble_archive_save_c5(bool selected)
+{++archive_save_calls;archive_save_selected=selected;archive_saved_c5=dual_ble_ui_selected;
+ archive_saved_provenance=dual_ble_ui_selected_provenance;}
 static esp_err_t draw_ble(void){return ESP_OK;}
 static void ble_fox_hunt_open_peer(const cerberus_c5_ble_result_t *,bool);
 static bool dual_ble_live_prepare_fox(uint32_t,bool);
@@ -201,10 +213,18 @@ esp_err_t cerberus_display_draw_mono_bitmap(uint16_t x,uint16_t y,uint16_t w,uin
 #ifdef CERBERUS_DISCOVERY_NATIVE_TEST
 #include "s3_ble_discovery_native_fakes.h"
 static unsigned discovery_ui_allocations;
+static unsigned unified_sort_calls;
+static uint8_t measured_unified_order(const cerberus_s3_ble_discovery_inventory_t *s3,
+    const cerberus_dual_ble_row_t *c5,uint8_t count,cerberus_ble_discovery_list_source_t source,
+    cerberus_ble_discovery_list_sort_t sort,bool recent,uint64_t now,
+    cerberus_ble_discovery_list_ref_t refs[CERBERUS_BLE_DISCOVERY_LIST_CAPACITY])
+{++unified_sort_calls;return cerberus_ble_discovery_list_order(s3,c5,count,source,sort,recent,now,refs);}
 static void *discovery_ui_calloc(size_t n,size_t size,unsigned capabilities)
 {++discovery_ui_allocations;return heap_caps_calloc(n,size,capabilities);}
 #define heap_caps_calloc discovery_ui_calloc
+#define cerberus_ble_discovery_list_order measured_unified_order
 #include "s3_ble_discovery_live_ui.h"
+#undef cerberus_ble_discovery_list_order
 #undef heap_caps_calloc
 #else
 /* This suite intentionally retains the legacy/frozen-bank presentation path
@@ -220,7 +240,13 @@ static void ble_discovery_tick(uint64_t now,bool asleep){(void)now;(void)asleep;
 static void ble_discovery_select_painted(unsigned row){(void)row;assert(!"native selection in legacy fixture");}
 static void ble_discovery_toggle(void){assert(!"native toggle in legacy fixture");}
 static uint32_t ble_discovery_visible_mask(uint64_t now){(void)now;return UINT32_MAX;}
+static bool ble_discovery_unified(void){return false;}
+static uint8_t ble_discovery_combined_order(void){assert(!"unified order in legacy fixture");return 0;}
+static bool ble_discovery_build_unified_row(unsigned row,size_t position,uint64_t now)
+{(void)row;(void)position;(void)now;assert(!"unified row in legacy fixture");return false;}
 #endif
+static bool dual_ble_live_enabled(void)
+{return ble_discovery_live&&ble_discovery_live->session.enabled;}
 /* The inherited monitor fixture uses one generic error name. Preserve its
  * existing cases while exposing the actual TIMEOUT label for owned polling. */
 static const char *view_error_name(esp_err_t error)
@@ -232,6 +258,12 @@ static const char *view_error_name(esp_err_t error)
 static void seed_list(void)
 {
     (void)draw_live_scan; /* Also compiled for the separate ordinary-live entry fixture. */
+    (void)actual_c5_footer_tap;(void)actual_c5_footer_draw;
+    (void)dual_ble_ui_select_frozen;
+    memset(&companion_store,0,sizeof(companion_store));dual_ble_ui_store=&companion_store;
+    companion_syncs=companion_retries=companion_exchanges=archive_save_calls=0;
+    companion_released=true;dual_ble_ui_detail=dual_ble_ui_receive_info=dual_ble_ui_from_unified=false;
+    dual_ble_ui_error=ESP_OK;
     reset();memset(observations,0,sizeof(observations));memset(&store,0,sizeof(store));
     memset(live_records,0,sizeof(live_records));memset(live_ble_focus_bits,0,sizeof(live_ble_focus_bits));
     memset(live_page,0,sizeof(live_page));sentinel_scan_session_init(&session);

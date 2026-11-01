@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the 121 host suites through the radio-memory headroom checkpoint.
+"""Run the 122 host suites through the unified BLE discovery checkpoint.
 
 The checked-in synthetic fixtures need no board, radio, or private captures.
 Generated fixtures, native executables, previews, logs, and the result receipt
@@ -59,6 +59,7 @@ CHECKS = (
     'check_wifi_relation_transport.py',
     'check_s3_ble_discovery_session.py',
     'check_s3_ble_discovery_inventory.py',
+    'check_ble_discovery_list.py',
     'check_mac_observation.py',
     'check_mac_capture.py',
     'check_mac_monitor_transport.py',
@@ -182,8 +183,8 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=3, help="Parallel compiler jobs (default: 3)")
     args = parser.parse_args()
     names = (*CHECKS, *SERIAL_CHECKS)
-    if len(names) != 121 or len(set(names)) != 121:
-        parser.error("Expected 121 unique suites; do not silently skip a suite")
+    if len(names) != 122 or len(set(names)) != 122:
+        parser.error("Expected 122 unique suites; do not silently skip a suite")
     if args.list:
         for name in names:
             print(name)
@@ -210,7 +211,7 @@ def main() -> int:
     changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
     receipt = {
         "format": 1,
-        "suite_set": "rev103",
+        "suite_set": "rev104",
         "recorded_utc": datetime.now(timezone.utc).isoformat(),
         "status": "passed" if not changed and all(r["exit_code"] == 0 for r in results) else "failed",
         "hardware_validated": False,

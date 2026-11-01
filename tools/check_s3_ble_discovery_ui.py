@@ -15,6 +15,7 @@ out.mkdir(parents=True, exist_ok=True)
 ui = (root / "s3_main/main/ui.c").read_text()
 live = (root / "s3_main/main/sentinel_live_ui.h").read_text()
 discovery = (root / "s3_main/main/s3_ble_discovery_live_ui.h").read_text()
+companion = (root / "s3_main/main/dual_ble_ui.h").read_text()
 (out / "discovery_back_geometry.h").write_text("\n".join(
     re.search(r"^#define " + name + r"\s+\d+", ui, re.M).group(0)
     for name in ("UI_BACK_Y", "UI_BACK_HEIGHT")) + "\n")
@@ -23,6 +24,28 @@ assert "!(wifi_relation_ui && wifi_relation_ui->reading)" in ui, "Relation trans
 def between(source, first, after):
     begin = source.index(first)
     return source[begin:source.index(after, begin)]
+
+def block(source, start):
+    opening = source.index("{", start)
+    depth = 1
+    end = opening + 1
+    while depth:
+        depth += (source[end] == "{") - (source[end] == "}")
+        end += 1
+    return source[start:end]
+
+def function(source, name):
+    match = re.search(r"^static [^\n]*\b" + re.escape(name) + r"\([^;]*?\)\s*\{", source, re.M)
+    assert match, name
+    return block(source, match.start())
+
+# Use production copied-selection/state helpers. RF lifecycle remains the
+# counted boundary, while committed row/provenance getters are linked below.
+companion_parts = between(companion, "enum {", "static uint64_t dual_ble_ui_clock(")
+companion_parts += "\n".join(function(companion, name) for name in (
+    "dual_ble_ui_get_view", "dual_ble_ui_open", "dual_ble_ui_select_frozen",
+    "dual_ble_ui_selected_peer", "dual_ble_ui_tap"))
+(out / "discovery_companion_impl.h").write_text(companion_parts)
 
 # Full production view builder and live tap handler: no second index map,
 # row binding, or hit-test implementation in the fixture.
@@ -66,11 +89,16 @@ footer_end = ui.index("    } else if", footer_start + 20)
 parts += "static esp_err_t actual_analyzer_footer(void) { const char *back_label = \"BACK\";\n" + ui[footer_start:footer_end].replace("} else if", "if", 1) + "}\n"
 parts += re.search(r"    return draw_button\(64, UI_BACK_Y, 192, UI_BACK_HEIGHT, back_label\);", ui).group(0) + "\n}\n"
 dual_live = (root / "s3_main/main/dual_ble_live_ui.h").read_text()
-parts += between(dual_live, "static bool dual_ble_live_discovery_released(", "static void dual_ble_live_tap(")
+parts += between(dual_live, "static bool dual_ble_live_discovery_released(", "static void dual_ble_live_tick(")
+footer_start = ui.index("if (!ui_capability_blocked && current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5 &&")
+parts += "\nstatic void actual_c5_footer_tap(uint16_t x,uint16_t y) {\n" + block(ui, footer_start) + "\n}\n"
+footer_start = ui.index("if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5) {")
+parts += "\nstatic esp_err_t actual_c5_footer_draw(void) {\n" + block(ui, footer_start) + "\nreturn ESP_OK;\n}\n"
 (out / "discovery_routes_impl.h").write_text(parts)
 exe = out / ("ble-discovery-native-check.exe" if native else "ble-discovery-ui-check.exe")
 env = os.environ.copy()
 env["ZIG_GLOBAL_CACHE_DIR"] = str(out / "zig-cache")
+env["ZIG_LOCAL_CACHE_DIR"] = str(out / "zig-local")
 subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
     "-I", str(out), "-I", str(root / "artifacts/findmy-monitor-ui-checks"),
     "-I", str(root / "tools/host_checks/stubs"), "-I", str(root / "s3_main/main"), "-I", str(root / "shared"),
@@ -82,6 +110,7 @@ subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-Wall
     str(root / "s3_main/main/s3_ble_discovery_session.c"),
     str(root / "s3_main/main/s3_ble_discovery_inventory.c"),
     str(root / "s3_main/main/s3_ble_snapshot.c"),
+    str(root / "s3_main/main/dual_ble_scan.c"),
     str(root / "shared/cerberus_watch_capture.c"),
     str(root / "shared/sentinel_watch_protocol.c"),
     "-o", str(exe)], check=True, env=env)
