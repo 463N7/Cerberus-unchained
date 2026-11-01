@@ -18,6 +18,7 @@ static bool dual_ble_ui_recent_only;
 static uint8_t dual_ble_ui_target[6], dual_ble_ui_type;
 static int dual_ble_ui_mode = -1;
 static bool dual_ble_ui_attempted, dual_ble_ui_detail;
+static bool dual_ble_ui_receive_info;
 static esp_err_t dual_ble_ui_error;
 
 static uint64_t dual_ble_ui_clock(void *context)
@@ -79,7 +80,7 @@ static bool dual_ble_ui_released(void)
 { return cerberus_dual_ble_released(dual_ble_ui_store); }
 
 static void dual_ble_ui_open(bool reset_detail)
-{ if (reset_detail) dual_ble_ui_detail = false; }
+{ if (reset_detail) { dual_ble_ui_detail = false; dual_ble_ui_receive_info = false; } }
 
 static bool dual_ble_ui_selected_peer(cerberus_c5_ble_result_t *out)
 {
@@ -95,6 +96,47 @@ static bool dual_ble_ui_selected_peer(cerberus_c5_ble_result_t *out)
     return true;
 }
 
+static const char *dual_ble_ui_phy(uint8_t phy)
+{
+    switch (phy) {
+    case 1U: return "1M";
+    case 2U: return "2M";
+    case 3U: return "CODED";
+    default: return "N/A";
+    }
+}
+
+/* This is the envelope copied with the selected original, never current scan
+ * configuration or aggregate peer hints. Drawing does no radio/transport work. */
+static esp_err_t dual_ble_ui_draw_receive(const cerberus_dual_ble_row_t *row)
+{
+    char line[64], sid[4];
+    const cerberus_dual_ble_receive_metadata_t *receive = &row->receive;
+    const bool legacy = receive->source_kind == CERBERUS_DUAL_BLE_RECEIVE_LEGACY;
+    if (!legacy && receive->source_kind != CERBERUS_DUAL_BLE_RECEIVE_EXTENDED) {
+        ESP_RETURN_ON_ERROR(draw_centered(234, "RECEIVE INFO UNAVAILABLE", UI_MUTED, 1), TAG, "C5 metadata missing");
+        ESP_RETURN_ON_ERROR(draw_centered(254, "NO METADATA FOR THIS OBSERVATION", UI_MUTED, 1), TAG, "C5 metadata scope");
+        return draw_centered(278, "RAW BYTES REMAIN AVAILABLE", UI_TEXT, 1);
+    }
+    ESP_RETURN_ON_ERROR(draw_centered(230, legacy ? "C5 LEGACY CALLBACK" :
+        (receive->properties & 0x10U) ? "C5 EXT CALLBACK / LEGACY PDU" :
+        "C5 EXTENDED CALLBACK", UI_TEXT, 1), TAG, "C5 callback kind");
+    snprintf(line, sizeof(line), "CALLBACK %u B / PREVIEW %u B", receive->callback_length, row->raw_length);
+    ESP_RETURN_ON_ERROR(draw_centered(248, line, UI_MUTED, 1), TAG, "C5 callback bytes");
+    if (receive->sid <= 15U) snprintf(sid, sizeof(sid), "%u", receive->sid);
+    else memcpy(sid, "N/A", sizeof(sid));
+    snprintf(line, sizeof(line), "PHY %s PRIMARY / %s SECONDARY", dual_ble_ui_phy(receive->primary_phy),
+        dual_ble_ui_phy(receive->secondary_phy));
+    ESP_RETURN_ON_ERROR(draw_centered(266, line, UI_MUTED, 1), TAG, "C5 physical metadata");
+    if (legacy) snprintf(line, sizeof(line), "SID N/A / PROPS N/A / CTRL STATUS N/A");
+    else snprintf(line, sizeof(line), "SID %s / PROPS %02X / CTRL COMPLETE", sid, receive->properties);
+    ESP_RETURN_ON_ERROR(draw_centered(284, line, UI_MUTED, 1), TAG, "C5 report status");
+    snprintf(line, sizeof(line), "FULL AD LAYOUT %s%s", receive->ad_validation == CERBERUS_DUAL_BLE_AD_VALID ?
+        "VALID" : receive->ad_validation == CERBERUS_DUAL_BLE_AD_INVALID ? "INVALID" : "UNKNOWN",
+        receive->callback_length > row->raw_length ? " / PREVIEW CUT" : "");
+    return draw_centered(302, line, UI_MUTED, 1);
+}
+
 static esp_err_t dual_ble_ui_draw(bool s3_enabled)
 {
     char line[64], identifier[24], name[CERBERUS_BLE_NAME_MAX_LENGTH + 1U];
@@ -108,7 +150,8 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
         ESP_RETURN_ON_ERROR(draw_centered(96, line, UI_TEXT, 1), TAG, "C5 BLE name");
         cerberus_privacy_format_ble_identifier(row->address, privacy_addresses_masked(), identifier, sizeof(identifier));
         ESP_RETURN_ON_ERROR(draw_centered(118, identifier, UI_TEXT, 1), TAG, "C5 BLE address");
-        snprintf(line, sizeof(line), "ADDRESS TYPE %u / C5 OBSERVATIONS ONLY", row->address_type);
+        snprintf(line, sizeof(line), dual_ble_ui_receive_info ?
+            "ADDRESS TYPE %u / RX INFO NOT SAVED" : "ADDRESS TYPE %u / C5 OBSERVATIONS ONLY", row->address_type);
         ESP_RETURN_ON_ERROR(draw_centered(140, line, UI_MUTED, 1), TAG, "C5 BLE type");
         uint32_t age;
         bool known_age = cerberus_dual_ble_list_age(row, now, &age);
@@ -121,13 +164,21 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
         ESP_RETURN_ON_ERROR(draw_centered(162, line, UI_MUTED, 1), TAG, "C5 BLE timing");
         snprintf(line, sizeof(line), "REPORTS %u / VENDOR ID %04X", row->reports, row->manufacturer_id);
         ESP_RETURN_ON_ERROR(draw_centered(186, line, UI_TEXT, 1), TAG, "C5 BLE metadata");
-        snprintf(line, sizeof(line), "ORIGINAL ADV %u B / FLAGS %02X", row->raw_length, row->raw_flags);
-        ESP_RETURN_ON_ERROR(draw_centered(212, line, UI_MUTED, 1), TAG, "C5 BLE packet");
-        for (unsigned part = 0; part < 4U; ++part) {
-            size_t n = 0U; line[0] = '\0';
-            for (unsigned i = part * 8U; i < row->raw_length && i < (part + 1U) * 8U; ++i)
-                n += (size_t)snprintf(line + n, sizeof(line) - n, "%02X ", row->raw[i]);
-            ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(234U + part * 16U), line, UI_TEXT, 1), TAG, "C5 BLE bytes");
+        ESP_RETURN_ON_ERROR(draw_small_button(8, 198, 148, 26,
+            dual_ble_ui_receive_info ? "RAW ADV" : "RAW ADV *"), TAG, "C5 raw tab");
+        ESP_RETURN_ON_ERROR(draw_small_button(164, 198, 148, 26,
+            dual_ble_ui_receive_info ? "RECEIVE INFO *" : "RECEIVE INFO"), TAG, "C5 metadata tab");
+        if (dual_ble_ui_receive_info) {
+            ESP_RETURN_ON_ERROR(dual_ble_ui_draw_receive(row), TAG, "C5 receive metadata");
+        } else {
+            snprintf(line, sizeof(line), "ORIGINAL ADV %u B / FLAGS %02X", row->raw_length, row->raw_flags);
+            ESP_RETURN_ON_ERROR(draw_centered(234, line, UI_MUTED, 1), TAG, "C5 BLE packet");
+            for (unsigned part = 0; part < 4U; ++part) {
+                size_t n = 0U; line[0] = '\0';
+                for (unsigned i = part * 8U; i < row->raw_length && i < (part + 1U) * 8U; ++i)
+                    n += (size_t)snprintf(line + n, sizeof(line) - n, "%02X ", row->raw[i]);
+                ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(254U + part * 14U), line, UI_TEXT, 1), TAG, "C5 BLE bytes");
+            }
         }
         ESP_RETURN_ON_ERROR(draw_small_button(8, 316, 148, 38, "BACK TO C5 LIST"), TAG, "C5 BLE list back");
         ESP_RETURN_ON_ERROR(draw_small_button(164, 316, 148, 38, "FOX THIS ADDRESS"), TAG, "C5 BLE fox");
@@ -197,6 +248,12 @@ static int dual_ble_ui_tap(uint16_t x, uint16_t y)
     if (x >= 8U && x < 312U && y >= 50U && y < 80U) return DUAL_BLE_UI_BACK_S3;
     if (x >= 20U && x < 300U && y >= 370U && y < 410U) return DUAL_BLE_UI_TOGGLE;
     if (dual_ble_ui_detail) {
+        if (y >= 198U && y < 224U) {
+            if (x >= 8U && x < 156U) dual_ble_ui_receive_info = false;
+            else if (x >= 164U && x < 312U) dual_ble_ui_receive_info = true;
+            else return DUAL_BLE_UI_NONE;
+            return DUAL_BLE_UI_REDRAW;
+        }
         if (y >= 316U && y < 354U) {
             if (x >= 8U && x < 156U) { dual_ble_ui_detail = false; return DUAL_BLE_UI_REDRAW; }
             if (x >= 164U && x < 312U) return DUAL_BLE_UI_FOX;
@@ -216,6 +273,7 @@ static int dual_ble_ui_tap(uint16_t x, uint16_t y)
                 dual_ble_ui_selected = dual_ble_ui_painted[row];
                 dual_ble_ui_selected_provenance = dual_ble_ui_painted_provenance[row];
                 dual_ble_ui_detail = true;
+                dual_ble_ui_receive_info = false;
                 return DUAL_BLE_UI_REDRAW;
             }
         }

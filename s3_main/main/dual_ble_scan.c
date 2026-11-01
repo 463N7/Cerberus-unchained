@@ -32,6 +32,7 @@ esp_err_t cerberus_dual_ble_begin(cerberus_dual_ble_scan_t *s, uint8_t mode,
     s->sweeps = 0U; s->snapshots = 0U; s->first_result_ms = 0U; s->has_first_result = false;
     s->live_updates = false; s->snapshots_capable = false;
     s->inventory_query_enabled = true; s->pending_inventory_known = false;
+    s->metadata_read_enabled = true;
     s->inventory_retries = 0U;
     s->discovery_clock_valid = s->ops.now_ms != NULL;
     s->discovery_started_ms = s->ops.now_ms ? s->ops.now_ms(s->ops.context) : 0U;
@@ -149,7 +150,9 @@ static esp_err_t decode_snapshot_row(cerberus_dual_ble_scan_t *s)
         ((r->timing_flags & CERBERUS_DUAL_BLE_RSSI_VALID) && (r->latest_rssi < -127 || r->latest_rssi > 20)) ||
         !zero_bytes(r->name + r->name_length, sizeof(r->name) - r->name_length) ||
         !zero_bytes(r->uuid + r->uuid_length, sizeof(r->uuid) - r->uuid_length) ||
-        !zero_bytes(r->raw + r->raw_length, sizeof(r->raw) - r->raw_length)) return ESP_ERR_INVALID_RESPONSE;
+        !zero_bytes(r->raw + r->raw_length, sizeof(r->raw) - r->raw_length) ||
+        !cerberus_dual_ble_receive_metadata_valid(&s->snapshot_metadata.receive,
+            r->raw_length, r->event_type, r->raw_flags)) return ESP_ERR_INVALID_RESPONSE;
     for (uint8_t i = 0U; i < s->read_index; ++i)
         if (s->staging[i].address_type == r->address_type &&
             !memcmp(s->staging[i].address, r->address, sizeof(r->address))) return ESP_ERR_INVALID_RESPONSE;
@@ -166,6 +169,7 @@ static esp_err_t decode_snapshot_row(cerberus_dual_ble_scan_t *s)
     /* All rows use FIRST BEGIN's anchor, including an idempotent retry whose
      * reply arrives later. Download/fence time can only make the upper age grow. */
     row->request_started_ms = s->snapshot_request_started_ms;
+    row->receive = s->snapshot_metadata.receive;
     return ESP_OK;
 }
 
@@ -188,15 +192,27 @@ static esp_err_t snapshot_step(cerberus_dual_ble_scan_t *s, uint64_t now)
         s->pending_inventory_known = false; s->inventory_retries = 0U;
         memset(&s->pending_inventory, 0, sizeof(s->pending_inventory));
         memset(s->staging, 0, sizeof(s->staging));
-        memset(&s->snapshot_row, 0, sizeof(s->snapshot_row));
+        memset(&s->snapshot_metadata, 0, sizeof(s->snapshot_metadata));
         s->read_index = 0U; s->copied = 0U;
         s->phase = result.count ? SNAP_READ : s->inventory_query_enabled ? SNAP_INVENTORY : SNAP_FENCE;
     } else if (s->phase == SNAP_READ) {
         cerberus_dual_ble_snapshot_read_t request = {b, s->snapshot.handle, s->read_index,
             (uint8_t)(s->copied / CERBERUS_DUAL_BLE_SNAPSHOT_CHUNK_BYTES)};
         cerberus_dual_ble_snapshot_chunk_t result;
-        esp_err_t error = exchange(s, CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ,
+        uint8_t command = s->metadata_read_enabled ? CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA :
+            CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ;
+        esp_err_t error = exchange(s, command,
             &request, sizeof(request), &result, sizeof(result));
+        if (error == ESP_ERR_NOT_SUPPORTED && s->metadata_read_enabled) {
+            /* Optional projection only. Discard every partially copied row,
+             * including completed metadata rows, then reread this exact frozen
+             * handle through READ. FIRST BEGIN's age anchor must not move. */
+            s->metadata_read_enabled = false;
+            memset(s->staging, 0, sizeof(s->staging));
+            memset(&s->snapshot_metadata, 0, sizeof(s->snapshot_metadata));
+            s->read_index = 0U; s->copied = 0U;
+            return ESP_OK;
+        }
         if (error != ESP_OK) return error;
         if (result.handle != request.handle || result.index != request.index || result.chunk != request.chunk ||
             result.error > CERBERUS_DUAL_BLE_SNAPSHOT_INVALID) return ESP_ERR_INVALID_RESPONSE;
@@ -205,16 +221,17 @@ static esp_err_t snapshot_step(cerberus_dual_ble_scan_t *s, uint64_t now)
             return result.error == CERBERUS_DUAL_BLE_SNAPSHOT_BUSY ? ESP_ERR_TIMEOUT :
                 result.error == CERBERUS_DUAL_BLE_SNAPSHOT_STALE ? ESP_ERR_NOT_FOUND : ESP_ERR_INVALID_RESPONSE;
         }
-        uint8_t amount = sizeof(s->snapshot_row) - s->copied;
+        uint8_t wire_size = s->metadata_read_enabled ? sizeof(s->snapshot_metadata) : sizeof(s->snapshot_row);
+        uint8_t amount = wire_size - s->copied;
         if (amount > CERBERUS_DUAL_BLE_SNAPSHOT_CHUNK_BYTES) amount = CERBERUS_DUAL_BLE_SNAPSHOT_CHUNK_BYTES;
         if (result.byte_count != amount || !zero_bytes(result.data + amount, sizeof(result.data) - amount))
             return ESP_ERR_INVALID_RESPONSE;
-        memcpy((uint8_t *)&s->snapshot_row + s->copied, result.data, amount); s->copied += amount;
-        if (s->copied == sizeof(s->snapshot_row)) {
+        memcpy((uint8_t *)&s->snapshot_metadata + s->copied, result.data, amount); s->copied += amount;
+        if (s->copied == wire_size) {
             error = decode_snapshot_row(s);
             if (error != ESP_OK) return error;
             s->copied = 0U; ++s->read_index;
-            memset(&s->snapshot_row, 0, sizeof(s->snapshot_row));
+            memset(&s->snapshot_metadata, 0, sizeof(s->snapshot_metadata));
             if (s->read_index == s->snapshot.count)
                 s->phase = s->inventory_query_enabled ? SNAP_INVENTORY : SNAP_FENCE;
         }

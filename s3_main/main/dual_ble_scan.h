@@ -15,6 +15,9 @@ typedef struct {
     uint8_t flags, timing_flags;
     uint32_t callback_age_ms;
     uint64_t request_started_ms;
+    /* Frozen original-ADV receive evidence. Older peers provide canonical
+     * UNKNOWN, not an inferred PHY/event mode or full-AD validation result. */
+    cerberus_dual_ble_receive_metadata_t receive;
 } cerberus_dual_ble_row_t;
 /* Historical identity of the published bank, not the currently running job.
  * Freeze beside a copied row. Generation zero is valid after wrap; the full
@@ -40,7 +43,10 @@ typedef struct {
      * unpublished inventory. No queued snapshots or additional full bank. */
     cerberus_dual_ble_snapshot_status_t snapshot;
     cerberus_dual_ble_snapshot_inventory_t pending_inventory;
-    cerberus_dual_ble_snapshot_row_t snapshot_row;
+    union {
+        cerberus_dual_ble_snapshot_row_t snapshot_row;
+        cerberus_dual_ble_snapshot_metadata_row_t snapshot_metadata;
+    };
     uint64_t snapshot_request_id, snapshot_request_started_ms, next_snapshot_ms;
     uint64_t published_epoch, published_boot_id, track_request_ms, next_poll_ms, last_tick_ms;
     uint32_t job_counter;
@@ -57,6 +63,7 @@ typedef struct {
     bool enabled, extended, has_track, stop_requested;
     bool has_first_result, live_updates, discovery_clock_valid, snapshot_anchor_valid, snapshots_capable;
     bool inventory_known, inventory_replacement_enabled, pending_inventory_known, inventory_query_enabled;
+    bool metadata_read_enabled;
 } cerberus_dual_ble_scan_t;
 typedef struct {
     bool enabled, attached, receiving, reading, stopping, extended;

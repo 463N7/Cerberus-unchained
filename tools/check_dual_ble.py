@@ -19,9 +19,14 @@ state_end = source.index("static void dual_expire_locked(void);", state_begin)
 legacy_begin = source.index("esp_err_t cerberus_ble_scanner_get_result(")
 legacy_end = source.index('#include "dual_ble_service_impl.h"', legacy_begin)
 (out / "c5_ble_legacy_getters.h").write_text(source[legacy_begin:legacy_end])
-begin = source.index("static void record_advertisement(")
+begin = source.index("static void copy_raw_advertisement(")
 end = source.index("static void finish_scan_for_epoch(", begin)
 (out / "c5_ble_callback_impl.h").write_text(source[begin:end])
+# Compile the actual receive cases, including the installed NimBLE EXT_DISC
+# normalization. Central/GATT cases are unrelated to this passive fixture.
+begin = source.index("static int gap_event(")
+gap = source[begin:source.index("    case BLE_GAP_EVENT_CONNECT:", begin)]
+(out / "c5_ble_gap_receive_impl.h").write_text(gap + "    default: break;\n    }\n    return 0;\n}\n")
 for fixture, extra in (("dual_ble_check", [root / "s3_main/main/dual_ble_scan.c"]),
                        ("dual_ble_owner_check", []),
                        ("dual_ble_integration_check", [root / "s3_main/main/dual_ble_scan.c"])):

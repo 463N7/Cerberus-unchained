@@ -201,6 +201,74 @@ static void check_reader_metrics(const char *prefix)
     assert(companion_exchanges==calls&&starts==radio_starts&&stops==radio_stops);
 }
 
+static void check_receive_metadata(const char *prefix)
+{
+    unsigned calls=companion_exchanges,radio_starts=starts,radio_stops=stops;
+    cerberus_c5_ble_result_t s3_before=ble_selected_result;
+    dual_ble_ui_open(true);dual_ble_ui_offset=0;dual_ble_ui_recent_only=false;
+    dual_ble_ui_store->count=1;
+    cerberus_dual_ble_row_t *r=&dual_ble_ui_store->rows[0];memset(r,0,sizeof(*r));
+    memcpy(r->address,"ABCDEF",6);strcpy(r->name,"Extended test observation");
+    r->rssi=-45;r->timing_flags=3;r->request_started_ms=(uint64_t)clock_ms;
+    r->raw_length=31;r->raw[0]=254;r->raw[1]=0xFF;r->event_type=3;
+    r->raw_flags=CERBERUS_BLE_ADVERTISEMENT_TRUNCATED|CERBERUS_BLE_ADVERTISEMENT_MALFORMED;
+    r->receive=(cerberus_dual_ble_receive_metadata_t){
+        .source_kind=CERBERUS_DUAL_BLE_RECEIVE_EXTENDED,.callback_length=255,.sid=15,
+        .primary_phy=1,.secondary_phy=3,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+    assert(cerberus_dual_ble_receive_metadata_valid(&r->receive,r->raw_length,r->event_type,r->raw_flags));
+    paint_list();
+    cerberus_dual_ble_receive_metadata_t frozen=r->receive;
+    memset(&r->receive,0,sizeof(r->receive));r->raw_length=3; /* New live bank cannot rebind selection. */
+    assert(dual_ble_ui_tap(20,160)==DUAL_BLE_UI_REDRAW);
+    assert(!memcmp(&dual_ble_ui_selected.receive,&frozen,sizeof(frozen)));
+    assert(!dual_ble_ui_receive_info);
+    paint_list();assert(strstr(drawn,"ORIGINAL ADV 31 B")&&strstr(drawn,"RAW ADV *"));
+    save(prefix,"metadata-raw-prefix");
+    assert(dual_ble_ui_tap(200,210)==DUAL_BLE_UI_REDRAW);paint_list();
+    assert(strstr(drawn,"RX INFO NOT SAVED"));
+    assert(strstr(drawn,"C5 EXTENDED CALLBACK")&&strstr(drawn,"CALLBACK 255 B / PREVIEW 31 B"));
+    assert(strstr(drawn,"PHY 1M PRIMARY / CODED SECONDARY")&&strstr(drawn,"SID 15 / PROPS 00 / CTRL COMPLETE"));
+    assert(strstr(drawn,"FULL AD LAYOUT VALID / PREVIEW CUT"));
+    assert(!strstr(drawn,"FULL AD LAYOUT INVALID"));save(prefix,"metadata-extended");
+    assert(dual_ble_ui_tap(160,210)==DUAL_BLE_UI_NONE); /* Gap between tabs. */
+    assert(dual_ble_ui_tap(200,224)==DUAL_BLE_UI_NONE);
+    assert(dual_ble_ui_tap(20,210)==DUAL_BLE_UI_REDRAW);paint_list();
+    assert(strstr(drawn,"ORIGINAL ADV 31 B")&&!strstr(drawn,"CTRL COMPLETE")&&!strstr(drawn,"RX INFO NOT SAVED"));
+    assert(!memcmp(&dual_ble_ui_selected.receive,&frozen,sizeof(frozen)));
+
+    dual_ble_ui_selected.receive.ad_validation=CERBERUS_DUAL_BLE_AD_INVALID;
+    dual_ble_ui_selected.receive.primary_phy=3;dual_ble_ui_selected.receive.secondary_phy=2;
+    dual_ble_ui_selected.receive.sid=0xFF;
+    assert(dual_ble_ui_tap(200,210)==DUAL_BLE_UI_REDRAW);paint_list();
+    assert(strstr(drawn,"PHY CODED PRIMARY / 2M SECONDARY")&&strstr(drawn,"SID N/A / PROPS 00 / CTRL COMPLETE"));
+    assert(strstr(drawn,"FULL AD LAYOUT INVALID / PREVIEW CUT"));
+    save(prefix,"metadata-malformed-full");
+    dual_ble_ui_selected.receive=(cerberus_dual_ble_receive_metadata_t){
+        .source_kind=CERBERUS_DUAL_BLE_RECEIVE_LEGACY,.callback_length=3,.sid=0xFF,
+        .data_status=0xFF,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+    dual_ble_ui_selected.raw_length=3;dual_ble_ui_selected.raw_flags=0;
+    memset(dual_ble_ui_selected.raw,0,sizeof(dual_ble_ui_selected.raw));
+    dual_ble_ui_selected.raw[0]=2;dual_ble_ui_selected.raw[1]=1;dual_ble_ui_selected.raw[2]=6;
+    assert(cerberus_dual_ble_receive_metadata_valid(&dual_ble_ui_selected.receive,3,3,0));paint_list();
+    assert(strstr(drawn,"C5 LEGACY CALLBACK")&&strstr(drawn,"CALLBACK 3 B / PREVIEW 3 B"));
+    assert(strstr(drawn,"PHY N/A PRIMARY / N/A SECONDARY")&&strstr(drawn,"SID N/A / PROPS N/A / CTRL STATUS N/A"));
+    assert(!strstr(drawn,"CTRL COMPLETE")&&!strstr(drawn,"PREVIEW CUT"));save(prefix,"metadata-legacy");
+    dual_ble_ui_selected.receive.source_kind=CERBERUS_DUAL_BLE_RECEIVE_EXTENDED;
+    dual_ble_ui_selected.receive.properties=0x10;dual_ble_ui_selected.receive.primary_phy=1;
+    dual_ble_ui_selected.receive.data_status=0;
+    assert(cerberus_dual_ble_receive_metadata_valid(&dual_ble_ui_selected.receive,3,3,0));paint_list();
+    assert(strstr(drawn,"C5 EXT CALLBACK / LEGACY PDU"));save(prefix,"metadata-legacy-pdu");
+    memset(&dual_ble_ui_selected.receive,0,sizeof(dual_ble_ui_selected.receive));paint_list();
+    assert(strstr(drawn,"RECEIVE INFO UNAVAILABLE")&&strstr(drawn,"NO METADATA FOR THIS OBSERVATION"));
+    assert(!strstr(drawn,"CTRL COMPLETE")&&!strstr(drawn,"CALLBACK 0 B"));save(prefix,"metadata-unknown");
+    assert(dual_ble_ui_tap(20,330)==DUAL_BLE_UI_REDRAW);paint_list();
+    assert(dual_ble_ui_tap(20,160)==DUAL_BLE_UI_REDRAW&&!dual_ble_ui_receive_info);
+    assert(dual_ble_ui_tap(200,210)==DUAL_BLE_UI_REDRAW&&dual_ble_ui_receive_info);
+    dual_ble_ui_open(true);assert(!dual_ble_ui_detail&&!dual_ble_ui_receive_info);
+    assert(companion_exchanges==calls&&starts==radio_starts&&stops==radio_stops);
+    assert(!memcmp(&s3_before,&ble_selected_result,sizeof(s3_before)));
+}
+
 int main(int argc,char **argv)
 {
     check_list_order();
@@ -277,7 +345,8 @@ int main(int argc,char **argv)
     save(argv[1],"fox-bound-new-target");
     check_list_controls(argv[1]);
     check_reader_metrics(argv[1]);
+    check_receive_metadata(argv[1]);
     heap_caps_free(dual_ble_ui_store);dual_ble_ui_store=NULL;
-    puts("Dual BLE UI: stable ordering/age controls, frozen typed rows, no RF calls on controls, live/whole-sweep reader metrics, concurrent receiving/reading, and old-target sample isolation passed");
+    puts("Dual BLE UI: stable ordering/age controls, frozen typed rows/receive metadata, raw/info tabs without RF calls, bounded callback/PHY/framing labels, live reader metrics, and old-target sample isolation passed");
     return 0;
 }

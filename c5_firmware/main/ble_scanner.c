@@ -57,6 +57,7 @@ typedef struct {
     uint32_t original_observed_ms;
     int8_t latest_rssi;
     bool original_time_valid;
+    cerberus_dual_ble_receive_metadata_t receive;
 } cerberus_ble_record_t;
 
 static const char *TAG = "ble_scanner";
@@ -101,6 +102,7 @@ static bool dual_attached, dual_radio_active, dual_track_seen;
 static cerberus_ble_inventory_admission_t scan_inventory;
 typedef struct {
     cerberus_dual_ble_snapshot_row_t rows[CERBERUS_DUAL_BLE_CAPACITY];
+    cerberus_dual_ble_receive_metadata_t receive[CERBERUS_DUAL_BLE_CAPACITY];
     uint64_t counter, handle, epoch, request_id;
     uint32_t job_id, replaced, dropped;
     uint8_t count, flags;
@@ -192,16 +194,20 @@ static void copy_raw_advertisement(cerberus_ble_record_t *record,
     if (record->reports_seen < UINT16_MAX) ++record->reports_seen;
 }
 
-static void record_advertisement(const struct ble_gap_disc_desc *discovery,
-    uint32_t epoch, int64_t callback_us)
+static void record_advertisement_with_metadata(const struct ble_gap_disc_desc *discovery,
+    uint32_t epoch, int64_t callback_us, const cerberus_dual_ble_receive_metadata_t *receive)
 {
     if (discovery == NULL || (discovery->length_data != 0U && discovery->data == NULL) ||
         discovery->event_type == BLE_HCI_ADV_RPT_EVTYPE_SCAN_RSP) return;
     struct ble_hs_adv_fields fields = {0};
     const bool parsed = discovery->length_data == 0U ||
         ble_hs_adv_parse_fields(&fields, discovery->data, discovery->length_data) == 0;
-    const bool qualifying = parsed && discovery->event_type <= 3U &&
+    /* Independently validate the complete delivered container once. NimBLE's
+     * parse result still gates inventory qualification; metadata validation
+     * describes full AD layout rather than a possibly cut31-byte preview. */
+    const bool full_ad_valid = discovery->event_type <= 3U &&
         cerberus_ble_inventory_ad_valid(discovery->data, discovery->length_data);
+    const bool qualifying = parsed && full_ad_valid;
 
     xSemaphoreTake(scanner_mutex, portMAX_DELAY);
     if (!epoch || epoch != scan_callback_epoch || scan_status.state != CERBERUS_BLE_SCAN_RUNNING) {
@@ -277,8 +283,30 @@ static void record_advertisement(const struct ble_gap_disc_desc *discovery,
         record->original_observed_ms = callback_us >= 0 ? (uint32_t)((uint64_t)callback_us / 1000U) : UINT32_MAX;
         record->latest_rssi = discovery->rssi;
         record->original_time_valid = callback_us >= 0;
+        memset(&record->receive, 0, sizeof(record->receive));
+        if (receive && receive->callback_length == discovery->length_data) {
+            record->receive = *receive;
+            record->receive.ad_validation = full_ad_valid ?
+                CERBERUS_DUAL_BLE_AD_VALID : CERBERUS_DUAL_BLE_AD_INVALID;
+            if (!cerberus_dual_ble_receive_metadata_valid(&record->receive,
+                    record->advertisement_length, record->advertisement_event_type,
+                    record->advertisement_flags))
+                memset(&record->receive, 0, sizeof(record->receive));
+        }
     }
     xSemaphoreGive(scanner_mutex);
+}
+
+/* Keep ordinary/legacy entry semantics; only passive provenance is added. */
+static void record_advertisement(const struct ble_gap_disc_desc *discovery,
+    uint32_t epoch, int64_t callback_us)
+{
+    const cerberus_dual_ble_receive_metadata_t receive = {
+        .source_kind = CERBERUS_DUAL_BLE_RECEIVE_LEGACY,
+        .callback_length = discovery ? discovery->length_data : 0U,
+        .sid = 0xffU, .data_status = 0xffU,
+    };
+    record_advertisement_with_metadata(discovery, epoch, callback_us, &receive);
 }
 
 static void finish_scan_for_epoch(int reason, uint32_t epoch)
@@ -362,7 +390,13 @@ static int gap_event(struct ble_gap_event *event, void *arg)
                 : ((extended->props & BLE_HCI_ADV_CONN_MASK) != 0U
                     ? BLE_HCI_ADV_RPT_EVTYPE_ADV_IND : BLE_HCI_ADV_RPT_EVTYPE_NONCONN_IND),
         };
-        record_advertisement(&discovery, epoch, callback_us);
+        const cerberus_dual_ble_receive_metadata_t receive = {
+            .source_kind = CERBERUS_DUAL_BLE_RECEIVE_EXTENDED,
+            .properties = extended->props, .callback_length = extended->length_data,
+            .sid = extended->sid, .primary_phy = extended->prim_phy,
+            .secondary_phy = extended->sec_phy, .data_status = extended->data_status,
+        };
+        record_advertisement_with_metadata(&discovery, epoch, callback_us, &receive);
         break;
     }
 #endif

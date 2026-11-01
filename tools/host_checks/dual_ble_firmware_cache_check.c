@@ -72,6 +72,34 @@ int main(void)
     reset();reported_version=63;expected_command=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_INVENTORY;
     assert(c5_spi_link_dual_ble_exchange(expected_command,&inventory_request,sizeof(inventory_request),
         &inventory,sizeof(inventory))==ESP_OK&&probes==1&&commands==1);
+    /* The opt-in110-byte row must not be requested from a known63 peer.
+     * Unknown cache still uses the same one-probe/shared-deadline contract. */
+    cerberus_dual_ble_snapshot_read_t metadata_request={.binding={123,1},.handle=456,.index=2,.chunk=10};
+    cerberus_dual_ble_snapshot_chunk_t metadata;
+    reset();peer_firmware_version=63;expected_command=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA;
+    assert(c5_spi_link_dual_ble_exchange(expected_command,&metadata_request,sizeof(metadata_request),
+        &metadata,sizeof(metadata))==ESP_ERR_NOT_SUPPORTED&&!probes&&!commands&&zero(&metadata,sizeof(metadata)));
+    reset();reported_version=64;expected_command=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA;
+    assert(c5_spi_link_dual_ble_exchange(expected_command,&metadata_request,sizeof(metadata_request),
+        &metadata,sizeof(metadata))==ESP_OK&&probes==1&&commands==1&&peer_firmware_version==64);
+    reset();peer_firmware_version=64;expected_command=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA;
+    assert(c5_spi_link_dual_ble_exchange(expected_command,&metadata_request,sizeof(metadata_request),
+        &metadata,sizeof(metadata))==ESP_OK&&!probes&&commands==1);
+    reset();reported_version=64;probe_error=ESP_ERR_TIMEOUT;
+    expected_command=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA;
+    assert(c5_spi_link_dual_ble_exchange(expected_command,&metadata_request,sizeof(metadata_request),
+        &metadata,sizeof(metadata))==ESP_ERR_TIMEOUT&&probes==1&&!commands&&!peer_firmware_version&&zero(&metadata,sizeof(metadata)));
+    probe_error=ESP_OK;
+    assert(c5_spi_link_dual_ble_exchange(expected_command,&metadata_request,sizeof(metadata_request),
+        &metadata,sizeof(metadata))==ESP_OK&&probes==2&&commands==1);
+    reset();reported_version=64;probe_us=10000;request_us=10001;
+    expected_command=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA;
+    assert(c5_spi_link_dual_ble_exchange(expected_command,&metadata_request,sizeof(metadata_request),
+        &metadata,sizeof(metadata))==ESP_ERR_TIMEOUT&&probes==1&&commands==1&&zero(&metadata,sizeof(metadata)));
+    reset();peer_firmware_version=64;corrupt=true;
+    expected_command=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA;
+    assert(c5_spi_link_dual_ble_exchange(expected_command,&metadata_request,sizeof(metadata_request),
+        &metadata,sizeof(metadata))==ESP_ERR_INVALID_RESPONSE&&!probes&&commands==1&&zero(&metadata,sizeof(metadata)));
     puts("Production firmware-cache recovery passed: known/unknown/old firmware, transient timeout recovery, shared deadline, invalid reply and no unintended command");
     return 0;
 }

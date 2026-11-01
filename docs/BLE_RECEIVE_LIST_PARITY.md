@@ -1,5 +1,20 @@
 # BLE receive-list parity audit
 
+## Rev101 source candidate: same-original C5 receive metadata
+
+The candidate preserves callback source, delivered length, SID/PHY, properties,
+controller status and full AD-layout validity in a bounded eight-byte envelope.
+It follows the same original raw/RSSI/time through a frozen snapshot and selected
+row; receiver capability never substitutes for a row's callback source. A
+firmware-gated 110-byte read still takes eleven chunks, and old 102-byte readers
+retain their layout. Unsupported optional reads fall back on the same frozen
+handle with metadata UNKNOWN. The existing detail page gains RAW ADV / RECEIVE
+INFO tabs. V3 archives do not gain this envelope, full payloads remain bounded,
+and C5 partial reports/scan responses remain excluded. This does not establish
+physical extended/coded reception, latency, full family parity or active-action
+eligibility. [The rev101 checkpoint](DUAL_RADIO_REV101.md) owns its validation
+and installation evidence; rev100 is the preceding installed checkpoint.
+
 ## Rev100 source candidate: matched-response archives and bounded C5 retention
 
 Rev99 remains the preceding installed checkpoint. This section records source

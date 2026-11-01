@@ -111,12 +111,13 @@ static void dual_snapshot_status_locked(int32_t error, cerberus_dual_ble_snapsho
     }
 }
 
-/* All three v2 commands are bounded: if a callback owns the mutex, report BUSY
+/* Snapshot commands are bounded: if a callback owns the mutex, report BUSY
  * immediately. Copy at most 32 rows with no allocation, RF operation or wait. */
 static bool dual_snapshot_command(uint8_t command, const void *request,
     size_t request_size, void *response, size_t *response_size)
 {
-    bool reading = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ;
+    bool metadata = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA;
+    bool reading = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ || metadata;
     bool beginning = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_BEGIN;
     cerberus_dual_ble_snapshot_read_t read = {0};
     cerberus_dual_ble_snapshot_begin_t begin = {0};
@@ -165,6 +166,7 @@ static bool dual_snapshot_command(uint8_t command, const void *request,
                     const int64_t freeze_us = esp_timer_get_time();
                     const uint32_t freeze_ms = (uint32_t)((uint64_t)freeze_us / 1000U);
                     memset(dual_snapshot.rows, 0, sizeof(dual_snapshot.rows));
+                    memset(dual_snapshot.receive, 0, sizeof(dual_snapshot.receive));
                     for (uint8_t i = 0U; i < scan_status.stored_count; ++i) {
                         const cerberus_ble_record_t *r = &scan_results[i];
                         cerberus_dual_ble_snapshot_row_t *out = &dual_snapshot.rows[i];
@@ -176,6 +178,10 @@ static bool dual_snapshot_command(uint8_t command, const void *request,
                         memcpy(out->raw, r->advertisement, r->advertisement_length);
                         out->raw_length = r->advertisement_length; out->event_type = r->advertisement_event_type;
                         out->raw_flags = r->advertisement_flags; out->reports = r->reports_seen;
+                        if (cerberus_dual_ble_receive_metadata_valid(&r->receive,
+                                r->advertisement_length, r->advertisement_event_type,
+                                r->advertisement_flags))
+                            dual_snapshot.receive[i] = r->receive;
                         out->age_ms = UINT32_MAX;
                         if (r->original_time_valid && freeze_us >= 0) {
                             out->age_ms = freeze_ms - r->original_observed_ms;
@@ -206,9 +212,17 @@ static bool dual_snapshot_command(uint8_t command, const void *request,
                 error = ESP_ERR_INVALID_ARG;
             else {
                 const size_t offset = (size_t)read.chunk * CERBERUS_DUAL_BLE_SNAPSHOT_CHUNK_BYTES;
-                size_t length = sizeof(dual_snapshot.rows[0]) - offset;
+                const size_t row_size = metadata ? CERBERUS_DUAL_BLE_SNAPSHOT_METADATA_ROW_BYTES :
+                    sizeof(dual_snapshot.rows[0]);
+                size_t length = row_size - offset;
                 if (length > sizeof(chunk.data)) length = sizeof(chunk.data);
-                memcpy(chunk.data, (const uint8_t *)&dual_snapshot.rows[read.index] + offset, length);
+                /* Virtual contiguous row: preserve the old102-byte wire bank
+                 * and append its SAME frozen metadata only for opt-in reads. */
+                size_t raw_length = sizeof(dual_snapshot.rows[0]) - offset;
+                if (raw_length > length) raw_length = length;
+                memcpy(chunk.data, (const uint8_t *)&dual_snapshot.rows[read.index] + offset, raw_length);
+                if (length > raw_length)
+                    memcpy(chunk.data + raw_length, &dual_snapshot.receive[read.index], length - raw_length);
                 chunk.byte_count = (uint8_t)length;
             }
         }
@@ -265,8 +279,9 @@ bool cerberus_ble_dual_command(uint8_t command, const void *request,
     *response_size = 0U;
     if (command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_INVENTORY)
         return dual_snapshot_inventory_command(request, request_size, response, response_size);
-    if (command >= CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_BEGIN &&
-        command <= CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_STATUS)
+    if ((command >= CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_BEGIN &&
+        command <= CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_STATUS) ||
+        command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA)
         return dual_snapshot_command(command, request, request_size, response, response_size);
     if (command == CERBERUS_SPI_COMMAND_DUAL_BLE_INFO) {
         if (request_size) return false;

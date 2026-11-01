@@ -10,6 +10,7 @@
 #define CERBERUS_DUAL_BLE_MIN_FIRMWARE 61U
 #define CERBERUS_DUAL_BLE_SNAPSHOT_MIN_FIRMWARE 62U
 #define CERBERUS_DUAL_BLE_INVENTORY_MIN_FIRMWARE 63U
+#define CERBERUS_DUAL_BLE_METADATA_MIN_FIRMWARE 64U
 #define CERBERUS_DUAL_BLE_CAPACITY 32U
 #define CERBERUS_DUAL_BLE_RAW_BYTES 31U
 #define CERBERUS_DUAL_BLE_STALE_MS 5000U
@@ -27,6 +28,57 @@ enum { CERBERUS_DUAL_BLE_SNAPSHOT_OK, CERBERUS_DUAL_BLE_SNAPSHOT_BUSY,
 #define CERBERUS_DUAL_BLE_SNAPSHOT_CHUNK_BYTES 10U
 #define CERBERUS_DUAL_BLE_SNAPSHOT_ROW_BYTES 102U
 #define CERBERUS_DUAL_BLE_SNAPSHOT_CHUNKS 11U
+#define CERBERUS_DUAL_BLE_SNAPSHOT_METADATA_ROW_BYTES 110U
+#define CERBERUS_DUAL_BLE_SNAPSHOT_METADATA_CHUNKS 11U
+
+enum { CERBERUS_DUAL_BLE_RECEIVE_UNKNOWN, CERBERUS_DUAL_BLE_RECEIVE_LEGACY,
+       CERBERUS_DUAL_BLE_RECEIVE_EXTENDED };
+enum { CERBERUS_DUAL_BLE_AD_UNKNOWN, CERBERUS_DUAL_BLE_AD_VALID,
+       CERBERUS_DUAL_BLE_AD_INVALID };
+/* Provenance of the SAME retained original as raw/RSSI/age, never peer hints.
+ * callback_length is the delivered SDK report length, not a reconstructed
+ * advertising train. UNKNOWN is canonical allzero. Legacy has no controller
+ * data-status/SID/PHY observation: status/SID=0xff, PHY/properties=0.
+ * Known EXT metadata describes complete originals only. A preview boundary
+ * may mark raw MALFORMED despite independently valid full AD layout. */
+typedef struct __attribute__((packed)) {
+    uint8_t source_kind, properties, callback_length, sid;
+    uint8_t primary_phy, secondary_phy, data_status, ad_validation;
+} cerberus_dual_ble_receive_metadata_t;
+
+static inline bool cerberus_dual_ble_receive_metadata_valid(
+    const cerberus_dual_ble_receive_metadata_t *m,
+    uint8_t raw_length, uint8_t event_type, uint8_t raw_flags)
+{
+    if (!m) return false;
+    if (m->source_kind == CERBERUS_DUAL_BLE_RECEIVE_UNKNOWN)
+        return !m->properties && !m->callback_length && !m->sid &&
+            !m->primary_phy && !m->secondary_phy && !m->data_status && !m->ad_validation;
+    /* Raw flag bit0 is preview truncation; bit1 is existing raw malformed.
+     * Do not depend on the larger protocol header or reinterpret bit1 here. */
+    const uint8_t preview = m->callback_length < CERBERUS_DUAL_BLE_RAW_BYTES ?
+        m->callback_length : CERBERUS_DUAL_BLE_RAW_BYTES;
+    if (event_type > 3U || raw_length != preview || (raw_flags & ~3U) ||
+        ((raw_flags & 1U) != 0U) != (m->callback_length > CERBERUS_DUAL_BLE_RAW_BYTES) ||
+        (m->ad_validation != CERBERUS_DUAL_BLE_AD_VALID &&
+         m->ad_validation != CERBERUS_DUAL_BLE_AD_INVALID)) return false;
+    if (m->source_kind == CERBERUS_DUAL_BLE_RECEIVE_LEGACY)
+        return !m->properties && m->callback_length <= CERBERUS_DUAL_BLE_RAW_BYTES &&
+            m->sid == 0xffU && !m->primary_phy && !m->secondary_phy && m->data_status == 0xffU;
+    if (m->source_kind != CERBERUS_DUAL_BLE_RECEIVE_EXTENDED ||
+        (m->properties & ~0x1fU) || (m->properties & 0x08U) || m->data_status ||
+        (m->sid > 15U && m->sid != 0xffU) ||
+        (m->primary_phy != 1U && m->primary_phy != 3U) || m->secondary_phy > 3U) return false;
+    if (m->properties & 0x10U) {
+        if (m->callback_length > CERBERUS_DUAL_BLE_RAW_BYTES || m->sid != 0xffU ||
+            m->primary_phy != 1U || m->secondary_phy) return false;
+        return (m->properties == 0x10U && event_type == 3U) ||
+            (m->properties == 0x12U && event_type == 2U) ||
+            (m->properties == 0x13U && event_type == 0U) ||
+            (m->properties == 0x15U && event_type == 1U);
+    }
+    return event_type == ((m->properties & 1U) ? 0U : 3U);
+}
 
 typedef struct __attribute__((packed)) {
     uint64_t boot_id;
@@ -124,6 +176,14 @@ typedef struct __attribute__((packed)) {
     uint8_t timing_flags;
 } cerberus_dual_ble_snapshot_row_t;
 
+/* Firmware64 opt-in READ_METADATA only. Existing READ retains102 bytes and
+ * its two-byte final chunk. This virtual110-byte projection uses the same11
+ * chunks: the final chunk contains the old two bytes followed by metadata8. */
+typedef struct __attribute__((packed)) {
+    cerberus_dual_ble_snapshot_row_t row;
+    cerberus_dual_ble_receive_metadata_t receive;
+} cerberus_dual_ble_snapshot_metadata_row_t;
+
 _Static_assert(sizeof(cerberus_dual_ble_info_t) == 22U, "dual BLE info frame");
 _Static_assert(sizeof(cerberus_dual_ble_start_t) == 22U, "dual BLE start frame");
 _Static_assert(sizeof(cerberus_dual_ble_status_t) == 22U, "dual BLE status frame");
@@ -136,6 +196,8 @@ _Static_assert(sizeof(cerberus_dual_ble_snapshot_status_t) == 22U, "snapshot sta
 _Static_assert(sizeof(cerberus_dual_ble_snapshot_inventory_t) == 22U, "snapshot inventory frame");
 _Static_assert(sizeof(cerberus_dual_ble_snapshot_chunk_t) == 22U, "snapshot chunk frame");
 _Static_assert(sizeof(cerberus_dual_ble_snapshot_row_t) == 102U, "snapshot row layout");
+_Static_assert(sizeof(cerberus_dual_ble_receive_metadata_t) == 8U, "receive metadata layout");
+_Static_assert(sizeof(cerberus_dual_ble_snapshot_metadata_row_t) == 110U, "metadata snapshot row layout");
 
 static inline bool cerberus_dual_ble_start_valid(const cerberus_dual_ble_start_t *r)
 {

@@ -18,6 +18,9 @@ typedef struct {
     unsigned complete_fences;
     cerberus_dual_ble_snapshot_status_t snapshot;
     cerberus_dual_ble_snapshot_row_t frozen[CERBERUS_DUAL_BLE_CAPACITY];
+    cerberus_dual_ble_receive_metadata_t frozen_receive[CERBERUS_DUAL_BLE_CAPACITY];
+    bool metadata_supported, metadata_fail_enabled;
+    unsigned metadata_reads, metadata_fail_after;
     unsigned fault, busy_begin, busy_read;
     bool unknown_age;
     bool inventory_supported;
@@ -57,6 +60,7 @@ static void snapshot_freeze(peer_t *p)
         .replaced=p->replacements,.dropped=p->dropped,.count=p->count,
         .flags=CERBERUS_DUAL_BLE_INVENTORY_REPLACEMENT};
     memset(p->frozen,0,sizeof(p->frozen));
+    memset(p->frozen_receive,0,sizeof(p->frozen_receive));
     for (uint8_t i=0;i<p->count;++i) {
         cerberus_dual_ble_snapshot_row_t *r=&p->frozen[i];
         memcpy(r->address,(uint8_t[]){1,2,3,4,5,(uint8_t)(i/4U)},6);
@@ -65,6 +69,9 @@ static void snapshot_freeze(peer_t *p)
         r->peer_flags=CERBERUS_BLE_RESULT_CONNECTABLE;r->raw_length=3;memcpy(r->raw,(uint8_t[]){2,1,6},3);
         r->reports=100U+p->snapshot_begins;r->age_ms=p->unknown_age?UINT32_MAX:17;
         r->timing_flags=p->unknown_age?0:3;
+        p->frozen_receive[i]=(cerberus_dual_ble_receive_metadata_t){
+            .source_kind=CERBERUS_DUAL_BLE_RECEIVE_LEGACY,.callback_length=3,
+            .sid=0xff,.data_status=0xff,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
     }
     cerberus_dual_ble_snapshot_row_t *r=&p->frozen[0];
     switch(p->fault) {
@@ -90,16 +97,25 @@ static esp_err_t snapshot_exchange(peer_t *p,uint8_t cmd,const void *request,
     assert(p->version==2 && p->snapshot_capability && reply_size==22);
     const cerberus_dual_ble_binding_t *b=request;
     assert(b->boot_id==p->boot && b->job_id==p->job && p->attached);
-    if(cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ) {
-        assert(request_size==22);++p->snapshot_reads;
+    if(cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ ||
+        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA) {
+        bool metadata=cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA;
+        assert(request_size==22);
+        if(metadata) {
+            ++p->metadata_reads;
+            if(!p->metadata_supported || (p->metadata_fail_enabled&&p->metadata_reads>p->metadata_fail_after))
+                return ESP_ERR_NOT_SUPPORTED;
+        } else ++p->snapshot_reads;
         const cerberus_dual_ble_snapshot_read_t *r=request;
         assert(r->handle==p->snapshot.handle&&r->index<p->snapshot.count&&r->chunk<11);
         cerberus_dual_ble_snapshot_chunk_t out={.handle=r->handle,.index=r->index,.chunk=r->chunk};
         if(p->busy_read) {--p->busy_read;out.error=CERBERUS_DUAL_BLE_SNAPSHOT_BUSY;}
         else {
-            size_t offset=r->chunk*10U, amount=sizeof(p->frozen[0])-offset;
+            cerberus_dual_ble_snapshot_metadata_row_t wire={.row=p->frozen[r->index],
+                .receive=p->frozen_receive[r->index]};
+            size_t offset=r->chunk*10U, amount=(metadata?sizeof(wire):sizeof(wire.row))-offset;
             if(amount>10U)amount=10U;out.byte_count=(uint8_t)amount;
-            memcpy(out.data,(const uint8_t *)&p->frozen[r->index]+offset,amount);
+            memcpy(out.data,(const uint8_t *)&wire+offset,amount);
             switch(p->fault) {
             case BAD_READ_HANDLE:--out.handle;break;
             case BAD_READ_INDEX:++out.index;break;
@@ -174,7 +190,8 @@ static esp_err_t exchange(void *ctx, uint8_t cmd, const void *request,
         }
         memcpy(reply,&out,sizeof(out));return ESP_OK;
     }
-    if(cmd>=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_BEGIN&&cmd<=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_STATUS)
+    if((cmd>=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_BEGIN&&cmd<=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_STATUS) ||
+        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA)
         return snapshot_exchange(p,cmd,request,request_size,reply,reply_size);
     if (cmd == CERBERUS_SPI_COMMAND_DUAL_BLE_INFO) {
         assert(!request_size && reply_size==sizeof(cerberus_dual_ble_info_t));
@@ -520,6 +537,143 @@ static void check_inventory_metadata(void)
     drain(&s,&p);assert(!s.snapshots&&!s.inventory_known&&!p.snapshot_fences);
     puts("dual BLE frozen inventory stats: exact bank, optional old-peer/fault fallback, bounded BUSY, final fence and Stop publication passed");
 }
+static bool bytes_zero(const void *data,size_t size)
+{
+    const uint8_t *p=data;
+    for(size_t i=0;i<size;++i)if(p[i])return false;
+    return true;
+}
+static void metadata_begin(cerberus_dual_ble_scan_t *s,peer_t *p,uint8_t count)
+{
+    init_live(s,p);p->metadata_supported=true;p->count=count;
+    s->count=1;s->rows[0].rssi=-110;
+    s->rows[0].receive=(cerberus_dual_ble_receive_metadata_t){.source_kind=1,.callback_length=3,
+        .sid=0xff,.data_status=0xff,.ad_validation=1};
+    start(s,p);p->cost_ms=8;
+    for(unsigned i=0;i<100&&s->phase!=12;++i)fast_tick(s,p);
+    assert(s->phase==12&&!p->metadata_reads&&!p->snapshot_reads&&p->snapshot_begins==1);
+}
+static void check_receive_metadata(void)
+{
+    cerberus_dual_ble_scan_t s;peer_t p;
+    /* All eleven chunks now carry110 bytes; the final eight bytes remain part
+     * of the same frozen row and are copied with its published provenance. */
+    metadata_begin(&s,&p,32);
+    p.frozen_receive[0]=(cerberus_dual_ble_receive_metadata_t){0};
+    p.frozen_receive[1]=(cerberus_dual_ble_receive_metadata_t){.source_kind=2,.properties=1,
+        .callback_length=3,.sid=15,.primary_phy=3,.secondary_phy=2,.ad_validation=1};
+    p.frozen_receive[2]=(cerberus_dual_ble_receive_metadata_t){.source_kind=2,.properties=0x13,
+        .callback_length=3,.sid=0xff,.primary_phy=1,.ad_validation=2};
+    /* Full-AD validity and preview parsing are deliberately independent. */
+    p.frozen[2].raw_flags=CERBERUS_BLE_ADVERTISEMENT_MALFORMED;
+    p.frozen_receive[3]=(cerberus_dual_ble_receive_metadata_t){.source_kind=2,.properties=0,
+        .callback_length=255,.sid=0,.primary_phy=1,.secondary_phy=3,.ad_validation=1};
+    p.frozen[3].event_type=3;p.frozen[3].raw_length=31;p.frozen[3].raw_flags=3;
+    memset(p.frozen[3].raw,0x55,31);
+    p.cost_ms=1;await_snapshots(&s,&p,1);
+    assert(p.metadata_reads==32U*11U&&!p.snapshot_reads&&p.snapshot_begins==1&&p.snapshot_fences==1);
+    assert(s.metadata_read_enabled&&s.count==32&&!s.sweeps&&p.owned);
+    for(unsigned i=0;i<32;++i)assert(!memcmp(&s.rows[i].receive,&p.frozen_receive[i],sizeof(s.rows[i].receive)));
+    cerberus_dual_ble_row_t selected;cerberus_dual_ble_provenance_t source;
+    assert(cerberus_dual_ble_copy_row(&s,3,&selected,&source));
+    assert(selected.receive.callback_length==255&&selected.receive.ad_validation==1&&selected.raw_flags==3);
+    p.frozen_receive[3].callback_length=31;
+    assert(selected.receive.callback_length==255&&s.rows[3].receive.callback_length==255);
+    drain(&s,&p);
+
+    /* A NOT_SUPPORTED reply is the only downgrade condition. Even after
+     * complete metadata rows were staged, ALL staging is cleared and the same
+     * handle is read from row0 through legacy READ, without another BEGIN. */
+    const unsigned fallback_positions[]={0,1,10,11,16,351};
+    for(unsigned n=0;n<sizeof(fallback_positions)/sizeof(fallback_positions[0]);++n){
+        metadata_begin(&s,&p,32);
+        cerberus_dual_ble_row_t saved=s.rows[0];
+        uint64_t handle=s.snapshot.handle,anchor=s.snapshot_request_started_ms;
+        p.metadata_fail_enabled=true;p.metadata_fail_after=fallback_positions[n];
+        for(unsigned i=0;i<500&&s.metadata_read_enabled;++i)assert(fast_tick(&s,&p)<=1);
+        assert(!s.metadata_read_enabled&&p.metadata_reads==fallback_positions[n]+1);
+        assert(s.phase==12&&!s.read_index&&!s.copied&&bytes_zero(s.staging,sizeof(s.staging)));
+        assert(bytes_zero(&s.snapshot_metadata,sizeof(s.snapshot_metadata)));
+        assert(s.snapshot.handle==handle&&s.snapshot_request_started_ms==anchor&&s.snapshot_anchor_valid);
+        assert(p.request_id==1&&p.snapshot_begins==1&&p.starts==1&&!p.stops&&!p.releases);
+        assert(!s.snapshots&&!memcmp(&saved,&s.rows[0],sizeof(saved)));
+        p.cost_ms=1;await_snapshots(&s,&p,1);
+        assert(p.snapshot_reads==32U*11U&&p.snapshot_fences==1);
+        for(unsigned i=0;i<32;++i)assert(bytes_zero(&s.rows[i].receive,sizeof(s.rows[i].receive))&&
+            s.rows[i].request_started_ms==anchor);
+        unsigned attempts=p.metadata_reads;
+        await_snapshots(&s,&p,2);assert(p.metadata_reads==attempts&&!s.metadata_read_enabled);
+        drain(&s,&p);
+        assert(cerberus_dual_ble_begin(&s,0,NULL,0)==ESP_OK&&s.metadata_read_enabled);
+        drain(&s,&p);
+    }
+    /* A lost first BEGIN reply plus a later downgrade cannot refresh age. */
+    init_live(&s,&p);p.metadata_supported=true;p.metadata_fail_enabled=true;p.metadata_fail_after=12;
+    p.lose_begin_replies=2;start(&s,&p);await_snapshots(&s,&p,1);
+    assert(p.snapshot_begins==3&&p.handle_counter==1&&p.metadata_reads==13);
+    assert(s.rows[0].request_started_ms+1==p.snapshot_clock_ms&&s.snapshot_request_started_ms+200<p.now);
+    assert(bytes_zero(&s.rows[0].receive,sizeof(s.rows[0].receive)));drain(&s,&p);
+
+    /* Validate each envelope dimension, rather than accepting properties or
+     * full-AD status inferred from the projected raw prefix. */
+    for(unsigned bad=0;bad<22;++bad){
+        metadata_begin(&s,&p,1);cerberus_dual_ble_row_t saved=s.rows[0];
+        cerberus_dual_ble_receive_metadata_t *m=&p.frozen_receive[0];
+        if(bad>=9)*m=(cerberus_dual_ble_receive_metadata_t){.source_kind=2,.properties=1,
+            .callback_length=3,.sid=0xff,.primary_phy=1,.ad_validation=1};
+        switch(bad){
+        case 0:m->source_kind=3;break;
+        case 1:m->source_kind=0;break; /* Noncanonical UNKNOWN. */
+        case 2:m->properties=1;break;
+        case 3:m->callback_length=32;break;
+        case 4:m->sid=0;break;
+        case 5:m->primary_phy=1;break;
+        case 6:m->secondary_phy=1;break;
+        case 7:m->data_status=0;break;
+        case 8:m->ad_validation=0;break;
+        case 9:m->properties=0x80;break;
+        case 10:m->properties=8;break; /* Response is not an original ADV. */
+        case 11:m->callback_length=2;break;
+        case 12:m->callback_length=32;break; /* Preview/truncation mismatch. */
+        case 13:m->sid=16;break;
+        case 14:m->primary_phy=2;break;
+        case 15:m->secondary_phy=4;break;
+        case 16:m->data_status=1;break;
+        case 17:m->data_status=2;break;
+        case 18:m->ad_validation=3;break;
+        case 19:m->properties=0;break; /* Mapped event mismatch. */
+        case 20:m->properties=0x13;m->sid=1;break;
+        case 21:m->properties=0x13;m->secondary_phy=1;break;
+        }
+        for(unsigned i=0;i<100&&!s.error;++i)fast_tick(&s,&p);
+        assert(s.error==ESP_ERR_INVALID_RESPONSE&&!s.snapshots&&s.metadata_read_enabled&&!p.snapshot_reads);
+        assert(!memcmp(&saved,&s.rows[0],sizeof(saved)));drain(&s,&p);
+    }
+    /* Metadata does not weaken transport/semantic or final bank fences. */
+    const unsigned faults[]={BAD_READ_HANDLE,BAD_READ_INDEX,BAD_READ_CHUNK,BAD_READ_LENGTH,
+        BAD_READ_ERROR,BAD_READ_ERROR_BODY,BAD_FENCE_HANDLE,BAD_FENCE_COUNT,BAD_FENCE_FLAGS};
+    for(unsigned i=0;i<sizeof(faults)/sizeof(faults[0]);++i){
+        metadata_begin(&s,&p,1);cerberus_dual_ble_row_t saved=s.rows[0];p.fault=faults[i];
+        for(unsigned j=0;j<100&&!s.error;++j)fast_tick(&s,&p);
+        assert(s.error==ESP_ERR_INVALID_RESPONSE&&!s.snapshots&&!p.snapshot_reads&&s.metadata_read_enabled);
+        assert(!memcmp(&saved,&s.rows[0],sizeof(saved)));drain(&s,&p);
+    }
+    metadata_begin(&s,&p,1);p.busy_read=2;await_snapshots(&s,&p,1);
+    assert(s.metadata_read_enabled&&!p.snapshot_reads&&p.metadata_reads==13&&p.snapshot_begins==1);drain(&s,&p);
+    /* STOP wins in every row/chunk position and before the final fence. */
+    metadata_begin(&s,&p,2);
+    for(unsigned i=0;i<30&&!s.snapshots;++i){
+        cerberus_dual_ble_scan_t stopped=s;peer_t other=p;stopped.ops.context=&other;
+        cerberus_dual_ble_row_t saved=stopped.rows[0];
+        unsigned reads=other.metadata_reads,old_reads=other.snapshot_reads,fences=other.snapshot_fences;
+        drain(&stopped,&other);
+        assert(other.metadata_reads==reads&&other.snapshot_reads==old_reads&&other.snapshot_fences==fences);
+        assert(!memcmp(&saved,&stopped.rows[0],sizeof(saved))&&!stopped.snapshots);
+        fast_tick(&s,&p);
+    }
+    assert(s.snapshots==1);drain(&s,&p);
+    puts("dual BLE receive metadata: coherent110-byte banks, exact legacy fallback, original age, validation, retry, frozen copies and Stop passed");
+}
 int main(void)
 {
     cerberus_dual_ble_scan_t s;peer_t p;
@@ -529,6 +683,7 @@ int main(void)
     assert(!memcmp(s.rows[0].address,s.rows[1].address,6)); /* Same bytes, distinct typed identities. */
     assert(s.rows[0].rssi==-80 && !strcmp(s.rows[0].name,"TEST")); /* Latest callback, not -20 peak. */
     assert(s.rows[0].raw_length==3 && s.rows[0].raw[2]==6 && s.rows[0].reports==7);
+    assert(bytes_zero(&s.rows[0].receive,sizeof(s.rows[0].receive)));
     assert(cerberus_dual_ble_age_upper(s.rows[0].callback_age_ms,s.rows[0].request_started_ms,p.now)>=7000);
     drain(&s,&p);
     cerberus_dual_ble_row_t saved=s.rows[0];
@@ -572,6 +727,7 @@ int main(void)
     assert(cerberus_dual_ble_age_upper(2,10,9)==UINT32_MAX);
     assert(cerberus_dual_ble_age_upper(2,10,12)==4);
     check_live_snapshots();check_snapshot_faults_and_stop();check_published_provenance();check_inventory_metadata();
+    check_receive_metadata();
     printf("dual BLE reader: owner/replay/fence/lost-reply/age/typed-row checks passed; store=%zu bytes\n",sizeof(s));
     return 0;
 }

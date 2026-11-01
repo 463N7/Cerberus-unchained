@@ -1,5 +1,6 @@
 #undef NDEBUG
 #include "cerberus_watch_capture.h"
+#include "dual_ble_protocol.h"
 #include "../../c5_firmware/main/ble_inventory_admission.h"
 #include <assert.h>
 #include <stdio.h>
@@ -17,8 +18,12 @@ static unsigned checks;
 enum { ESP_OK, ESP_ERR_INVALID_ARG, ESP_ERR_INVALID_STATE, ESP_ERR_NOT_FINISHED };
 typedef int esp_err_t;
 typedef struct { uint8_t type,val[6]; } ble_addr_t;
-struct ble_gap_disc_desc { ble_addr_t addr; int8_t rssi; uint8_t event_type; uint16_t length_data; const uint8_t *data; };
-struct ble_gap_ext_disc_desc { ble_addr_t addr; int8_t rssi; uint16_t props,length_data; uint8_t data_status,legacy_event_type; const uint8_t *data; };
+struct ble_gap_disc_desc { ble_addr_t addr; int8_t rssi; uint8_t event_type,length_data; const uint8_t *data; };
+/* Match the installed SDK's eight-bit callback fields; this fixture does not
+ * invent >255-byte reports or silently widen properties. */
+struct ble_gap_ext_disc_desc { uint8_t props,data_status,legacy_event_type; ble_addr_t addr;
+    int8_t rssi,tx_power; uint8_t sid,prim_phy,sec_phy; uint16_t periodic_adv_itvl;
+    uint8_t length_data; const uint8_t *data; ble_addr_t direct_addr; };
 enum { BLE_GAP_EVENT_DISC=1,BLE_GAP_EVENT_EXT_DISC,BLE_GAP_EVENT_DISC_COMPLETE };
 enum { BLE_HCI_ADV_RPT_EVTYPE_ADV_IND=0,BLE_HCI_ADV_RPT_EVTYPE_DIR_IND=1,
        BLE_HCI_ADV_RPT_EVTYPE_NONCONN_IND=3,BLE_HCI_ADV_RPT_EVTYPE_SCAN_RSP=4 };

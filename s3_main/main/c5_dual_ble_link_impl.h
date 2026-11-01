@@ -9,7 +9,8 @@ esp_err_t c5_spi_link_dual_ble_exchange(uint8_t command, const void *input,
     bool snapshot = command >= CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_BEGIN &&
         command <= CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_STATUS;
     bool inventory = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_INVENTORY;
-    allowed = allowed || snapshot || inventory;
+    bool metadata = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA;
+    allowed = allowed || snapshot || inventory || metadata;
     allowed = allowed || command == CERBERUS_SPI_COMMAND_BLE_SCAN_RESULT ||
         command == CERBERUS_SPI_COMMAND_BLE_SCAN_DATA;
     if (!allowed || !output || !output_size || output_size > CERBERUS_SPI_FRAME_PAYLOAD_SIZE ||
@@ -31,7 +32,8 @@ esp_err_t c5_spi_link_dual_ble_exchange(uint8_t command, const void *input,
             error = ESP_ERR_TIMEOUT;
         peer_firmware_version = error == ESP_OK ? peer.firmware_version : 0U;
     }
-    if (error == ESP_OK && peer_firmware_version < (inventory ? CERBERUS_DUAL_BLE_INVENTORY_MIN_FIRMWARE :
+    if (error == ESP_OK && peer_firmware_version < (metadata ? CERBERUS_DUAL_BLE_METADATA_MIN_FIRMWARE :
+        inventory ? CERBERUS_DUAL_BLE_INVENTORY_MIN_FIRMWARE :
         snapshot ? CERBERUS_DUAL_BLE_SNAPSHOT_MIN_FIRMWARE : CERBERUS_DUAL_BLE_MIN_FIRMWARE))
         error = ESP_ERR_NOT_SUPPORTED;
     if (error == ESP_OK) {

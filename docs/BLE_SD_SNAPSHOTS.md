@@ -24,6 +24,10 @@ The same browser opens new v3 reports and old v1/v2 files. V1 files show **LEGAC
 
 ## What is retained
 
+Rev101's candidate **RECEIVE INFO** panel adds live/selected C5 callback metadata.
+That envelope is not part of the v3 SD format described here. The offline reader
+does not borrow those fields from current scans or reconstruct absent metadata.
+
 Each row includes its receiver and typed address, bounded peer-name projection, RSSI semantics/validity, manufacturer and UUID hints, peer flags, original raw ADV bytes/flags, report count, generation/index and available source metadata. S3 rows retain sweep-peak RSSI and exact historical source/copy times. C5 rows retain latest-original-ADV RSSI, the published or selected full-width C5 boot/epoch provenance, and an optional conservative age bound. C5 exact S3 source/copy times remain absent; an age bound may exceed saved S3 uptime and cannot be converted into an exact S3 packet timestamp. Unknown timing stays explicit.
 
 Both archived sources retain at most **31 raw original advertisement bytes** per row. V3 additionally retains up to **31 S3 matching-response bytes from a delivered response of up to 255 bytes**, with separate lengths, event/flags, SID where valid, ordered original/response sequences and independent source times. This is a bounded prefix, not full extended-report retention. C5 passive discovery does not collect scan responses and its archived response availability is UNKNOWN. The S3 native extended-advertisement build remains disabled; controlled C5 extended/coded reception remains unaccepted on hardware.
