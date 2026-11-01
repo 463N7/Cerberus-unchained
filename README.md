@@ -46,8 +46,9 @@ stable list, Dashboard/Radar are visible main tabs, and category controls say
 ALERT. Current accepted S3 Meta identifier hints now reach Recon at LOW
 confidence, with no glasses/model claim. All 136 host suites and five native
 targets pass on 1,120 unchanged inputs; independent review and the linked
-resource audit pass. The Recon model/view sizes remain unchanged. Matched
-packaging is next. See
+resource audit pass. The Recon model/view sizes remain unchanged. The matched
+package and offline installation checks are ready; flashing awaits release of
+the active Recon session. See
 [rev126](docs/DUAL_RADIO_REV126.md). Installed firmware remains rev124.
 
 Rev125 implements offline Marauder AP JSON and SSID text import, details,

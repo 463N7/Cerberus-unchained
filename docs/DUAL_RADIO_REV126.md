@@ -3,8 +3,9 @@
 Source version is `0.1.0-dev.rev126`; onboard C5 capability revision remains
 69. Implementation and independent source/visual reviews are complete. All
 136 host suites and five native targets pass on the same 1,120 unchanged
-inputs. The linked resource audit passes; packaging and installation are the
-remaining gates.
+inputs. The linked resource audit and matched local packaging pass. Installation
+is pending because the connected device's Recon session was still active at
+the final readiness check; no rev126 flash write or reset has been attempted.
 Installed firmware is rev124; the completed
 [rev125 file-interchange package](DUAL_RADIO_REV125.md) remains a local,
 uninstalled checkpoint whose changes are included in this follow-up.
@@ -77,9 +78,37 @@ task stacks remain unchanged. These figures exclude allocator overhead and do
 not establish concurrent runtime peaks or fragmentation.
 
 Selected native entry frames include 1,088 bytes for the UI loop, 320 for
-`watch_draw`, 160 for the dashboard renderer and 224 for the outer Watch view
-draw routine (16 above rev124). Some helpers are inlined and have no standalone
-measurement; they are not treated as free. The audit is not a complete call
-chain or worst-case runtime stack bound. Physical navigation, priority behavior
+`watch_draw` and 224 for `sentinel_watch_view_draw`, which includes the inlined
+Recon dashboard body (16 above rev124). The audit's separate 160-byte
+`draw_dashboard` symbol belongs to the general system dashboard, not Recon.
+A separately bound retained-ELF inspection in
+`artifacts/device-rev126/recon-frame-supplement.json` measures
+`watch_consume_radio` at 192 bytes in both rev124 and rev126; its linked code
+grows by 474 bytes. Some helpers are inlined and have no standalone measurement;
+they are not treated as free. The audit is not a complete call chain or
+worst-case runtime stack bound. Physical navigation, priority behavior
 over real sweeps, repeated sessions, SD workflows and loaded performance remain
 separate acceptance checks.
+
+## Final package and device readiness
+
+Built source commit: `d679ba0c3d4307330c5d29d3ce2e546e359d2635`.
+Package: `dist/cerberus-unchained-0.1.0-dev.rev126-20261101T223739Z`.
+Manifest SHA-256:
+`84d3f81d2d0d0f126e3e96996e56f3d9c850d0352dd6eea4a44f8025efaebca5`.
+`artifacts/device-rev126/local-milestone.json` binds the source, all nine images,
+host/native receipts and resource audit. Its `installed: false` is intentional.
+
+The candidate-bound six identity tests and 22 installation-helper tests pass.
+Offline preflight verifies the exact package and all helper hashes. Fresh
+baseline backups, paired writes and boot checks still require released device
+owners. A transient idle C5 sample was insufficient: S3 remained initialized,
+and a subsequent sample caught the next active Recon sweep. The user was asked
+to leave Recon with Back and return to Home. The installer did not reset or
+write while that session was active.
+
+The operator/recovery plan is `artifacts/device-rev126/INSTALL.md`. Documentation
+after the built source commit records completed packaging and readiness only;
+the strict installer requires the exact clean built commit before device work.
+No push, pull request or release was made for this checkpoint. The overall
+Marauder port remains unfinished.
