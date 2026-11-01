@@ -1,5 +1,14 @@
 # BLE receive-list parity audit
 
+## Rev109 source checkpoint: saved full-original C5 family evidence
+
+The v5 archive and offline C5 HINTS view preserve rev108's frozen decoded family
+record alongside its raw preview, receive metadata and source identity.
+Historical files keep absent proof explicit, and offline viewing does not
+activate either receiver. Rev106 remains last verified installed; see
+[rev109](DUAL_RADIO_REV109.md) for local validation and physical limits.
+The earlier sections retain their revision-specific scope.
+
 ## Rev105 source checkpoint: saved-report source filters
 
 The offline report viewer adds ALL/S3/C5/LEGACY receiver filtering and stable

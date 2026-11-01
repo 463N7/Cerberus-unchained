@@ -29,7 +29,7 @@ extern "C" {
 #define CERBERUS_STORAGE_RECON_NAME_CAPACITY 7U
 #define CERBERUS_STORAGE_BLE_ARCHIVE_PATH "/CERBERUS/BLE"
 /* v4: header32 + up to64 receiver-tagged rows of216 bytes. */
-#define CERBERUS_STORAGE_BLE_ARCHIVE_MAX_BYTES 13856U
+#define CERBERUS_STORAGE_BLE_ARCHIVE_MAX_BYTES 16928U
 
 typedef struct {
     bool mounted;

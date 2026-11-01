@@ -1,7 +1,7 @@
 {
   "format": 2,
-  "audit_checkpoint": "rev108-source",
-  "scope": "Editorial source/workflow status through rev108 C5 full-report family evidence and focused retention. Rev106/C5 firmware65 remains installed; rev108 is an unflashed local candidate. See DUAL_RADIO_REV108.md for source, validation and limits. Full Marauder parity remains incomplete. The rev107 GitHub develop check on 2026-11-01 resolved to 79cc6bcba1db6679baee1dab2b0c1ad5010e6363, matching the pinned source.",
+  "audit_checkpoint": "rev109-source",
+  "scope": "Editorial source/workflow status through rev109 saved full-original C5 family evidence. Rev106/C5 firmware65 remains last verified installed; rev109 is an unflashed local candidate paired with C5 firmware66. See DUAL_RADIO_REV109.md for source, validation and limits. Full Marauder parity remains incomplete. The rev107 GitHub develop check on 2026-11-01 resolved to 79cc6bcba1db6679baee1dab2b0c1ad5010e6363, matching the pinned source.",
   "contribution_summary": "docs/CONTRIBUTION_REV93.md",
   "prior_public_contribution": "docs/CONTRIBUTION_REV81.md",
   "upstream": "https://github.com/justcallmekoko/ESP32Marauder",
@@ -317,7 +317,7 @@
       "family": "ble_general_scanning",
       "status": "partial",
       "cerberus_evidence": "docs/BLE_SD_SNAPSHOTS.md",
-      "next_gap": "Rev102 v4 reports preserve the frozen C5 callback source, delivered length, SID, PHY, properties, controller status and full AD-layout validation beside original raw/RSSI/provenance. The existing offline page adds RECEIVE INFO for C5 while retaining S3 RESPONSE. Old v1/v2/v3 files retain unknown receive metadata; v3 S3 response bytes and times remain readable. Firmware64 transport and scan admission are unchanged. Physical extended/coded reports, dense retention, save/reopen, response-only discovery, latency and repeated owner transitions remain pending. Full payload/history recording, C5 response acquisition, saved-file family evidence and upstream suboptions remain incomplete. Rev108 adds full-original evidence and selected-family retention only in focused family mode; generic ALL retains its existing preview transport. See DUAL_RADIO_REV108.md. See DUAL_RADIO_REV102.md; rev101 is the preceding installed checkpoint.",
+      "next_gap": "Rev109 v5 reports preserve full-original C5 family evidence from focused scans beside frozen raw previews, receive metadata and source identity. Existing v1-v4 files remain readable with missing family evidence explicit. Generic ALL keeps its existing preview transport. Physical save/reopen, file-failure recovery, extended formats, dense retention, latency, repeated transitions and sustained headroom remain pending. Full payload/history recording, C5 response acquisition and complete upstream suboptions remain open. See DUAL_RADIO_REV109.md.",
       "s3_role": "S3 owns discovery, family evidence, presentation and storage. It validates C5 rows and their optional same-original receive metadata before final-fence publication, freezes typed selections, and displays raw bytes and receive information without new radio work. V4 SD reports preserve the frozen C5 receive envelope and S3 matched responses; offline viewing never activates saved targets.",
       "c5_role": "Firmware64 retains an eight-byte callback metadata envelope with each original and freezes it with rows/counters. Existing READ/INFO and RF admission remain compatible; no raw buffer grows. It retains firmware63 bounded discovery replacement and keeps C5 scan responses excluded. Mixed Recon/Wardriving retain C5 Wi-Fi plus S3 BLE.",
       "related_menu_entries": [],
@@ -370,10 +370,10 @@
       "symbol": "BT_SCAN_SKIMMERS",
       "family": "ble_tag_and_device_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/DUAL_RADIO_REV108.md",
-      "next_gap": "Rev108 adds C5 complete-original family classification before the retained raw preview and selected-family admission. Frozen source evidence remains independent from S3 matched responses and historical suppression. Physical extended formats, dense RF retention, saved-file family details, repeated touchscreen transitions, sustained performance and C5 response acquisition remain open. No authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV108.md.",
-      "s3_role": "S3 retains its independent family evidence, validates frozen C5 evidence and owns source-labelled lists, lifecycle and details.",
-      "c5_role": "C5 classifies complete original callbacks and admits selected-family observations into its bounded existing inventory; frozen rows preserve the same original proof.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV109.md",
+      "next_gap": "Rev108 adds full-original C5 family evidence and focused retention; rev109 adds versioned SD retention and offline viewing of that decoded evidence. S3 response/history and C5 original evidence remain independent. Physical save/reopen, extended formats, dense RF retention, repeated touchscreen transitions, sustained performance and C5 response acquisition remain open. No complete raw payload retention, authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV109.md.",
+      "s3_role": "S3 retains its independent family evidence, validates frozen C5 evidence, and owns source-labelled live and saved analysis with historical ages.",
+      "c5_role": "C5 supplies full-original focused family evidence bound to its own frozen source observation; offline viewing never starts C5 radio work.",
       "related_menu_entries": [
         245
       ],
@@ -398,7 +398,13 @@
         "c5_firmware/main/ble_scanner.c",
         "c5_firmware/main/dual_ble_service_impl.h",
         "s3_main/main/dual_ble_scan.c",
-        "s3_main/main/dual_ble_diagnostics_ui.h"
+        "s3_main/main/dual_ble_diagnostics_ui.h",
+        "s3_main/main/ble_archive.h",
+        "s3_main/main/ble_archive.c",
+        "s3_main/main/dual_ble_archive_capture.h",
+        "s3_main/main/ble_archive_ui.h",
+        "s3_main/main/ble_archive_io.c",
+        "s3_main/main/ble_family_hint_ui.h"
       ],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open.",
       "upstream_value": 11,
@@ -1080,10 +1086,10 @@
       "symbol": "BT_SCAN_AIRTAG",
       "family": "ble_tag_and_device_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/DUAL_RADIO_REV108.md",
-      "next_gap": "Rev108 adds C5 complete-original family classification before the retained raw preview and selected-family admission. Frozen source evidence remains independent from S3 matched responses and historical suppression. Physical extended formats, dense RF retention, saved-file family details, repeated touchscreen transitions, sustained performance and C5 response acquisition remain open. No authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV108.md.",
-      "s3_role": "S3 retains its independent family evidence, validates frozen C5 evidence and owns source-labelled lists, lifecycle and details.",
-      "c5_role": "C5 classifies complete original callbacks and admits selected-family observations into its bounded existing inventory; frozen rows preserve the same original proof.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV109.md",
+      "next_gap": "Rev108 adds full-original C5 family evidence and focused retention; rev109 adds versioned SD retention and offline viewing of that decoded evidence. S3 response/history and C5 original evidence remain independent. Physical save/reopen, extended formats, dense RF retention, repeated touchscreen transitions, sustained performance and C5 response acquisition remain open. No complete raw payload retention, authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV109.md.",
+      "s3_role": "S3 retains its independent family evidence, validates frozen C5 evidence, and owns source-labelled live and saved analysis with historical ages.",
+      "c5_role": "C5 supplies full-original focused family evidence bound to its own frozen source observation; offline viewing never starts C5 radio work.",
       "related_menu_entries": [],
       "related_cli_commands": [],
       "cerberus_code": [
@@ -1106,7 +1112,13 @@
         "c5_firmware/main/ble_scanner.c",
         "c5_firmware/main/dual_ble_service_impl.h",
         "s3_main/main/dual_ble_scan.c",
-        "s3_main/main/dual_ble_diagnostics_ui.h"
+        "s3_main/main/dual_ble_diagnostics_ui.h",
+        "s3_main/main/ble_archive.h",
+        "s3_main/main/ble_archive.c",
+        "s3_main/main/dual_ble_archive_capture.h",
+        "s3_main/main/ble_archive_ui.h",
+        "s3_main/main/ble_archive_io.c",
+        "s3_main/main/ble_family_hint_ui.h"
       ],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open.",
       "upstream_value": 43,
@@ -1142,10 +1154,10 @@
       "symbol": "BT_SCAN_FLIPPER",
       "family": "ble_tag_and_device_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/DUAL_RADIO_REV108.md",
-      "next_gap": "Rev108 adds C5 complete-original family classification before the retained raw preview and selected-family admission. Frozen source evidence remains independent from S3 matched responses and historical suppression. Physical extended formats, dense RF retention, saved-file family details, repeated touchscreen transitions, sustained performance and C5 response acquisition remain open. No authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV108.md.",
-      "s3_role": "S3 retains its independent family evidence, validates frozen C5 evidence and owns source-labelled lists, lifecycle and details.",
-      "c5_role": "C5 classifies complete original callbacks and admits selected-family observations into its bounded existing inventory; frozen rows preserve the same original proof.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV109.md",
+      "next_gap": "Rev108 adds full-original C5 family evidence and focused retention; rev109 adds versioned SD retention and offline viewing of that decoded evidence. S3 response/history and C5 original evidence remain independent. Physical save/reopen, extended formats, dense RF retention, repeated touchscreen transitions, sustained performance and C5 response acquisition remain open. No complete raw payload retention, authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV109.md.",
+      "s3_role": "S3 retains its independent family evidence, validates frozen C5 evidence, and owns source-labelled live and saved analysis with historical ages.",
+      "c5_role": "C5 supplies full-original focused family evidence bound to its own frozen source observation; offline viewing never starts C5 radio work.",
       "related_menu_entries": [],
       "related_cli_commands": [],
       "cerberus_code": [
@@ -1165,7 +1177,13 @@
         "c5_firmware/main/ble_scanner.c",
         "c5_firmware/main/dual_ble_service_impl.h",
         "s3_main/main/dual_ble_scan.c",
-        "s3_main/main/dual_ble_diagnostics_ui.h"
+        "s3_main/main/dual_ble_diagnostics_ui.h",
+        "s3_main/main/ble_archive.h",
+        "s3_main/main/ble_archive.c",
+        "s3_main/main/dual_ble_archive_capture.h",
+        "s3_main/main/ble_archive_ui.h",
+        "s3_main/main/ble_archive_io.c",
+        "s3_main/main/ble_family_hint_ui.h"
       ],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open.",
       "upstream_value": 45,
@@ -1757,10 +1775,10 @@
       "symbol": "BT_SCAN_FLOCK",
       "family": "ble_tag_and_device_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/DUAL_RADIO_REV108.md",
-      "next_gap": "Rev108 adds C5 complete-original family classification before the retained raw preview and selected-family admission. Frozen source evidence remains independent from S3 matched responses and historical suppression. Physical extended formats, dense RF retention, saved-file family details, repeated touchscreen transitions, sustained performance and C5 response acquisition remain open. No authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV108.md.",
-      "s3_role": "S3 retains its independent family evidence, validates frozen C5 evidence and owns source-labelled lists, lifecycle and details.",
-      "c5_role": "C5 classifies complete original callbacks and admits selected-family observations into its bounded existing inventory; frozen rows preserve the same original proof.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV109.md",
+      "next_gap": "Rev108 adds full-original C5 family evidence and focused retention; rev109 adds versioned SD retention and offline viewing of that decoded evidence. S3 response/history and C5 original evidence remain independent. Physical save/reopen, extended formats, dense RF retention, repeated touchscreen transitions, sustained performance and C5 response acquisition remain open. No complete raw payload retention, authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV109.md.",
+      "s3_role": "S3 retains its independent family evidence, validates frozen C5 evidence, and owns source-labelled live and saved analysis with historical ages.",
+      "c5_role": "C5 supplies full-original focused family evidence bound to its own frozen source observation; offline viewing never starts C5 radio work.",
       "related_menu_entries": [],
       "related_cli_commands": [],
       "cerberus_code": [
@@ -1780,7 +1798,13 @@
         "c5_firmware/main/ble_scanner.c",
         "c5_firmware/main/dual_ble_service_impl.h",
         "s3_main/main/dual_ble_scan.c",
-        "s3_main/main/dual_ble_diagnostics_ui.h"
+        "s3_main/main/dual_ble_diagnostics_ui.h",
+        "s3_main/main/ble_archive.h",
+        "s3_main/main/ble_archive.c",
+        "s3_main/main/dual_ble_archive_capture.h",
+        "s3_main/main/ble_archive_ui.h",
+        "s3_main/main/ble_archive_io.c",
+        "s3_main/main/ble_family_hint_ui.h"
       ],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open.",
       "upstream_value": 72,
@@ -1995,10 +2019,10 @@
       "symbol": "BT_SCAN_RAYBAN",
       "family": "ble_tag_and_device_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/DUAL_RADIO_REV108.md",
-      "next_gap": "Rev108 adds C5 complete-original family classification before the retained raw preview and selected-family admission. Frozen source evidence remains independent from S3 matched responses and historical suppression. Physical extended formats, dense RF retention, saved-file family details, repeated touchscreen transitions, sustained performance and C5 response acquisition remain open. No authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV108.md.",
-      "s3_role": "S3 retains its independent family evidence, validates frozen C5 evidence and owns source-labelled lists, lifecycle and details.",
-      "c5_role": "C5 classifies complete original callbacks and admits selected-family observations into its bounded existing inventory; frozen rows preserve the same original proof.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV109.md",
+      "next_gap": "Rev108 adds full-original C5 family evidence and focused retention; rev109 adds versioned SD retention and offline viewing of that decoded evidence. S3 response/history and C5 original evidence remain independent. Physical save/reopen, extended formats, dense RF retention, repeated touchscreen transitions, sustained performance and C5 response acquisition remain open. No complete raw payload retention, authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV109.md.",
+      "s3_role": "S3 retains its independent family evidence, validates frozen C5 evidence, and owns source-labelled live and saved analysis with historical ages.",
+      "c5_role": "C5 supplies full-original focused family evidence bound to its own frozen source observation; offline viewing never starts C5 radio work.",
       "related_menu_entries": [
         248
       ],
@@ -2020,7 +2044,13 @@
         "c5_firmware/main/ble_scanner.c",
         "c5_firmware/main/dual_ble_service_impl.h",
         "s3_main/main/dual_ble_scan.c",
-        "s3_main/main/dual_ble_diagnostics_ui.h"
+        "s3_main/main/dual_ble_diagnostics_ui.h",
+        "s3_main/main/ble_archive.h",
+        "s3_main/main/ble_archive.c",
+        "s3_main/main/dual_ble_archive_capture.h",
+        "s3_main/main/ble_archive_ui.h",
+        "s3_main/main/ble_archive_io.c",
+        "s3_main/main/ble_family_hint_ui.h"
       ],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open.",
       "upstream_value": 81,
@@ -2102,10 +2132,10 @@
       "symbol": "BT_SCAN_IBEACON",
       "family": "ble_tag_and_device_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/DUAL_RADIO_REV108.md",
-      "next_gap": "Rev108 adds C5 complete-original family classification before the retained raw preview and selected-family admission. Frozen source evidence remains independent from S3 matched responses and historical suppression. Physical extended formats, dense RF retention, saved-file family details, repeated touchscreen transitions, sustained performance and C5 response acquisition remain open. No authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV108.md.",
-      "s3_role": "S3 retains its independent family evidence, validates frozen C5 evidence and owns source-labelled lists, lifecycle and details.",
-      "c5_role": "C5 classifies complete original callbacks and admits selected-family observations into its bounded existing inventory; frozen rows preserve the same original proof.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV109.md",
+      "next_gap": "Rev108 adds full-original C5 family evidence and focused retention; rev109 adds versioned SD retention and offline viewing of that decoded evidence. S3 response/history and C5 original evidence remain independent. Physical save/reopen, extended formats, dense RF retention, repeated touchscreen transitions, sustained performance and C5 response acquisition remain open. No complete raw payload retention, authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV109.md.",
+      "s3_role": "S3 retains its independent family evidence, validates frozen C5 evidence, and owns source-labelled live and saved analysis with historical ages.",
+      "c5_role": "C5 supplies full-original focused family evidence bound to its own frozen source observation; offline viewing never starts C5 radio work.",
       "related_menu_entries": [
         240
       ],
@@ -2130,7 +2160,13 @@
         "c5_firmware/main/ble_scanner.c",
         "c5_firmware/main/dual_ble_service_impl.h",
         "s3_main/main/dual_ble_scan.c",
-        "s3_main/main/dual_ble_diagnostics_ui.h"
+        "s3_main/main/dual_ble_diagnostics_ui.h",
+        "s3_main/main/ble_archive.h",
+        "s3_main/main/ble_archive.c",
+        "s3_main/main/dual_ble_archive_capture.h",
+        "s3_main/main/ble_archive_ui.h",
+        "s3_main/main/ble_archive_io.c",
+        "s3_main/main/ble_family_hint_ui.h"
       ],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open.",
       "upstream_value": 85,
@@ -2418,7 +2454,7 @@
         11,
         14
       ],
-      "next_gap": "Rev102 extends asynchronous immutable-PSRAM BLE save/open to v4, at most13,856 encoded bytes, preserving v1/v2/v3 readers and explicit unknown absent metadata. The frozen C5 eight-byte receive envelope and S3 matched-response bytes/provenance remain historical evidence; C5 response bytes are unavailable. Normal owners drain before worker submission, reader pins keep large copies outside critical sections, and exclusive .TMP/write/flush/sync/close/validated .BLE publication remain. Host faults do not establish physical SD save/reopen, native peak memory/stack headroom, power-loss or prolonged-use acceptance. Broader export/upload, AP/SSID persistence and backup/restore parity remain open; see BLE_SD_SNAPSHOTS.md and DUAL_RADIO_REV102.md."
+      "next_gap": "Rev109 extends immutable asynchronous BLE save/open to v5, at most 16,928 encoded bytes, preserving v1-v4 readers and explicit unknown absent evidence. Frozen full-original C5 decoded family hints, receive metadata and S3 matched-response evidence remain historical; saved HINTS does not query either radio or the current clock. The existing PSRAM worker, reader pins, owner drain and transactional file publication remain. Physical SD save/reopen, power-loss durability, runtime peak memory/stack headroom and prolonged-use acceptance remain open. Full raw payloads, C5 response capture, broader export/upload, AP/SSID persistence and backup/restore parity are incomplete; see DUAL_RADIO_REV109.md."
     },
     {
       "name": "settings_and_device_control",

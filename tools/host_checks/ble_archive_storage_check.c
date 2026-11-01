@@ -35,6 +35,7 @@
 #include "esp_check.h"
 #include "archive_storage_types.h"
 #include "ble_archive.h"
+#include "ble_archive_family_fixture.h"
 #define CERBERUS_STORAGE_MOUNT_PATH "sdcard"
 #define TAG "archive-storage-test"
 #define ESP_LOGI(...) ((void)0)
@@ -188,11 +189,11 @@ static esp_err_t load(size_t *length)
 static void failure_output(size_t length){CHECK(length==0);for(size_t i=0;i<sizeof(output);++i)CHECK(output[i]==0);}
 static void clean(void){CHECK(!locked&&!streams&&!descriptors&&locks==unlocks);}
 
-static void check_full_v4_document(void)
+static void check_full_v5_document(void)
 {
     static cerberus_ble_archive_t document,decoded;
     static uint8_t original[CERBERUS_BLE_ARCHIVE_MAX_SIZE];
-    CHECK(CERBERUS_STORAGE_BLE_ARCHIVE_MAX_BYTES==13856U&&CERBERUS_BLE_ARCHIVE_MAX_SIZE==13856U);
+    CHECK(CERBERUS_STORAGE_BLE_ARCHIVE_MAX_BYTES==16928U&&CERBERUS_BLE_ARCHIVE_MAX_SIZE==16928U);
     memset(&document,0,sizeof(document));document.count=64;document.saved_uptime_ms=100;
     for(unsigned i=0;i<64;++i){
         cerberus_ble_archive_row_t *r=&document.rows[i];
@@ -211,27 +212,35 @@ static void check_full_v4_document(void)
         }else{
             r->rssi_kind=CERBERUS_BLE_ARCHIVE_RSSI_LATEST_ADV;
             r->receiver_boot_id=UINT64_C(0xabcdef0123456789);r->age_upper_valid=true;r->age_upper_at_save_ms=500+i;
-            r->advertisement_length=31;r->advertisement[0]=254;r->advertisement[1]=0xff;
+            r->advertisement_length=31;
             r->advertisement_event_type=3;r->advertisement_flags=3;
-            r->receive=(cerberus_dual_ble_receive_metadata_t){.source_kind=CERBERUS_DUAL_BLE_RECEIVE_EXTENDED,
-                .callback_length=255,.sid=(uint8_t)(i%16),.primary_phy=3,.secondary_phy=2,
-                .ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+            CHECK(archive_test_family_original(r->advertisement,&r->receive,&r->family,
+                r->address,r->address_type,(i%2)?'5':'6'));
         }
     }
     setup();size_t encoded=0;
-    CHECK(cerberus_ble_archive_encode(&document,payload,sizeof(payload),&encoded)&&encoded==13856U);
-    CHECK(payload[8]==4&&payload[12]==216&&payload[encoded-1]==CERBERUS_DUAL_BLE_AD_VALID);
+    CHECK(cerberus_ble_archive_encode(&document,payload,sizeof(payload),&encoded)&&encoded==16928U);
+    CHECK(payload[8]==5&&payload[12]==8&&payload[13]==1);
+    CHECK(payload[32+63*264+216]==1&&payload[32+63*264+220]==CERBERUS_BLE_HC_05);
     memcpy(original,payload,encoded);
     CHECK(save(encoded)==ESP_OK&&!strcmp(name,"B00001.BLE"));
     size_t got=0;CHECK(load(&got)==ESP_OK&&got==encoded&&!memcmp(output,payload,encoded));
     CHECK(cerberus_ble_archive_decode(output,got,&decoded)&&!memcmp(&decoded,&document,sizeof(document)));
     /* Failure publishing another full-size document leaves the prior mixed
-     * snapshot and its final receive-envelope byte untouched. */
+     * snapshot and its complete family suffix untouched. */
     document.rows[63].receive.sid=1;
+    CHECK(archive_test_family_original(document.rows[63].advertisement,&document.rows[63].receive,
+        &document.rows[63].family,document.rows[63].address,document.rows[63].address_type,'6'));
     CHECK(cerberus_ble_archive_encode(&document,payload,sizeof(payload),&encoded));
-    fault[WRITE]=calls[WRITE]+1;
-    CHECK(save(encoded)!=ESP_OK&&!exists("B00002.BLE")&&exists("B00002.TMP"));
-    verify("B00001.BLE",original,sizeof(original));clean();
+    const enum event publish_failures[]={WRITE,FLUSH,SYNC,CLOSE,RENAME};
+    for(unsigned n=0;n<sizeof(publish_failures)/sizeof(publish_failures[0]);++n){
+        memset(fault,0,sizeof(fault));fault[publish_failures[n]]=calls[publish_failures[n]]+1;
+        CHECK(save(encoded)!=ESP_OK);
+        char final[16],temporary[16];snprintf(final,sizeof(final),"B%05u.BLE",n+2);
+        snprintf(temporary,sizeof(temporary),"B%05u.TMP",n+2);
+        CHECK(!exists(final)&&exists(temporary));
+        verify("B00001.BLE",original,sizeof(original));clean();
+    }
     /* A full-size file that grows by one byte is rejected before fopen. */
     memset(fault,0,sizeof(fault));stat_size_delta=1;
     unsigned opened=calls[FOPEN];CHECK(load(&got)==ESP_ERR_INVALID_SIZE&&calls[FOPEN]==opened);
@@ -240,7 +249,7 @@ static void check_full_v4_document(void)
 
 int main(void)
 {
-    check_full_v4_document();
+    check_full_v5_document();
     for(unsigned length=1;length<=sizeof(payload);length=length<128?length+31:sizeof(payload)+1){
         setup();CHECK(save(length)==ESP_OK&&!strcmp(name,"B00001.BLE"));verify(name,payload,length);
         size_t got;CHECK(load(&got)==ESP_OK&&got==length&&!memcmp(output,payload,length));clean();

@@ -40,6 +40,7 @@ static void receive_roundtrip(const cerberus_dual_ble_row_t *source)
     cerberus_ble_archive_t document={.saved_uptime_ms=500,.count=1},decoded;
     assert(cerberus_dual_ble_archive_capture_row(&document.rows[0],source,&provenance,500));
     assert(!memcmp(&document.rows[0].receive,&source->receive,sizeof(source->receive)));
+    assert(!memcmp(&document.rows[0].family,&source->family,sizeof(source->family)));
     assert_exact_times_unknown(&document.rows[0]);
     assert(cerberus_ble_archive_validate(&document));
     uint8_t encoded[CERBERUS_BLE_ARCHIVE_MAX_SIZE];size_t length=0;
@@ -48,6 +49,7 @@ static void receive_roundtrip(const cerberus_dual_ble_row_t *source)
     assert(cerberus_ble_archive_decode(encoded,length,&decoded));
     const cerberus_ble_archive_row_t *row=&decoded.rows[0];
     assert(!memcmp(&row->receive,&source->receive,sizeof(source->receive)));
+    assert(!memcmp(&row->family,&source->family,sizeof(source->family)));
     assert(row->receiver_boot_id==provenance.boot_id&&row->scan_epoch==provenance.epoch&&
         row->generation==provenance.generation&&row->index==provenance.index);
     assert(row->advertisement_length==source->raw_length&&row->advertisement_flags==source->raw_flags&&
@@ -130,6 +132,73 @@ static void check_receive_capture(void)
         saved.generation==0&&saved.index==31);
     assert(source.receive.sid==12&&live_identity.boot_id!=saved.receiver_boot_id);
 }
+
+static void check_family_capture(void)
+{
+    const uint8_t samples[6][31]={
+        {26,0xff,0x4c,0,2,0x15,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,0x12,0x34,0xab,0xcd,0xc5},
+        {3,3,0x44,0xfd},{3,3,0x81,0x30},{15,9,'F','S',' ','E','x','t',' ','B','a','t','t','e','r','y'},
+        {3,3,0x5f,0xfd},{6,9,'H','C','-','0','5'}};
+    const uint8_t lengths[]={27,4,4,16,4,7};
+    for(unsigned family=1;family<=6;++family){
+        cerberus_dual_ble_row_t source=observation();uint8_t full[255]={39,0x30};
+        memcpy(full+40,samples[family-1],lengths[family-1]);
+        source.raw_length=31;source.event_type=3;source.raw_flags=3;memcpy(source.raw,full,31);
+        source.receive=(cerberus_dual_ble_receive_metadata_t){.source_kind=2,.callback_length=255,
+            .sid=255,.primary_phy=3,.secondary_phy=2,.ad_validation=1};
+        cerberus_dual_ble_family_evidence_t e;
+        assert(cerberus_dual_ble_family_parse_ad(full,255,source.address,source.address_type,&e));
+        assert(e.categories==(1U<<(family-1)));
+        assert(cerberus_dual_ble_family_wire_encode(&e,(uint8_t)family,&source.family));
+        receive_roundtrip(&source);
+        const cerberus_dual_ble_row_t selected=source;
+        const cerberus_dual_ble_provenance_t selected_proof=provenance;
+        /* A replacement live row/lease does not retarget the frozen selection. */
+        memset(&source.family,0,sizeof(source.family));memset(source.raw,0,sizeof(source.raw));source.address[0]^=1;
+        cerberus_dual_ble_provenance_t next=provenance;++next.boot_id;++next.epoch;++next.generation;next.index=0;
+        cerberus_ble_archive_row_t saved;
+        assert(cerberus_dual_ble_archive_capture_row(&saved,&selected,&selected_proof,500));
+        assert(!memcmp(&saved.family,&selected.family,sizeof(saved.family))&&saved.receiver_boot_id==selected_proof.boot_id&&
+            saved.scan_epoch==selected_proof.epoch&&saved.index==31&&saved.generation==0);
+        assert(saved.receiver_boot_id!=next.boot_id&&saved.scan_epoch!=next.epoch);
+        for(unsigned fault=0;fault<15;++fault){
+            source=selected;
+            if(fault==0)source.family.version=0;
+            if(fault==1)source.family.version=2;
+            if(fault==2)source.family.family_code=0;
+            if(fault==3)source.family.family_code=7;
+            if(fault==4)source.family.flags|=0x80;
+            if(fault==5)source.family.reserved[0]=1;
+            if(fault==6)source.family.reserved[1]=1;
+            if(fault==7)source.family.categories^=0x80;
+            if(fault==8)source.family.hc_name=4;
+            if(fault==9)source.family.meta_pairs[9]|=0x80;
+            if(fault==10)memset(&source.receive,0,sizeof(source.receive));
+            if(fault==11)source.receive.ad_validation=2;
+            if(fault==12)source.event_type=4;
+            if(fault==13)source.address_type=4;
+            if(fault==14)source.raw_flags=0;
+            reject_unchanged(&source,&provenance);
+        }
+        source=selected;full[254]=1;
+        assert(!cerberus_dual_ble_family_parse_ad(full,255,source.address,source.address_type,&e));
+        assert(cerberus_dual_ble_family_wire_encode(&e,(uint8_t)family,&source.family));
+        source.receive.ad_validation=2;receive_roundtrip(&source); /* Historical dequalification, not absent. */
+        source=selected;cerberus_dual_ble_family_unavailable(&e,CERBERUS_DUAL_BLE_FAMILY_RECEIVE_UNKNOWN);
+        assert(cerberus_dual_ble_family_wire_encode(&e,(uint8_t)family,&source.family));
+        memset(&source.receive,0,sizeof(source.receive));receive_roundtrip(&source);
+    }
+    /* A known legacy callback carrying a complete short original is also a
+     * genuine full proof; the callback source must survive unchanged. */
+    cerberus_dual_ble_row_t source=observation();source.raw_length=7;memcpy(source.raw,samples[5],7);
+    source.receive=(cerberus_dual_ble_receive_metadata_t){.source_kind=1,.callback_length=7,.sid=255,.data_status=255,.ad_validation=1};
+    cerberus_dual_ble_family_evidence_t e;
+    assert(cerberus_dual_ble_family_parse_ad(source.raw,7,source.address,source.address_type,&e));
+    assert(cerberus_dual_ble_family_wire_encode(&e,6,&source.family));receive_roundtrip(&source);
+    source.receive=(cerberus_dual_ble_receive_metadata_t){.source_kind=2,.properties=0x13,.callback_length=7,
+        .sid=255,.primary_phy=1,.ad_validation=1};receive_roundtrip(&source);
+}
+
 int main(void)
 {
     cerberus_dual_ble_row_t source=observation();
@@ -209,6 +278,7 @@ int main(void)
     assert(cerberus_dual_ble_archive_capture_row(&row,&source,&provenance,500));
     assert(strlen(row.name)==32);
     check_receive_capture();
-    puts("C5 archive capture: frozen identity/receive metadata, v4 raw and age round-trips, UNKNOWN response and transactional rejection passed");
+    check_family_capture();
+    puts("C5 archive capture: frozen identity/receive/full-family proof, v5 raw and age round-trips, UNKNOWN response and transactional rejection passed");
     return 0;
 }

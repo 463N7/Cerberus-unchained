@@ -8,6 +8,8 @@
 #include "ble_archive_list.h"
 #include "cerberus_protocol.h"
 #include "ble_receive_info_ui.h"
+#include "ble_family_wire.h"
+#include "ble_family_hint_ui.h"
 
 typedef enum {
     BLE_ARCHIVE_UI_JOB, BLE_ARCHIVE_UI_LIST, BLE_ARCHIVE_UI_DETAIL,
@@ -23,9 +25,9 @@ typedef struct {
     uint64_t job_id, painted_saved_uptime_ms, selected_saved_uptime_ms;
     uint64_t painted_age_ms[4], selected_age_ms;
     uint64_t release_started_ms;
-    bool painted_age_valid[4], selected_age_valid, raw_response;
+    bool painted_age_valid[4], selected_age_valid, raw_response, raw_hints;
     bool job_pending, saving, has_document, paint_valid, selected_valid, release_pending;
-    uint8_t page, raw_page, painted_count;
+    uint8_t page, raw_page, painted_count, hint_page, hint_pages;
     uint8_t order[CERBERUS_BLE_ARCHIVE_LIST_CAPACITY], filtered_count;
     cerberus_ble_archive_list_source_t source_filter;
     cerberus_ble_archive_list_sort_t sort;
@@ -91,6 +93,7 @@ static inline bool ble_archive_ui_complete(ble_archive_ui_store_t *store,
     store->source_filter = CERBERUS_BLE_ARCHIVE_LIST_ALL;
     store->sort = CERBERUS_BLE_ARCHIVE_LIST_FILE;
     store->raw_response = false;
+    store->raw_hints = false; store->hint_page = store->hint_pages = 0U;
     store->error = ESP_OK;
     store->view = BLE_ARCHIVE_UI_LIST;
     return true;
@@ -280,7 +283,7 @@ static inline esp_err_t ble_archive_ui_detail(ble_archive_ui_store_t *store)
     }
     ESP_RETURN_ON_ERROR(draw_centered(356, line, UI_MUTED, 1), TAG, "archive response evidence");
     ESP_RETURN_ON_ERROR(draw_button(64, 374, 192, 44,
-        row->receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ? "RAW ADV / RX INFO" : "RAW ADV / RESPONSE"), TAG, "archive raw button");
+        row->receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ? "RAW / RX INFO / HINTS" : "RAW ADV / RESPONSE"), TAG, "archive raw button");
     return ble_archive_ui_back("BACK TO SNAPSHOT");
 }
 
@@ -331,16 +334,62 @@ static inline uint8_t ble_archive_ui_fields(const cerberus_ble_archive_row_t *ro
     uint8_t offsets[15], uint8_t *bad_offset)
 { return ble_archive_ui_payload_fields(row->advertisement, row->advertisement_length, offsets, bad_offset); }
 
+static inline esp_err_t ble_archive_ui_hints(ble_archive_ui_store_t *store)
+{
+    const cerberus_ble_archive_row_t *row = &store->selected;
+    cerberus_dual_ble_family_evidence_t evidence = {0};
+    const cerberus_dual_ble_family_wire_t absent = {0};
+    bool present = memcmp(&row->family, &absent, sizeof(absent)) != 0;
+    if (present && (row->receiver != CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ||
+        !row->receiver_boot_id || !row->scan_epoch_valid || !row->scan_epoch ||
+        !cerberus_dual_ble_family_wire_decode(&row->family, &row->receive,
+            row->advertisement_length, row->advertisement_event_type,
+            row->advertisement_flags, row->address, row->address_type, &evidence)))
+        (void)cerberus_dual_ble_family_unavailable(&evidence, CERBERUS_DUAL_BLE_FAMILY_INVALID_SOURCE);
+    /* An absent v1-v4/ordinary proof stays unknown. Never reconstruct a full
+     * report's family facts from its short raw preview or aggregate fields. */
+    char line[53];
+    ESP_RETURN_ON_ERROR(draw_centered(98, "HISTORICAL / NO LIVE RADIO", UI_MUTED, 1), TAG, "archive hint scope");
+    if (store->selected_age_valid) snprintf(line, sizeof(line), "AGE AT SAVE: <= %llu ms",
+        (unsigned long long)store->selected_age_ms);
+    else snprintf(line, sizeof(line), "AGE AT SAVE: UNKNOWN");
+    ESP_RETURN_ON_ERROR(draw_centered(120, line, UI_TEXT, 1), TAG, "archive hint age");
+    snprintf(line, sizeof(line), "SAVED BOOT UPTIME: %llu ms", (unsigned long long)store->selected_saved_uptime_ms);
+    ESP_RETURN_ON_ERROR(draw_centered(140, line, UI_MUTED, 1), TAG, "archive hint saved clock");
+    snprintf(line, sizeof(line), "C5 BOOT ID: %016llX", (unsigned long long)row->receiver_boot_id);
+    ESP_RETURN_ON_ERROR(draw_centered(160, line, UI_MUTED, 1), TAG, "archive hint source");
+    ESP_RETURN_ON_ERROR(draw_centered(180, "ORIGINAL ADV / NO MATCHED RESPONSE", UI_MUTED, 1), TAG, "archive hint provenance");
+    uint8_t pages = 0U;
+    ESP_RETURN_ON_ERROR(ble_family_hint_ui_draw(&evidence, present && evidence.available,
+        row->receive.callback_length, row->advertisement_length, true, 218U,
+        store->hint_page, &pages), TAG, "archive saved hints");
+    ESP_RETURN_ON_ERROR(draw_centered(310, "DECODED HINTS / RAW PREVIEW IS SEPARATE", UI_MUTED, 1), TAG, "archive hint bytes");
+    ESP_RETURN_ON_ERROR(draw_centered(332, "SAVED EVIDENCE / NOT CURRENT RADIO STATE", UI_MUTED, 1), TAG, "archive hint time");
+    ESP_RETURN_ON_ERROR(draw_button(8, 374, 148, 44, "PREV HINTS"), TAG, "archive hints prev");
+    ESP_RETURN_ON_ERROR(draw_button(164, 374, 148, 44, "NEXT HINTS"), TAG, "archive hints next");
+    ESP_RETURN_ON_ERROR(ble_archive_ui_back("BACK TO DETAILS"), TAG, "archive hints back");
+    store->hint_pages = pages;
+    return ESP_OK;
+}
+
 static inline esp_err_t ble_archive_ui_raw(ble_archive_ui_store_t *store)
 {
     const cerberus_ble_archive_row_t *row = &store->selected;
     const bool response = store->raw_response;
     const bool c5 = row->receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5;
-    ESP_RETURN_ON_ERROR(ble_archive_ui_clear(response ? (c5 ? "SAVED RECEIVE INFO" : "SAVED RESPONSE") :
+    store->hint_pages = 0U;
+    ESP_RETURN_ON_ERROR(ble_archive_ui_clear(c5 && store->raw_hints ? "SAVED C5 HINTS" :
+        response ? (c5 ? "SAVED RECEIVE INFO" : "SAVED RESPONSE") :
         "SAVED RAW ADV"), TAG, "archive raw");
-    ESP_RETURN_ON_ERROR(draw_button(8, 54, 148, 28, response ? "ADVERTISEMENT" : "ADVERTISEMENT *"), TAG, "archive ADV selector");
-    ESP_RETURN_ON_ERROR(draw_button(164, 54, 148, 28, c5 ? (response ? "RECEIVE INFO *" : "RECEIVE INFO") :
-        (response ? "RESPONSE *" : "RESPONSE")), TAG, "archive alternate selector");
+    if (c5) {
+        ESP_RETURN_ON_ERROR(draw_button(8, 54, 96, 28, !response && !store->raw_hints ? "RAW ADV *" : "RAW ADV"), TAG, "archive ADV selector");
+        ESP_RETURN_ON_ERROR(draw_button(112, 54, 96, 28, response ? "RX INFO *" : "RX INFO"), TAG, "archive receive selector");
+        ESP_RETURN_ON_ERROR(draw_button(216, 54, 96, 28, store->raw_hints ? "HINTS *" : "HINTS"), TAG, "archive hint selector");
+        if (store->raw_hints) return ble_archive_ui_hints(store);
+    } else {
+        ESP_RETURN_ON_ERROR(draw_button(8, 54, 148, 28, response ? "ADVERTISEMENT" : "ADVERTISEMENT *"), TAG, "archive ADV selector");
+        ESP_RETURN_ON_ERROR(draw_button(164, 54, 148, 28, response ? "RESPONSE *" : "RESPONSE"), TAG, "archive alternate selector");
+    }
     if (c5 && response) {
         ESP_RETURN_ON_ERROR(ble_receive_info_ui_draw(&row->receive, row->advertisement_length, 116U), TAG, "archive receive metadata");
         ESP_RETURN_ON_ERROR(draw_centered(224, "HISTORICAL EVIDENCE / RECORDED AT SAVE", UI_MUTED, 1), TAG, "archive receive history");
@@ -475,18 +524,36 @@ static inline ble_archive_ui_action_t ble_archive_ui_tap(ble_archive_ui_store_t 
             store->selected_age_ms = store->painted_age_ms[row];
             store->selected_age_valid = store->painted_age_valid[row];
             store->selected_valid = true; store->paint_valid = false;
-            store->raw_page = 0U; store->raw_response = false; store->view = BLE_ARCHIVE_UI_DETAIL;
+            store->raw_page = 0U; store->raw_response = store->raw_hints = false;
+            store->hint_page = store->hint_pages = 0U; store->view = BLE_ARCHIVE_UI_DETAIL;
             return BLE_ARCHIVE_UI_REDRAW;
         }
     } else if (store->view == BLE_ARCHIVE_UI_DETAIL && store->selected_valid &&
         x >= 64U && x < 256U && y >= 374U && y < 418U) {
         store->view = BLE_ARCHIVE_UI_RAW; store->raw_page = 0U;
-        store->raw_response = false; return BLE_ARCHIVE_UI_REDRAW;
+        store->raw_response = store->raw_hints = false; store->hint_page = store->hint_pages = 0U;
+        return BLE_ARCHIVE_UI_REDRAW;
     } else if (store->view == BLE_ARCHIVE_UI_RAW && store->selected_valid &&
-        y >= 54U && y < 82U && ((x >= 8U && x < 156U) || (x >= 164U && x < 312U))) {
-        store->raw_response = x >= 164U; store->raw_page = 0U; return BLE_ARCHIVE_UI_REDRAW;
+        y >= 54U && y < 82U) {
+        if (store->selected.receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5) {
+            if (x >= 8U && x < 104U) store->raw_response = store->raw_hints = false;
+            else if (x >= 112U && x < 208U) { store->raw_response = true; store->raw_hints = false; }
+            else if (x >= 216U && x < 312U) { store->raw_response = false; store->raw_hints = true; }
+            else return BLE_ARCHIVE_UI_NONE;
+        } else if ((x >= 8U && x < 156U) || (x >= 164U && x < 312U)) {
+            store->raw_response = x >= 164U; store->raw_hints = false;
+        } else return BLE_ARCHIVE_UI_NONE;
+        store->raw_page = store->hint_page = store->hint_pages = 0U;
+        return BLE_ARCHIVE_UI_REDRAW;
     } else if (store->view == BLE_ARCHIVE_UI_RAW && store->selected_valid &&
         y >= 374U && y < 418U && ((x >= 8U && x < 156U) || (x >= 164U && x < 312U))) {
+        if (store->raw_hints && store->selected.receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5) {
+            if (!store->hint_pages) return BLE_ARCHIVE_UI_NONE;
+            if (x < 156U) { if (store->hint_page) --store->hint_page; }
+            else if (store->hint_page + 1U < store->hint_pages) ++store->hint_page;
+            store->hint_pages = 0U;
+            return BLE_ARCHIVE_UI_REDRAW;
+        }
         if (store->raw_response && (store->selected.receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ||
             store->selected.response_state != CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT))
             return BLE_ARCHIVE_UI_NONE;

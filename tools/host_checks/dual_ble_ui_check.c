@@ -525,7 +525,7 @@ static void check_full_original_hints(const char *prefix)
         assert(cerberus_dual_ble_family_wire_encode(&evidence,(uint8_t)(i+1U),&row.family));
         show_hints(&row,&proof);
         assert(strstr(drawn,"C5 FULL ORIGINAL")&&strstr(drawn,"FULL 255 B / PREVIEW 31 B"));
-        assert(strstr(drawn,cases[i].label)&&strstr(drawn,"FULL HINTS NOT SAVED"));
+        assert(strstr(drawn,cases[i].label)&&strstr(drawn,"SD SAVES PREVIEW + DECODED HINTS"));
         if(i==2U)save(prefix,"hints-full255-summary");
         cerberus_dual_ble_row_t frozen=dual_ble_ui_selected;
         memset(dual_ble_ui_store->rows,0,sizeof(dual_ble_ui_store->rows));

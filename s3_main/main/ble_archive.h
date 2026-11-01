@@ -12,7 +12,8 @@ enum {
     CERBERUS_BLE_ARCHIVE_LEGACY_VERSION = 1,
     CERBERUS_BLE_ARCHIVE_V2_VERSION = 2,
     CERBERUS_BLE_ARCHIVE_V3_VERSION = 3,
-    CERBERUS_BLE_ARCHIVE_VERSION = 4,
+    CERBERUS_BLE_ARCHIVE_V4_VERSION = 4,
+    CERBERUS_BLE_ARCHIVE_VERSION = 5,
     CERBERUS_BLE_ARCHIVE_MAX_ROWS_PER_RECEIVER = 32,
     CERBERUS_BLE_ARCHIVE_MAX_ROWS = 64,
     CERBERUS_BLE_ARCHIVE_NAME_MAX = 32,
@@ -25,8 +26,10 @@ enum {
     CERBERUS_BLE_ARCHIVE_V2_MAX_SIZE = 9248,
     CERBERUS_BLE_ARCHIVE_V3_ROW_SIZE = 208,
     CERBERUS_BLE_ARCHIVE_V3_MAX_SIZE = 13344,
-    CERBERUS_BLE_ARCHIVE_ROW_SIZE = 216,
-    CERBERUS_BLE_ARCHIVE_MAX_SIZE = 13856,
+    CERBERUS_BLE_ARCHIVE_V4_ROW_SIZE = 216,
+    CERBERUS_BLE_ARCHIVE_V4_MAX_SIZE = 13856,
+    CERBERUS_BLE_ARCHIVE_ROW_SIZE = 264,
+    CERBERUS_BLE_ARCHIVE_MAX_SIZE = 16928,
     CERBERUS_BLE_ARCHIVE_RSSI_UNAVAILABLE = 127,
 };
 enum {
@@ -96,6 +99,13 @@ typedef struct {
      * and all pre-v4 files retain canonical allzero UNKNOWN; neither a saved
      * peer boot/epoch nor a raw prefix reconstructs absent receive metadata. */
     cerberus_dual_ble_receive_metadata_t receive;
+    /* Optional frozen C5 full-callback family evidence, canonical wire48.
+     * Allzero means absent (including every pre-v5 file); no raw/peer fields
+     * reconstruct it. Nonzero evidence must validate against THIS typed row,
+     * receive envelope and boot/epoch source proof. S3/LEGACY require allzero.
+     * A canonical unavailable/nonmatching proof preserves dequalification;
+     * it must not fall back to an earlier or short-preview positive hint. */
+    cerberus_dual_ble_family_wire_t family;
 } cerberus_ble_archive_row_t;
 
 typedef struct {
@@ -106,10 +116,11 @@ typedef struct {
 
 bool cerberus_ble_archive_validate(const cerberus_ble_archive_t *document);
 
-/* Encode v4: header32 + count*row216. Decode also accepts v3 row208, v2 row144
+/* Encode v5: header32 + count*row264. Decode also accepts v4 row216, v3 row208, v2 row144
  * and v1 row128/count<=32, mapping v1's unspecified source to LEGACY. V3
  * response evidence remains intact. Pre-v3 rows have UNKNOWN response;
- * all pre-v4 rows have UNKNOWN receive metadata, never fabricated provenance.
+ * all pre-v4 rows have UNKNOWN receive metadata. Every pre-v5 row has absent
+ * allzero full-family proof, never fabricated provenance.
  * Little-endian integers, zero padding
  * and reserved bytes. CRC-32/ISO-HDLC covers ALL encoded bytes, treating the
  * header CRC field as zero. This detects corruption, not authenticity.

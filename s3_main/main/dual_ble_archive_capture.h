@@ -2,12 +2,14 @@
 
 #include "ble_archive.h"
 #include "dual_ble_scan.h"
+#include "ble_family_wire.h"
 #include <string.h>
 
 /* Pure copy from a frozen C5 publication. Source identity must travel with the
  * selected/painted row: never reconstruct it from a later scan's START/status.
  * The raw ADV is evidence, including malformed/truncated bytes. Peer metadata
- * remains independent; no family, freshness or active eligibility is inferred.
+ * remains independent; frozen full-family proof is copied without inferring
+ * absent evidence, freshness or active eligibility.
  * No RF/SPI/clock/allocation. Invalid input leaves the output unchanged. */
 static inline bool cerberus_dual_ble_archive_capture_row(cerberus_ble_archive_row_t *out,
     const cerberus_dual_ble_row_t *source,
@@ -26,6 +28,13 @@ static inline bool cerberus_dual_ble_archive_capture_row(cerberus_ble_archive_ro
             (source->rssi < -127 || source->rssi > 20)) ||
         !cerberus_dual_ble_receive_metadata_valid(&source->receive,
             source->raw_length, source->event_type, source->raw_flags)) return false;
+    const cerberus_dual_ble_family_wire_t absent = {0};
+    if (memcmp(&source->family, &absent, sizeof(absent))) {
+        cerberus_dual_ble_family_evidence_t evidence;
+        if (!cerberus_dual_ble_family_wire_decode(&source->family, &source->receive,
+                source->raw_length, source->event_type, source->raw_flags,
+                source->address, source->address_type, &evidence)) return false;
+    }
     const char *end = memchr(source->name, 0, sizeof(source->name));
     if (!end) return false;
 
@@ -48,6 +57,7 @@ static inline bool cerberus_dual_ble_archive_capture_row(cerberus_ble_archive_ro
     /* Frozen same-original metadata; UNKNOWN from older peers stays UNKNOWN.
      * Never infer receive provenance from current scanner state or raw hints. */
     row.receive = source->receive;
+    row.family = source->family;
     row.reports_seen = source->reports;
     row.generation = provenance->generation;
     row.index = provenance->index;

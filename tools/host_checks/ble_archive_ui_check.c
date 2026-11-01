@@ -377,15 +377,15 @@ static void test_receive_info(const char *directory)
     CHECK(!memcmp(&viewer.selected,&frozen,sizeof(frozen)));
     clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
     CHECK(strstr(drawn,"C5 RECEIVE INFO RETAINED")&&strstr(drawn,"C5 RESPONSE BYTES UNAVAILABLE")&&
-        strstr(drawn,"RAW ADV / RX INFO")&&!strstr(drawn,"RAW ADV / RESPONSE"));
+        strstr(drawn,"RAW / RX INFO / HINTS")&&!strstr(drawn,"RAW ADV / RESPONSE"));
     preview(directory,"archive-c5-receive-detail");
     CHECK(ble_archive_ui_tap(&viewer,64,374)==BLE_ARCHIVE_UI_REDRAW&&!viewer.raw_response);
     clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
-    CHECK(strstr(drawn,"MALFORMED OR CUT AD AT BYTE 0")&&strstr(drawn,"RECEIVE INFO"));
-    CHECK(ble_archive_ui_tap(&viewer,160,60)==BLE_ARCHIVE_UI_NONE);
+    CHECK(strstr(drawn,"MALFORMED OR CUT AD AT BYTE 0")&&strstr(drawn,"RX INFO"));
+    CHECK(ble_archive_ui_tap(&viewer,108,60)==BLE_ARCHIVE_UI_NONE);
     CHECK(ble_archive_ui_tap(&viewer,164,54)==BLE_ARCHIVE_UI_REDRAW&&viewer.raw_response);
     clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
-    CHECK(strstr(drawn,"SAVED RECEIVE INFO")&&strstr(drawn,"RECEIVE INFO *")&&strstr(drawn,"C5 EXTENDED CALLBACK"));
+    CHECK(strstr(drawn,"SAVED RECEIVE INFO")&&strstr(drawn,"RX INFO *")&&strstr(drawn,"C5 EXTENDED CALLBACK"));
     CHECK(strstr(drawn,"CALLBACK 255 B / PREVIEW 31 B")&&strstr(drawn,"PHY CODED PRIMARY / 2M SECONDARY")&&
         strstr(drawn,"SID 15 / PROPS 00 / CTRL COMPLETE")&&strstr(drawn,"FULL AD LAYOUT VALID / PREVIEW CUT"));
     CHECK(strstr(drawn,"HISTORICAL EVIDENCE")&&strstr(drawn,"NOT CURRENT RADIO STATE")&&
@@ -634,11 +634,174 @@ static void test_v1_filtered_read(const char *directory)
     CHECK(ble_archive_ui_tap(&viewer,64,426)==BLE_ARCHIVE_UI_REDRAW);
     CHECK(viewer.source_filter==CERBERUS_BLE_ARCHIVE_LIST_LEGACY&&viewer.sort==CERBERUS_BLE_ARCHIVE_LIST_SIGNAL);
 }
+static void full_family_source(const uint8_t *full,size_t length,uint8_t family)
+{
+    seed(33);source.rows[0]=source.rows[32];source.count=1;
+    cerberus_ble_archive_row_t *row=&source.rows[0];
+    memset(row->advertisement,0,sizeof(row->advertisement));
+    row->advertisement_length=(uint8_t)(length>31U?31U:length);
+    memcpy(row->advertisement,full,row->advertisement_length);
+    row->advertisement_event_type=3;row->advertisement_flags=length>31U?3U:0U;
+    row->receive=(cerberus_dual_ble_receive_metadata_t){
+        .source_kind=CERBERUS_DUAL_BLE_RECEIVE_EXTENDED,.callback_length=(uint8_t)length,
+        .sid=7,.primary_phy=3,.secondary_phy=2,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+    cerberus_dual_ble_family_evidence_t evidence;
+    CHECK(cerberus_dual_ble_family_parse_ad(full,length,row->address,row->address_type,&evidence));
+    CHECK(cerberus_dual_ble_family_wire_encode(&evidence,family,&row->family));
+    CHECK(cerberus_ble_archive_validate(&source));
+}
+
+static void reopen_family(void)
+{
+    static uint8_t bytes[CERBERUS_BLE_ARCHIVE_MAX_SIZE];size_t written=0;
+    CHECK(cerberus_ble_archive_encode(&source,bytes,sizeof(bytes),&written));
+    CHECK(written==32U+264U*source.count);
+    CHECK(cerberus_ble_archive_decode(bytes,written,&viewer.incoming));
+    CHECK(ble_archive_ui_begin(&viewer,1,false)&&
+        ble_archive_ui_complete(&viewer,1,&viewer.incoming,"saved-family-v5.BLE"));
+    repaint();CHECK(ble_archive_ui_tap(&viewer,8,150)==BLE_ARCHIVE_UI_REDRAW);
+    CHECK(ble_archive_ui_tap(&viewer,64,374)==BLE_ARCHIVE_UI_REDRAW);
+    CHECK(ble_archive_ui_tap(&viewer,250,54)==BLE_ARCHIVE_UI_REDRAW&&viewer.raw_hints&&!viewer.raw_response);
+    repaint();
+}
+
+static void test_saved_full_families(const char *directory)
+{
+    static const uint8_t beacon[27]={26,0xff,0x4c,0,2,0x15,1,2,3,4};
+    static const uint8_t findmy[]={3,3,0x44,0xfd},flipper[]={3,3,0x82,0x30};
+    static const uint8_t flock[]={4,0xff,0xc8,9,1},meta[]={3,0xff,0x5f,0xfd};
+    static const uint8_t hc[]={6,9,'H','C','-','0','5'};
+    const struct {const uint8_t *bytes;size_t size;const char *detail;} cases[]={
+        {beacon,sizeof(beacon),"IBEACON ADVERTISED FORMAT"},
+        {findmy,sizeof(findmy),"FIND MY FORMAT HINTS"},
+        {flipper,sizeof(flipper),"CODES: 3082"},
+        {flock,sizeof(flock),"FLOCK ADVERTISED CLUES"},
+        {meta,sizeof(meta),"META IDENTIFIER HINTS"},
+        {hc,sizeof(hc),"HC-05"}};
+    for(unsigned i=0;i<6;++i){
+        uint8_t full[255]={0};size_t prefix=sizeof(full)-cases[i].size;
+        full[0]=(uint8_t)(prefix-1U);full[1]=0xff;
+        memcpy(full+prefix,cases[i].bytes,cases[i].size);
+        full_family_source(full,sizeof(full),(uint8_t)(i+1U));reopen_family();
+        CHECK(strstr(drawn,"SAVED C5 ORIGINAL")&&strstr(drawn,"FULL 255 B / PREVIEW 31 B"));
+        CHECK(strstr(drawn,"HISTORICAL / NO LIVE RADIO")&&strstr(drawn,"AGE AT SAVE: <= 1700 ms"));
+        CHECK(strstr(drawn,"DECODED HINTS / RAW PREVIEW IS SEPARATE")&&!strstr(drawn,"BEEP")&&!strstr(drawn,"FOX"));
+        if(i==2U)preview(directory,"archive-family-full255-summary");
+        cerberus_ble_archive_row_t frozen=viewer.selected;
+        memset(&viewer.document.rows[0].family,0,sizeof(viewer.document.rows[0].family));
+        viewer.document.rows[0].receiver_boot_id=7;viewer.document.rows[0].scan_epoch=8;
+        viewer.document.saved_uptime_ms=9;
+        CHECK(ble_archive_ui_tap(&viewer,164,374)==BLE_ARCHIVE_UI_REDRAW);repaint();
+        CHECK(strstr(drawn,cases[i].detail)&&strstr(drawn,"AGE AT SAVE: <= 1700 ms"));
+        CHECK(strstr(drawn,"SAVED BOOT UPTIME: 1000000 ms")&&strstr(drawn,"C5 BOOT ID: ABCDEF0123456789"));
+        CHECK(!memcmp(&frozen,&viewer.selected,sizeof(frozen)));
+        if(i==2U)preview(directory,"archive-family-frozen-flipper");
+        const uint16_t gaps[][2]={{7,54},{104,54},{108,54},{208,54},{212,54},{312,54},{250,82}};
+        for(unsigned gap=0;gap<sizeof(gaps)/sizeof(gaps[0]);++gap)
+            CHECK(ble_archive_ui_tap(&viewer,gaps[gap][0],gaps[gap][1])==BLE_ARCHIVE_UI_NONE);
+        CHECK(ble_archive_ui_tap(&viewer,8,54)==BLE_ARCHIVE_UI_REDRAW&&!viewer.raw_hints);repaint();
+        CHECK(strstr(drawn,"31 BYTES / EVENT 3")&&!strstr(drawn,"FULL 255 B"));
+        CHECK(ble_archive_ui_tap(&viewer,164,54)==BLE_ARCHIVE_UI_REDRAW&&viewer.raw_response);repaint();
+        CHECK(strstr(drawn,"CALLBACK 255 B / PREVIEW 31 B")&&!strstr(drawn,"CODES: 3082"));
+        CHECK(ble_archive_ui_tap(&viewer,250,54)==BLE_ARCHIVE_UI_REDRAW&&viewer.raw_hints&&!viewer.hint_page);repaint();
+        unsigned total=calls;
+        for(unsigned failure=1;failure<=total;++failure){
+            clear_draw();fail_after=failure;CHECK(ble_archive_ui_draw(&viewer,ESP_OK)!=ESP_OK);
+            CHECK(!viewer.hint_pages&&ble_archive_ui_tap(&viewer,164,374)==BLE_ARCHIVE_UI_NONE);
+            CHECK(!memcmp(&frozen,&viewer.selected,sizeof(frozen)));
+        }
+        repaint();CHECK(viewer.hint_pages>1U);
+        CHECK(ble_archive_ui_tap(&viewer,64,426)==BLE_ARCHIVE_UI_REDRAW&&viewer.view==BLE_ARCHIVE_UI_DETAIL);
+        CHECK(ble_archive_ui_tap(&viewer,64,426)==BLE_ARCHIVE_UI_REDRAW&&viewer.view==BLE_ARCHIVE_UI_LIST);
+    }
+}
+
+static void test_saved_hint_states(const char *directory)
+{
+    uint8_t full[255]={254,0xff};
+    full_family_source(full,sizeof(full),3);reopen_family();
+    CHECK(strstr(drawn,"NO SUPPORTED FAMILY HINT")&&strstr(drawn,"/ 0 HINTS"));
+    CHECK(viewer.hint_pages==1U);preview(directory,"archive-family-complete-nohint");
+    cerberus_dual_ble_family_evidence_t unavailable={.state=CERBERUS_DUAL_BLE_FAMILY_MALFORMED};
+    full_family_source(full,sizeof(full),3);
+    CHECK(cerberus_dual_ble_family_wire_encode(&unavailable,3,&source.rows[0].family));reopen_family();
+    CHECK(strstr(drawn,"AD EVIDENCE NOT CLASSIFIABLE")&&!strstr(drawn,"NO SUPPORTED FAMILY HINT"));
+    preview(directory,"archive-family-unclassifiable");
+    full_family_source(full,sizeof(full),3);unavailable.state=CERBERUS_DUAL_BLE_FAMILY_RECEIVE_UNKNOWN;
+    memset(&source.rows[0].receive,0,sizeof(source.rows[0].receive));
+    CHECK(cerberus_dual_ble_family_wire_encode(&unavailable,3,&source.rows[0].family));reopen_family();
+    CHECK(strstr(drawn,"RECEIVE INFO UNAVAILABLE")&&!strstr(drawn,"FULL ORIGINAL HINTS NOT SAVED"));
+    preview(directory,"archive-family-receive-unknown");
+    full_family_source(full,sizeof(full),3);memset(&source.rows[0].family,0,sizeof(source.rows[0].family));
+    source.rows[0].age_upper_valid=false;source.rows[0].age_upper_at_save_ms=0;reopen_family();
+    CHECK(strstr(drawn,"FULL ORIGINAL HINTS NOT SAVED")&&strstr(drawn,"AGE AT SAVE: UNKNOWN"));
+    CHECK(!strstr(drawn,"NO SUPPORTED FAMILY HINT"));preview(directory,"archive-family-absent-proof");
+    full_family_source(full,sizeof(full),3);source.rows[0].age_upper_at_save_ms=UINT64_MAX;
+    source.saved_uptime_ms=UINT64_MAX;reopen_family();
+    CHECK(strstr(drawn,"AGE AT SAVE: <= 18446744073709551615 ms"));
+    preview(directory,"archive-family-extreme-historical-age");
+}
+
+static void test_saved_meta_pages(const char *directory)
+{
+    uint8_t full[255]={0};size_t used=0;
+    const uint8_t base[12]={0xfb,0x34,0x9b,0x5f,0x80,0,0,0x80,0,0x10,0,0};
+    const unsigned widths[]={2,4,16};
+    for(unsigned w=0;w<3;++w){
+        unsigned width=widths[w];full[used++]=(uint8_t)(11U*width+1U);full[used++]=(uint8_t)(3U+2U*w);
+        for(unsigned id=0;id<11;++id){
+            uint16_t value=cerberus_ble_meta_id_value(id);
+            if(width==16U){memcpy(full+used,base,12);full[used+12]=(uint8_t)value;full[used+13]=(uint8_t)(value>>8);}
+            else {full[used]=(uint8_t)value;full[used+1]=(uint8_t)(value>>8);}
+            used+=width;
+        }
+    }
+    CHECK(used==248U);full_family_source(full,sizeof(full),5);reopen_family();
+    CHECK(viewer.hint_pages==18U);preview(directory,"archive-family-meta-summary");
+    for(unsigned page=1;page<18;++page){
+        CHECK(ble_archive_ui_tap(&viewer,164,374)==BLE_ARCHIVE_UI_REDRAW);repaint();
+        CHECK(viewer.hint_page==page&&viewer.hint_pages==18U);
+        CHECK(strstr(drawn,"META HINT SUPPRESSED BY ID RULE"));
+        for(unsigned pair=0;pair<2&&2U*(page-1U)+pair<33U;++pair){
+            unsigned index=2U*(page-1U)+pair;char expected[40];
+            snprintf(expected,sizeof(expected),"ID %04X / %s",cerberus_ble_meta_id_value(index/3U),
+                index%3U==0U?"LIST16":index%3U==1U?"LIST32":"LIST128");
+            CHECK(strstr(drawn,expected));
+        }
+    }
+    CHECK(strstr(drawn,"ID/CONTEXT PAIRS 33-33 OF 33"));preview(directory,"archive-family-meta-last-pair");
+    CHECK(ble_archive_ui_tap(&viewer,164,374)==BLE_ARCHIVE_UI_REDRAW);repaint();CHECK(viewer.hint_page==17U);
+    for(unsigned page=17;page;--page){CHECK(ble_archive_ui_tap(&viewer,8,374)==BLE_ARCHIVE_UI_REDRAW);repaint();CHECK(viewer.hint_page==page-1U);}
+}
+
+static void test_v4_missing_hints(const char *directory)
+{
+    static const char hex[]=
+        "43424c454152430004002000d8000100f8000000807060504030201045e6bb85"
+        "010203040506020d03c9a5024c00030300fe1f02341201000807060504030201"
+        "000000000000000000000000000000004101ff00000000000000000000000000"
+        "000000000000000000000000000000000d180000000000000000000000000000"
+        "0201060000000000000000000000000000000000000000000000000000000000"
+        "1032547698badcfe112233445566778800000000000000000000000000000000"
+        "0000000000000000000000000000000000000000000000000000000000000000"
+        "000000000000000000000000000000000200030703010001";
+    uint8_t bytes[248];CHECK(strlen(hex)==2U*sizeof(bytes));
+    for(unsigned i=0;i<sizeof(bytes);++i){unsigned value;CHECK(sscanf(hex+2U*i,"%2x",&value)==1);bytes[i]=(uint8_t)value;}
+    memset(&viewer,0,sizeof(viewer));CHECK(cerberus_ble_archive_decode(bytes,sizeof(bytes),&source));
+    CHECK(ble_archive_ui_begin(&viewer,1,false)&&ble_archive_ui_complete(&viewer,1,&source,"old-v4.BLE"));
+    repaint();CHECK(ble_archive_ui_tap(&viewer,8,150)==BLE_ARCHIVE_UI_REDRAW);
+    CHECK(ble_archive_ui_tap(&viewer,64,374)==BLE_ARCHIVE_UI_REDRAW);
+    CHECK(ble_archive_ui_tap(&viewer,250,54)==BLE_ARCHIVE_UI_REDRAW);repaint();
+    CHECK(strstr(drawn,"FULL ORIGINAL HINTS NOT SAVED")&&!strstr(drawn,"NO SUPPORTED FAMILY HINT"));
+    CHECK(strstr(drawn,"AGE AT SAVE: <= 18364758544493064720 ms"));preview(directory,"archive-family-v4-unavailable");
+}
+
 int main(int argc,char **argv)
 {
     CHECK(argc==2);test_jobs(argv[1]);test_list(argv[1]);test_paint_and_privacy();test_raw(argv[1]);test_receivers(argv[1]);test_response(argv[1]);test_receive_info(argv[1]);
     test_filtered_pages(argv[1]);test_sort_and_empty(argv[1]);test_frozen_filtered_and_jobs(argv[1]);
     test_control_recovery_and_history(argv[1]);test_v1_filtered_read(argv[1]);
+    test_saved_full_families(argv[1]);test_saved_hint_states(argv[1]);test_saved_meta_pages(argv[1]);test_v4_missing_hints(argv[1]);
     printf("BLE archive UI PASS %u assertions; PSRAM model=%zu bytes; no clock, heap, SD, IO worker or radio linked\n",
         checks,sizeof(ble_archive_ui_store_t));
     return 0;

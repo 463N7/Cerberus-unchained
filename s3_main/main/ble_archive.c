@@ -1,4 +1,5 @@
 #include "ble_archive.h"
+#include "ble_family_wire.h"
 
 #include <string.h>
 
@@ -91,6 +92,13 @@ static bool row_valid(const cerberus_ble_archive_row_t *r, uint64_t saved_ms)
             r->receive.source_kind != CERBERUS_DUAL_BLE_RECEIVE_UNKNOWN) ||
         !cerberus_dual_ble_receive_metadata_valid(&r->receive,
             r->advertisement_length, r->advertisement_event_type, r->advertisement_flags)) return false;
+    if (!all_zero((const uint8_t *)&r->family, sizeof(r->family))) {
+        cerberus_dual_ble_family_evidence_t evidence;
+        if (r->receiver != CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ||
+            !cerberus_dual_ble_family_wire_decode(&r->family, &r->receive,
+                r->advertisement_length, r->advertisement_event_type,
+                r->advertisement_flags, r->address, r->address_type, &evidence)) return false;
+    }
     return response_valid(r);
 }
 
@@ -207,6 +215,18 @@ static void encode_row(const cerberus_ble_archive_row_t *r, uint8_t *out)
     out[213] = r->receive.secondary_phy;
     out[214] = r->receive.data_status;
     out[215] = r->receive.ad_validation;
+    /* Explicit portable wire fields, never native row/evidence serialization. */
+    const cerberus_dual_ble_family_wire_t *f = &r->family;
+    out[216]=f->version; out[217]=f->family_code; out[218]=f->state;
+    out[219]=f->categories; out[220]=f->hc_name; out[221]=f->ibeacon_result; out[222]=f->flags;
+    out[223]=f->findmy_bits; out[224]=f->findmy_uuid_widths;
+    out[225]=f->flipper_bits; out[226]=f->flipper_flags;
+    out[227]=f->flock_facts; out[228]=f->flock_accessory_contexts;
+    out[229]=f->flock_raven_3100_contexts; out[230]=f->flock_raven_3200_contexts;
+    memcpy(out+231,f->meta_pairs,10U); memcpy(out+241,f->ibeacon_uuid,16U);
+    memcpy(out+257,f->ibeacon_major_le,2U); memcpy(out+259,f->ibeacon_minor_le,2U);
+    out[261]=(uint8_t)f->ibeacon_power; /* Signed two's-complement octet. */
+    out[262]=f->reserved[0]; out[263]=f->reserved[1];
 }
 
 static bool all_zero(const uint8_t *bytes, size_t length)
@@ -271,11 +291,24 @@ static bool decode_row(const uint8_t *p, uint64_t saved_ms, uint16_t version,
         r->response_source_uptime_ms = get64(p + 168);
         memcpy(r->response, p + 176, r->response_length);
     }
-    if (version == CERBERUS_BLE_ARCHIVE_VERSION) {
+    if (version >= CERBERUS_BLE_ARCHIVE_V4_VERSION) {
         r->receive.source_kind = p[208]; r->receive.properties = p[209];
         r->receive.callback_length = p[210]; r->receive.sid = p[211];
         r->receive.primary_phy = p[212]; r->receive.secondary_phy = p[213];
         r->receive.data_status = p[214]; r->receive.ad_validation = p[215];
+    }
+    if (version == CERBERUS_BLE_ARCHIVE_VERSION) {
+        cerberus_dual_ble_family_wire_t *f = &r->family;
+        f->version=p[216]; f->family_code=p[217]; f->state=p[218];
+        f->categories=p[219]; f->hc_name=p[220]; f->ibeacon_result=p[221]; f->flags=p[222];
+        f->findmy_bits=p[223]; f->findmy_uuid_widths=p[224];
+        f->flipper_bits=p[225]; f->flipper_flags=p[226];
+        f->flock_facts=p[227]; f->flock_accessory_contexts=p[228];
+        f->flock_raven_3100_contexts=p[229]; f->flock_raven_3200_contexts=p[230];
+        memcpy(f->meta_pairs,p+231,10U); memcpy(f->ibeacon_uuid,p+241,16U);
+        memcpy(f->ibeacon_major_le,p+257,2U); memcpy(f->ibeacon_minor_le,p+259,2U);
+        f->ibeacon_power=p[261]<=INT8_MAX ? (int8_t)p[261] : (int8_t)((int)p[261]-256);
+        f->reserved[0]=p[262]; f->reserved[1]=p[263];
     }
     return row_valid(r, saved_ms);
 }
@@ -319,10 +352,12 @@ bool cerberus_ble_archive_decode(const uint8_t *input, size_t length,
     const uint16_t version = get16(input + 8);
     const bool legacy = version == CERBERUS_BLE_ARCHIVE_LEGACY_VERSION;
     if (!legacy && version != CERBERUS_BLE_ARCHIVE_V2_VERSION &&
-        version != CERBERUS_BLE_ARCHIVE_V3_VERSION && version != CERBERUS_BLE_ARCHIVE_VERSION) return false;
+        version != CERBERUS_BLE_ARCHIVE_V3_VERSION && version != CERBERUS_BLE_ARCHIVE_V4_VERSION &&
+        version != CERBERUS_BLE_ARCHIVE_VERSION) return false;
     const uint16_t row_size = legacy ? CERBERUS_BLE_ARCHIVE_LEGACY_ROW_SIZE :
         version == CERBERUS_BLE_ARCHIVE_V2_VERSION ? CERBERUS_BLE_ARCHIVE_V2_ROW_SIZE :
-        version == CERBERUS_BLE_ARCHIVE_V3_VERSION ? CERBERUS_BLE_ARCHIVE_V3_ROW_SIZE : CERBERUS_BLE_ARCHIVE_ROW_SIZE;
+        version == CERBERUS_BLE_ARCHIVE_V3_VERSION ? CERBERUS_BLE_ARCHIVE_V3_ROW_SIZE :
+        version == CERBERUS_BLE_ARCHIVE_V4_VERSION ? CERBERUS_BLE_ARCHIVE_V4_ROW_SIZE : CERBERUS_BLE_ARCHIVE_ROW_SIZE;
     if (get16(input + 12) != row_size) return false;
     const uint16_t count = get16(input + 14);
     const uint64_t saved_ms = get64(input + 20);

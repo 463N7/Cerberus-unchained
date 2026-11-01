@@ -3,6 +3,7 @@
 #include "s3_ble_discovery_inventory.h"
 #include "s3_findmy_monitor.h"
 #include "dual_ble_scan.h"
+#include "ble_archive_family_fixture.h"
 #define ESP_ERROR_CHECK(x) CHECK((x) == ESP_OK)
 #define MALLOC_CAP_SPIRAM 1U
 #define MALLOC_CAP_8BIT 2U
@@ -23,7 +24,8 @@ typedef struct { cerberus_s3_ble_discovery_inventory_t inventory; } ble_discover
 static ble_discovery_live_store_t discovery;
 static ble_discovery_live_store_t *ble_discovery_live;
 static int64_t now_us;
-static int64_t esp_timer_get_time(void) { return now_us; }
+static unsigned clock_reads;
+static int64_t esp_timer_get_time(void) { ++clock_reads;return now_us; }
 static cerberus_dual_ble_scan_t companion;
 static cerberus_dual_ble_scan_t *dual_ble_ui_store;
 static cerberus_dual_ble_row_t dual_ble_ui_selected;
@@ -42,6 +44,9 @@ static uint64_t last_canceled_job, last_released_job;
 static cerberus_ble_archive_io_status_t io;
 static cerberus_ble_archive_t saved;
 static size_t saved_length;
+static uint8_t file_bytes[CERBERUS_BLE_ARCHIVE_MAX_SIZE];
+static size_t file_length;
+static bool load_from_file;
 static void *heap_caps_calloc(size_t count,size_t size,unsigned caps)
 { CHECK(caps==(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));CHECK(!allocation);++allocations;
   if(allocation_fails)return NULL;allocation=calloc(count,size);CHECK(allocation);return allocation; }
@@ -53,11 +58,13 @@ esp_err_t cerberus_ble_archive_io_save(const cerberus_ble_archive_t *doc,uint64_
 { ++saves;*job=0;if(start_error)return start_error;CHECK(cerberus_ble_archive_validate(doc));
   static uint8_t encoded[CERBERUS_BLE_ARCHIVE_MAX_SIZE];size_t length=0;
   CHECK(cerberus_ble_archive_encode(doc,encoded,sizeof(encoded),&length));
-  CHECK(length==32U+216U*doc->count);saved_length=length;
+  CHECK(length==32U+264U*doc->count);saved_length=length;
+  memcpy(file_bytes,encoded,length);file_length=length;
   CHECK(cerberus_ble_archive_decode(encoded,length,&saved));
   io=(cerberus_ble_archive_io_status_t){.job_id=++sequence,.worker_active=true,.state=CERBERUS_BLE_ARCHIVE_IO_SAVING};*job=sequence;return ESP_OK; }
 esp_err_t cerberus_ble_archive_io_load(const char *path,const char *name,uint64_t *job)
 { ++loads;*job=0;CHECK(path&&name);if(start_error)return start_error;
+  if(load_from_file)CHECK(cerberus_ble_archive_decode(file_bytes,file_length,&saved));
   io=(cerberus_ble_archive_io_status_t){.job_id=++sequence,.worker_active=true,.state=CERBERUS_BLE_ARCHIVE_IO_LOADING};*job=sequence;return ESP_OK; }
 void cerberus_ble_archive_io_get_status(cerberus_ble_archive_io_status_t *out) { *out=io; }
 esp_err_t cerberus_ble_archive_io_copy_result(uint64_t job,cerberus_ble_archive_t *out)
@@ -97,6 +104,7 @@ static void seed(void)
     memset(&dual_ble_ui_selected_provenance,0,sizeof(dual_ble_ui_selected_provenance));
     s3_released=c5_released=true;
     ui_capability_blocked=false;
+    load_from_file=false;
 }
 static void complete(void)
 { io.state=CERBERUS_BLE_ARCHIVE_IO_COMPLETE;io.worker_active=false;io.result_ready=true;
@@ -252,10 +260,8 @@ static void seed_both(void)
             .source_kind=CERBERUS_DUAL_BLE_RECEIVE_LEGACY,.callback_length=3,
             .sid=0xff,.data_status=0xff,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
         if(i%3==2||i==31){
-            c->raw_length=31;c->raw[0]=254;c->raw[1]=0xff;c->event_type=3;c->raw_flags=3;
-            c->receive=(cerberus_dual_ble_receive_metadata_t){.source_kind=CERBERUS_DUAL_BLE_RECEIVE_EXTENDED,
-                .callback_length=255,.sid=(uint8_t)(i%16),.primary_phy=3,.secondary_phy=2,
-                .ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+            c->raw_length=31;c->event_type=3;c->raw_flags=3;
+            CHECK(archive_test_family_original(c->raw,&c->receive,&c->family,c->address,c->address_type,'5'));
         }
     }
     memset(companion.staging,0xEE,sizeof(companion.staging));
@@ -274,7 +280,9 @@ static void test_both_and_c5_footer(void)
     CHECK(ble_archive_view->incoming.rows[32].receiver==CERBERUS_BLE_ARCHIVE_RECEIVER_C5&&
         ble_archive_view->incoming.rows[32].age_upper_at_save_ms==105);
     cerberus_dual_ble_receive_metadata_t frozen_receive=companion.rows[31].receive;
+    cerberus_dual_ble_family_wire_t frozen_family=companion.rows[31].family;
     CHECK(!memcmp(&ble_archive_view->incoming.rows[63].receive,&frozen_receive,sizeof(frozen_receive)));
+    CHECK(!memcmp(&ble_archive_view->incoming.rows[63].family,&frozen_family,sizeof(frozen_family)));
     CHECK(ble_archive_view->incoming.rows[0].response_state==CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT);
     memset(companion.rows,0,sizeof(companion.rows));companion.published_epoch=999;
     discovery.inventory.entries[0].record.peer.address[0]=99;now_us+=2000000;
@@ -283,7 +291,8 @@ static void test_both_and_c5_footer(void)
     CHECK(saves==before+1&&saved.count==64&&saved.rows[32].scan_epoch==456&&
         saved.rows[32].receiver_boot_id==123&&saved.rows[0].address[0]==0&&
         saved.rows[32].age_upper_at_save_ms==105); /* Not refreshed after release. */
-    CHECK(saved_length==13856U&&!memcmp(&saved.rows[63].receive,&frozen_receive,sizeof(frozen_receive)));
+    CHECK(saved_length==16928U&&!memcmp(&saved.rows[63].receive,&frozen_receive,sizeof(frozen_receive)));
+    CHECK(!memcmp(&saved.rows[63].family,&frozen_family,sizeof(frozen_family)));
     CHECK(saved.rows[0].response_state==CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT&&saved.rows[0].response_source_uptime_ms==9100);
     CHECK(!memcmp(&selected_before,&ble_selected_result,sizeof(selected_before)));
     complete();CHECK(strstr(drawn,"64/64 OBS / P1/16 / S3 32 C5 32 L0"));
@@ -292,14 +301,18 @@ static void test_both_and_c5_footer(void)
     seed_both();dual_ble_ui_detail=true;
     CHECK(cerberus_dual_ble_copy_row(&companion,31,&dual_ble_ui_selected,&dual_ble_ui_selected_provenance));
     frozen_receive=dual_ble_ui_selected.receive;
+    frozen_family=dual_ble_ui_selected.family;
     companion.published_epoch=999;companion.published_boot_id=888;companion.rows[31].address[0]=99;
     memset(&companion.rows[31].receive,0,sizeof(companion.rows[31].receive));
+    memset(&companion.rows[31].family,0,sizeof(companion.rows[31].family));
+    companion.start.mode=CERBERUS_DUAL_BLE_FAMILY;companion.start.reserved=1;companion.published_family=1;
     CHECK(archive_root_footer_draw()==ESP_OK&&strstr(drawn,"SAVE SD"));
     archive_root_footer_tap(220,440);ble_archive_tick(false);
     CHECK(saved.count==1&&saved.rows[0].receiver==CERBERUS_BLE_ARCHIVE_RECEIVER_C5&&
         saved.rows[0].address[0]==31&&saved.rows[0].index==31&&saved.rows[0].scan_epoch==456&&
         saved.rows[0].receiver_boot_id==123&&saved.rows[0].generation==0);
     CHECK(!memcmp(&saved.rows[0].receive,&frozen_receive,sizeof(frozen_receive))&&saved.rows[0].advertisement_length==31);
+    CHECK(!memcmp(&saved.rows[0].family,&frozen_family,sizeof(frozen_family))&&saved.rows[0].family.family_code==6);
     complete();ble_archive_return();CHECK(ble_mode==UI_BLE_MODE_C5&&dual_ble_ui_detail);
     archive_root_footer_tap(156,440);CHECK(ble_mode==UI_BLE_MODE_C5); /* Footer gap. */
     archive_root_footer_tap(30,440);CHECK(ble_mode==UI_BLE_MODE_LIST);
@@ -341,12 +354,13 @@ static void test_receive_metadata_jobs(void)
     ble_archive_save_c5(true);CHECK(ble_archive_view->release_pending&&saves==before);
     frozen=ble_archive_view->incoming;
     memset(&dual_ble_ui_selected.receive,0,sizeof(dual_ble_ui_selected.receive));
+    memset(&dual_ble_ui_selected.family,0,sizeof(dual_ble_ui_selected.family));
     memset(companion.rows,0,sizeof(companion.rows));
     ble_archive_save_c5(true);CHECK(!memcmp(&frozen,&ble_archive_view->incoming,sizeof(frozen)));
     s3_released=true;ble_archive_tick(false);CHECK(saves==before&&!memcmp(&frozen,&ble_archive_view->incoming,sizeof(frozen)));
     c5_released=true;ble_archive_tick(false);CHECK(saves==before+1&&!memcmp(&frozen,&saved,sizeof(frozen)));
     complete();CHECK(!memcmp(&frozen,&ble_archive_view->document,sizeof(frozen)));
-    /* A failed later load leaves the previously published v4 document intact. */
+    /* A failed later load leaves the previously published v5 document intact. */
     ble_archive_open_file("/COPIED","bad.BLE");io.worker_active=false;
     io.state=CERBERUS_BLE_ARCHIVE_IO_ERROR;io.error=ESP_ERR_INVALID_RESPONSE;
     ble_archive_tick(false);CHECK(ble_archive_view->has_document&&!memcmp(&frozen,&ble_archive_view->document,sizeof(frozen)));
@@ -373,10 +387,67 @@ static void test_receive_metadata_jobs(void)
     CHECK(!memcmp(&frozen,&ble_archive_view->incoming,sizeof(frozen)));
     s3_released=c5_released=true;ble_archive_tick(false);CHECK(saves==before);ble_archive_return();
 }
+static void test_invalid_family_capture(void)
+{
+    seed_both();dual_ble_ui_detail=true;
+    CHECK(cerberus_dual_ble_copy_row(&companion,31,&dual_ble_ui_selected,&dual_ble_ui_selected_provenance));
+    dual_ble_ui_selected.family.version=2;
+    unsigned before=saves,stopped=s3_stop_requests;
+    ble_archive_save_c5(true);
+    CHECK(ble_archive_open_error==ESP_ERR_INVALID_RESPONSE&&ble_archive_view->view==BLE_ARCHIVE_UI_ERROR);
+    CHECK(!ble_archive_view->release_pending&&!ble_archive_view->job_pending&&saves==before&&s3_stop_requests==stopped);
+    CHECK(!companion.stop_requested); /* Invalid evidence does not start storage or touch radio ownership. */
+    ble_archive_return();
+}
+static void test_saved_family_reopen(void)
+{
+    static cerberus_ble_archive_t frozen;
+    seed_both();dual_ble_ui_detail=true;
+    CHECK(cerberus_dual_ble_copy_row(&companion,31,&dual_ble_ui_selected,&dual_ble_ui_selected_provenance));
+    s3_released=c5_released=false;unsigned before=saves;
+    ble_archive_save_c5(true);frozen=ble_archive_view->incoming;
+    CHECK(frozen.rows[0].family.hc_name==CERBERUS_BLE_HC_05&&frozen.rows[0].family.family_code==6);
+    CHECK(frozen.rows[0].receive.callback_length==255&&frozen.rows[0].advertisement_length==31);
+    CHECK(archive_test_family_original(dual_ble_ui_selected.raw,&dual_ble_ui_selected.receive,
+        &dual_ble_ui_selected.family,dual_ble_ui_selected.address,dual_ble_ui_selected.address_type,'6'));
+    companion.published_boot_id=999;companion.published_epoch=1000;companion.published_family=1;
+    companion.start.mode=CERBERUS_DUAL_BLE_FAMILY;companion.start.reserved=1;
+    memset(companion.rows,0,sizeof(companion.rows));memset(companion.staging,0xEE,sizeof(companion.staging));
+    now_us+=3000000;ble_archive_save_c5(true);
+    CHECK(!memcmp(&frozen,&ble_archive_view->incoming,sizeof(frozen))&&saves==before);
+    s3_released=c5_released=true;ble_archive_tick(false);complete();
+    CHECK(!memcmp(&frozen,&ble_archive_view->document,sizeof(frozen))&&file_length==296);
+    ble_archive_return();CHECK(!allocation);
+
+    /* Reopen the actual encoded bytes after the loading boot's clock and live
+     * receiver bank have changed. Source clocks/bounds come only from file. */
+    now_us=0;load_from_file=true;current_page=UI_PAGE_FILES;
+    unsigned clocks=clock_reads,stopped=s3_stop_requests,save_count=saves;
+    ble_archive_open_file("/MOVED","family.BLE");complete();
+    CHECK(!memcmp(&frozen,&ble_archive_view->document,sizeof(frozen)));
+    ble_archive_tap(20,160);CHECK(ble_archive_view->selected_valid);
+    ble_archive_tap(160,390);CHECK(ble_archive_view->view==BLE_ARCHIVE_UI_RAW);
+    ble_archive_tap(250,65);CHECK(ble_archive_view->raw_hints&&strstr(drawn,"SAVED C5 HINTS"));
+    CHECK(strstr(drawn,"HISTORICAL / NO LIVE RADIO")&&strstr(drawn,"AGE AT SAVE: <= 105 ms"));
+    CHECK(ble_archive_view->selected.receiver_boot_id==123&&ble_archive_view->selected.scan_epoch==456);
+    CHECK(ble_archive_view->selected.family.hc_name==CERBERUS_BLE_HC_05&&ble_archive_view->hint_pages>=2);
+    uint8_t pages=ble_archive_view->hint_pages;
+    for(uint8_t page=1;page<pages;++page)ble_archive_tap(220,390);
+    CHECK(ble_archive_view->hint_page==pages-1&&strstr(drawn,"HC-05"));
+    CHECK(!strstr(drawn,"HC-06")&&clock_reads==clocks&&s3_stop_requests==stopped&&saves==save_count);
+    CHECK(ble_archive_view->selected_saved_uptime_ms==10000&&ble_archive_view->selected_age_ms==105);
+    ble_archive_tap(64,426);CHECK(ble_archive_view->view==BLE_ARCHIVE_UI_DETAIL);
+    ble_archive_tap(64,426);CHECK(ble_archive_view->view==BLE_ARCHIVE_UI_LIST);
+    ble_archive_tap(64,426);CHECK(!allocation&&current_page==UI_PAGE_FILES);
+    load_from_file=false;
+}
 int main(void)
 {
     test_capture();test_jobs();test_accepted_job_rejected_by_view();test_complete_without_result();
     test_both_and_c5_footer();test_release_wait();test_response_capture();test_receive_metadata_jobs();
+    test_invalid_family_capture();
+    test_saved_family_reopen();
     ble_archive_dispose();CHECK(frees+1==allocations); /* One rejected allocation. */
-    printf("%u archive capture/controller checks passed; saves=%u loads=%u copies=%u releases=%u.\n",checks,saves,loads,copies,releases);return 0;
+    printf("%u archive capture/controller checks passed; saves=%u loads=%u copies=%u releases=%u; host viewer=%zu document=%zu row=%zu bytes.\n",
+        checks,saves,loads,copies,releases,sizeof(ble_archive_ui_store_t),sizeof(cerberus_ble_archive_t),sizeof(cerberus_ble_archive_row_t));return 0;
 }
