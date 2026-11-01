@@ -33,6 +33,7 @@ esp_err_t cerberus_display_fill_rect(uint16_t x,uint16_t y,uint16_t w,uint16_t h
 #include "dual_ble_scan.h"
 #include "dual_ble_list.h"
 #include "ble_discovery_list.h"
+#include "dual_ble_family.h"
 #define UI_BLE_MODE_C5 99U
 
 enum { UI_WIFI_MODE_LIST, UI_WIFI_MODE_MENU, UI_WIFI_MODE_BASELINE, UI_WIFI_MODE_STATS,
@@ -221,18 +222,23 @@ esp_err_t cerberus_display_draw_mono_bitmap(uint16_t x,uint16_t y,uint16_t w,uin
 #ifdef CERBERUS_DISCOVERY_NATIVE_TEST
 #include "s3_ble_discovery_native_fakes.h"
 static unsigned discovery_ui_allocations;
-static unsigned unified_sort_calls;
+static unsigned unified_sort_calls,unified_classify_calls;
 static uint8_t measured_unified_order(const cerberus_s3_ble_discovery_inventory_t *s3,
     const cerberus_dual_ble_row_t *c5,uint8_t count,cerberus_ble_discovery_list_source_t source,
-    cerberus_ble_discovery_list_sort_t sort,bool recent,uint64_t now,
+    cerberus_ble_discovery_list_sort_t sort,uint32_t s3_mask,uint32_t c5_mask,
     cerberus_ble_discovery_list_ref_t refs[CERBERUS_BLE_DISCOVERY_LIST_CAPACITY])
-{++unified_sort_calls;return cerberus_ble_discovery_list_order(s3,c5,count,source,sort,recent,now,refs);}
+{++unified_sort_calls;return cerberus_ble_discovery_list_order_masked(s3,c5,count,source,sort,s3_mask,c5_mask,refs);}
+static bool measured_family_classify(const cerberus_dual_ble_row_t *row,
+    const cerberus_dual_ble_provenance_t *proof,cerberus_dual_ble_family_evidence_t *out)
+{++unified_classify_calls;return cerberus_dual_ble_family_classify(row,proof,out);}
 static void *discovery_ui_calloc(size_t n,size_t size,unsigned capabilities)
 {++discovery_ui_allocations;return heap_caps_calloc(n,size,capabilities);}
 #define heap_caps_calloc discovery_ui_calloc
-#define cerberus_ble_discovery_list_order measured_unified_order
+#define cerberus_ble_discovery_list_order_masked measured_unified_order
+#define cerberus_dual_ble_family_classify measured_family_classify
 #include "s3_ble_discovery_live_ui.h"
-#undef cerberus_ble_discovery_list_order
+#undef cerberus_ble_discovery_list_order_masked
+#undef cerberus_dual_ble_family_classify
 #undef heap_caps_calloc
 #else
 /* This suite intentionally retains the legacy/frozen-bank presentation path

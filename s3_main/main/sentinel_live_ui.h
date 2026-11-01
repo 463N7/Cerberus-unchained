@@ -557,12 +557,15 @@ static void live_make_view(void)
     live_view.total_count = record->count;
     if (tool == SENTINEL_SCAN_BLE) {
         if (unified_ble) {
-            live_ble_recent_only = false;
+            if (!cerberus_s3_ble_recent_supported(ble_filter)) live_ble_recent_only = false;
             live_ble_order_dirty = true; /* The legacy 32-index family cache has a different count. */
             ble_discovery_live_store_t *store = ble_discovery_live;
             live_ble_filtered_count = ble_discovery_combined_order();
-            live_view.age_label = store->source_filter == CERBERUS_BLE_DISCOVERY_LIST_S3 ? "SOURCE S3 >" :
-                store->source_filter == CERBERUS_BLE_DISCOVERY_LIST_C5 ? "SOURCE C5 >" : "SOURCE ALL >";
+            live_view.age_label = live_ble_recent_only ?
+                (store->source_filter == CERBERUS_BLE_DISCOVERY_LIST_S3 ? "RECENT S3 >" :
+                 store->source_filter == CERBERUS_BLE_DISCOVERY_LIST_C5 ? "RECENT C5 >" : "RECENT ALL >") :
+                (store->source_filter == CERBERUS_BLE_DISCOVERY_LIST_S3 ? "SOURCE S3 >" :
+                 store->source_filter == CERBERUS_BLE_DISCOVERY_LIST_C5 ? "SOURCE C5 >" : "SOURCE ALL >");
         } else {
         if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_LIST &&
             !cerberus_s3_ble_recent_supported(ble_filter)) live_ble_recent_only = false;
@@ -596,7 +599,7 @@ static void live_make_view(void)
         live_view.total_count = (uint16_t)live_ble_filtered_count;
         if ((size_t)live_page[tool] * 4U >= live_ble_filtered_count) live_page[tool] = 0U;
         snprintf(live_ble_filter_label, sizeof(live_ble_filter_label), "%.15s >", ble_filter_name(ble_filter));
-        live_view.tools_label = ble_filter == CERBERUS_S3_BLE_FILTER_FIND_MY && !ble_attack_selecting ? "MONITOR" : "TOOLS";
+        live_view.tools_label = ble_filter == CERBERUS_S3_BLE_FILTER_FIND_MY && !ble_attack_selecting ? "S3 MONITOR" : "TOOLS";
         live_view.sort_label = live_ble_sort == CERBERUS_S3_BLE_SORT_SIGNAL_DESC ? "SIGNAL >" :
             live_ble_sort == CERBERUS_S3_BLE_SORT_NAME_ASC ? "NAME A-Z >" : unified_ble ? "SOURCE ORDER" : "SCAN ORDER >";
         if (!unified_ble && current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_LIST &&
@@ -702,10 +705,16 @@ static void live_make_view(void)
             ble_discovery_live->inventory.count,
             (unsigned long)ble_discovery_live->inventory.replacements,
             ble_discovery_live->binding_overflows);
-        if (unified_ble)
-            snprintf(live_hint, sizeof(live_hint), "S3 %u + C5 %u OBS / SOURCE FILTER ABOVE",
-                ble_discovery_live->inventory.family == CERBERUS_S3_BLE_FILTER_ALL ?
-                    ble_discovery_live->inventory.count : 0U, companion.count);
+        if (unified_ble) {
+            if (ble_filter == CERBERUS_S3_BLE_FILTER_ALL)
+                snprintf(live_hint, sizeof(live_hint), "S3 %u + C5 %u OBS / SOURCE FILTER ABOVE",
+                    ble_discovery_live->inventory.family == ble_filter ?
+                        ble_discovery_live->inventory.count : 0U, companion.count);
+            else snprintf(live_hint, sizeof(live_hint), "S3 %u + C5 %u / C5 UNCLASSIFIED %u",
+                (unsigned)__builtin_popcount(ble_discovery_live->order_s3_mask),
+                (unsigned)__builtin_popcount(ble_discovery_live->order_c5_mask),
+                (unsigned)ble_discovery_live->order_c5_count - (unsigned)__builtin_popcount(ble_discovery_live->c5_classifiable));
+        }
     }
     if (tool == SENTINEL_SCAN_WIFI && live_view.age_label && record->captured)
         snprintf(live_hint, sizeof(live_hint), "%s / %s / %u IN SWEEP",
@@ -743,7 +752,8 @@ static void live_make_view(void)
         live_view.state == SENTINEL_VIEW_COMPLETE ? "NO SIGNALS FOUND" : NULL;
     if (tool == SENTINEL_SCAN_BLE && ble_discovery_presenting())
         live_view.message = ble_discovery_live->session.enabled ?
-            "WAITING FOR MATCHING REPORTS" : "NO MATCHING OBSERVATIONS";
+            (ble_filter == CERBERUS_S3_BLE_FILTER_ALL ? "WAITING FOR REPORTS" : "WAITING FOR HINTS") :
+            (ble_filter == CERBERUS_S3_BLE_FILTER_ALL ? "NO OBSERVATIONS" : "NO MATCHING HINTS");
     if (tool == SENTINEL_SCAN_BLE && live_ble_recent_only && live_view.age_label && record->captured)
         live_view.message = "NO HINTS WITHIN 30S";
     if (tool == SENTINEL_SCAN_WIFI && live_wifi_recent_only && live_view.age_label && record->captured)
@@ -1094,6 +1104,8 @@ static void handle_live_scan_tap(uint16_t x, uint16_t y)
         ble_discovery_unified()) {
         ble_discovery_live->source_filter = (cerberus_ble_discovery_list_source_t)
             (((unsigned)ble_discovery_live->source_filter + 1U) % CERBERUS_BLE_DISCOVERY_LIST_SOURCE_COUNT);
+        if (ble_discovery_live->source_filter == CERBERUS_BLE_DISCOVERY_LIST_ALL)
+            live_ble_recent_only = cerberus_s3_ble_recent_supported(ble_filter) && !live_ble_recent_only;
         live_page[tool] = 0U;
     }
     else if (action == SENTINEL_VIEW_AGE && tool == SENTINEL_SCAN_BLE &&

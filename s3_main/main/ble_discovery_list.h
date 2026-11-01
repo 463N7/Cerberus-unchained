@@ -185,15 +185,16 @@ static inline bool cerberus_ble_discovery_list_before(
  * is S3 inventory index order followed by C5 published index order, not a shared
  * chronology. Signal ties use name; equal full sort keys retain source/index
  * order. Source plus typed address remains distinct: no rows are deduplicated.
- * Recent-only means a proven original age <=30s, independent of S3 current_mask
- * or family-specific ADV/response admission. UI may elect not to expose it.
+ * Each source mask is computed by its owner, preserving family-specific S3
+ * history/response time and C5 original upper-bound semantics. This ordering
+ * layer never derives classification or treats a receiver mask as identity.
  * Caller provides 64 output slots that do not overlap either source. Invalid
  * arguments return zero without touching output; unused output stays untouched. */
-static inline uint8_t cerberus_ble_discovery_list_order(
+static inline uint8_t cerberus_ble_discovery_list_order_masked(
     const cerberus_s3_ble_discovery_inventory_t *s3,
     const cerberus_dual_ble_row_t *c5, uint8_t c5_count,
     cerberus_ble_discovery_list_source_t source, cerberus_ble_discovery_list_sort_t sort,
-    bool recent_only, uint64_t now_ms,
+    uint32_t s3_visible, uint32_t c5_visible,
     cerberus_ble_discovery_list_ref_t refs[CERBERUS_BLE_DISCOVERY_LIST_CAPACITY])
 {
     if (!refs || !cerberus_ble_discovery_list_inputs_valid(s3, c5, c5_count) ||
@@ -206,11 +207,8 @@ static inline uint8_t cerberus_ble_discovery_list_order(
         uint8_t count = receiver == CERBERUS_BLE_DISCOVERY_LIST_S3 ? (s3 ? s3->count : 0U) : c5_count;
         for (uint8_t i = 0U; i < count; ++i) {
             cerberus_ble_discovery_list_ref_t ref = {receiver, i};
-            if (recent_only) {
-                cerberus_ble_discovery_list_age_t age = cerberus_ble_discovery_list_age(s3, c5, c5_count, ref, now_ms);
-                if (age.kind == CERBERUS_BLE_DISCOVERY_LIST_AGE_UNKNOWN ||
-                    age.ms > CERBERUS_BLE_DISCOVERY_LIST_RECENT_MS) continue;
-            }
+            uint32_t visible_mask = receiver == CERBERUS_BLE_DISCOVERY_LIST_S3 ? s3_visible : c5_visible;
+            if (!(visible_mask & (UINT32_C(1) << i))) continue;
             uint8_t at = visible;
             while (at && cerberus_ble_discovery_list_before(s3, c5, c5_count, ref, refs[at - 1U], sort)) {
                 refs[at] = refs[at - 1U];
@@ -221,4 +219,32 @@ static inline uint8_t cerberus_ble_discovery_list_order(
         }
     }
     return visible;
+}
+
+/* Compatibility entrypoint for ordinary original-age filtering. Family views
+ * pass their own source-specific masks to the shared ordering implementation. */
+static inline uint8_t cerberus_ble_discovery_list_order(
+    const cerberus_s3_ble_discovery_inventory_t *s3,
+    const cerberus_dual_ble_row_t *c5, uint8_t c5_count,
+    cerberus_ble_discovery_list_source_t source, cerberus_ble_discovery_list_sort_t sort,
+    bool recent_only, uint64_t now_ms,
+    cerberus_ble_discovery_list_ref_t refs[CERBERUS_BLE_DISCOVERY_LIST_CAPACITY])
+{
+    if (!cerberus_ble_discovery_list_inputs_valid(s3, c5, c5_count)) return 0U;
+    uint32_t masks[2] = {UINT32_MAX, UINT32_MAX};
+    if (recent_only) {
+        masks[0] = masks[1] = 0U;
+        for (uint8_t source_index = 0U; source_index < 2U; ++source_index) {
+            uint8_t count = source_index ? c5_count : s3 ? s3->count : 0U;
+            for (uint8_t index = 0U; index < count; ++index) {
+                cerberus_ble_discovery_list_ref_t ref = {(uint8_t)(source_index + 1U), index};
+                cerberus_ble_discovery_list_age_t age = cerberus_ble_discovery_list_age(s3, c5, c5_count, ref, now_ms);
+                if (age.kind != CERBERUS_BLE_DISCOVERY_LIST_AGE_UNKNOWN &&
+                    age.ms <= CERBERUS_BLE_DISCOVERY_LIST_RECENT_MS)
+                    masks[source_index] |= UINT32_C(1) << index;
+            }
+        }
+    }
+    return cerberus_ble_discovery_list_order_masked(s3, c5, c5_count,
+        source, sort, masks[0], masks[1], refs);
 }

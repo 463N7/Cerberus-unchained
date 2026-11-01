@@ -19,6 +19,8 @@ static void clean_live(void)
 static void seed_native(cerberus_s3_ble_filter_t family)
 {
     clean_live();
+    drawn[0]=0;
+    CHECK(cerberus_display_fill_rect(0,0,320,480,UI_BACKGROUND)==ESP_OK);
     seed_list();
     memset(&discovery_native,0,sizeof(discovery_native));
     memset(live_records,0,sizeof(live_records));
@@ -30,7 +32,7 @@ static void seed_native(cerberus_s3_ble_filter_t family)
     session.completed=live_session.completed=true;
     live_commands=live_observations=starts=stops=0;
     live_last_poll=0;fail_alloc=false;
-    discovery_ui_allocations=unified_sort_calls=0;
+    discovery_ui_allocations=unified_sort_calls=unified_classify_calls=0;
 }
 
 static void native_tick(uint64_t now,bool asleep)
@@ -392,7 +394,186 @@ static unsigned all_boundary_calls(void)
 }
 
 static void repaint_unified(void)
-{live_make_view();CHECK(live_paint(true)==ESP_OK);}
+{drawn[0]=0;live_make_view();CHECK(live_paint(true)==ESP_OK);}
+
+static void c5_payload(unsigned index,const uint8_t *data,size_t length)
+{
+    CHECK(index<32U&&length<=31U);
+    cerberus_dual_ble_row_t *peer=&companion_store.rows[index];
+    memset(peer->raw,0,sizeof(peer->raw));memcpy(peer->raw,data,length);
+    peer->raw_length=(uint8_t)length;peer->receive.callback_length=(uint8_t)length;
+    ++companion_store.snapshots;
+}
+
+/* Use the real S3 collector to seed original/response evidence, then pass its
+ * result through the real inventory copy and UI. This is not a second family
+ * classifier invented by the presentation fixture. */
+static void s3_payload(unsigned index,unsigned key,uint8_t type,const uint8_t *data,
+    size_t length,bool response_only,bool later_ordinary)
+{
+    static cerberus_s3_ble_snapshot_t snapshot;
+    static const uint8_t ordinary[]={2,1,6};
+    row(index,key,type,-70);
+    cerberus_s3_ble_discovery_bank_t *bank=&discovery_native.bank;
+    cerberus_s3_ble_discovery_record_t *record=&bank->records[index];
+    cerberus_s3_ble_snapshot_begin(&snapshot,record->generation,(uint32_t)clock_ms,false);
+    cerberus_s3_ble_report_t report={.address_type=type,.rssi=-70,.complete=true,.event_type=3,
+        .data=response_only?ordinary:data,.length=response_only?sizeof(ordinary):length};
+    memcpy(report.address,record->peer.address,6);
+    cerberus_s3_ble_snapshot_observe(&snapshot,&report,(uint32_t)clock_ms);
+    if(response_only||later_ordinary){
+        report.scan_response=response_only;report.event_type=response_only?4U:3U;
+        report.data=response_only?data:ordinary;report.length=response_only?length:sizeof(ordinary);
+        cerberus_s3_ble_snapshot_observe(&snapshot,&report,(uint32_t)clock_ms+100U);
+    }
+    CHECK(snapshot.status.stored_count==1U);
+    const cerberus_s3_ble_record_t *from=&snapshot.records[0];
+    record->focus=from->focus;record->observed_ms=from->last_advertisement_ms;
+    memcpy(record->advertisement.data,from->advertisement,sizeof(record->advertisement.data));
+    record->advertisement.length=from->advertisement_length;
+    record->advertisement.event_type=from->advertisement_event_type;
+    record->advertisement.flags=from->advertisement_flags;
+    record->advertisement.reports_seen=from->reports_seen;
+    bank->meta.source_now_ms=(uint64_t)clock_ms+(response_only||later_ordinary?100U:0U);
+}
+
+static void unified_all_families(const char *prefix)
+{
+    static const uint8_t ibeacon[27]={26,0xff,0x4c,0,2,0x15,1,2,3,4};
+    static const uint8_t findmy[]={3,3,0x44,0xfd},flipper[]={3,3,0x82,0x30};
+    static const uint8_t flock[]={4,0xff,0xc8,9,1},meta[]={3,0xff,0x5f,0xfd};
+    static const uint8_t hc[]={6,9,'H','C','-','0','5'},ordinary[]={2,1,6};
+    const struct {const uint8_t *data;size_t size;const char *preview;} cases[]={
+        {ibeacon,sizeof(ibeacon),"family-ibeacon"},{findmy,sizeof(findmy),"family-findmy"},
+        {flipper,sizeof(flipper),"family-flipper"},{flock,sizeof(flock),"family-flock"},
+        {meta,sizeof(meta),"family-meta"},{hc,sizeof(hc),"family-hc"}};
+    for(unsigned family=1U;family<CERBERUS_S3_BLE_FILTER_COUNT;++family){
+        const unsigned c=family-1U;seed_native((cerberus_s3_ble_filter_t)family);
+        native_tick(1000,false);clock_ms=1050;
+        s3_payload(0,70,1,cases[c].data,cases[c].size,false,false);
+        companion_row(0,70,1,-20);c5_payload(0,cases[c].data,cases[c].size);
+        companion_row(1,70,2,-40);c5_payload(1,cases[c].data,cases[c].size);
+        companion_row(2,71,0,-10);c5_payload(2,cases[c].data,cases[c].size);
+        memset(&companion_store.rows[2].receive,0,sizeof(companion_store.rows[2].receive));
+        companion_row(3,72,0,-5);c5_payload(3,ordinary,sizeof(ordinary));
+        strcpy(companion_store.rows[3].name,"Flipper HC-05"); /* Aggregate name is not raw proof. */
+        companion_store.rows[3].uuid[0]=0x82;companion_store.rows[3].uuid[1]=0x30;
+        companion_store.rows[3].uuid_length=2;companion_store.rows[3].manufacturer_id=0xfd5f;
+        native_tick(1050,false);
+        CHECK(ble_discovery_unified()&&live_view.total_count==3U&&live_view.row_count==3U);
+        CHECK(ble_discovery_live->painted_source[0]==CERBERUS_BLE_DISCOVERY_LIST_C5&&
+            ble_discovery_live->painted_source[1]==CERBERUS_BLE_DISCOVERY_LIST_C5&&
+            ble_discovery_live->painted_source[2]==CERBERUS_BLE_DISCOVERY_LIST_S3);
+        CHECK(ble_discovery_live->painted_c5[0].address_type==1U&&ble_discovery_live->painted_c5[1].address_type==2U);
+        CHECK(strstr(live_badges[0],"C5 ADV HINT")&&strstr(live_details[2],"S3 PEAK"));
+        CHECK(strstr(live_hint,"C5 UNCLASSIFIED 1"));
+        CHECK(unified_classify_calls==4U);
+        unsigned parsed=unified_classify_calls,boundaries=all_boundary_calls(),sorts=unified_sort_calls;
+        for(unsigned i=0;i<4U;++i){clock_ms+=200;repaint_unified();}
+        CHECK(unified_classify_calls==parsed&&unified_sort_calls==sorts&&all_boundary_calls()==boundaries);
+        if(family==CERBERUS_S3_BLE_FILTER_FIND_MY)CHECK(!strcmp(live_view.tools_label,"S3 MONITOR"));
+        drawn[0]=0;CHECK(live_paint(true)==ESP_OK);save(prefix,cases[c].preview);
+        /* Source-only controls do not parse, copy or request radio work. */
+        handle_live_scan_tap(260,85);CHECK(live_view.total_count==1U&&!strcmp(live_view.age_label,"SOURCE S3 >"));
+        handle_live_scan_tap(260,85);CHECK(live_view.total_count==2U&&!strcmp(live_view.age_label,"SOURCE C5 >"));
+        CHECK(unified_classify_calls==parsed&&all_boundary_calls()==boundaries);
+        if(family==CERBERUS_S3_BLE_FILTER_FLIPPER){
+            cerberus_dual_ble_row_t painted=ble_discovery_live->painted_c5[0];
+            cerberus_dual_ble_provenance_t proof=ble_discovery_live->painted_c5_provenance[0];
+            companion_row(0,99,3,-2);++companion_store.published_boot_id;++companion_store.published_epoch;
+            handle_live_scan_tap(20,135);CHECK(ble_mode==UI_BLE_MODE_C5&&dual_ble_ui_from_unified);
+            CHECK(!memcmp(&painted,&dual_ble_ui_selected,sizeof(painted))&&
+                !memcmp(&proof,&dual_ble_ui_selected_provenance,sizeof(proof)));
+            actual_c5_footer_tap(250,440);CHECK(archive_save_calls==1U&&archive_save_selected);
+            CHECK(!memcmp(&painted,&archive_saved_c5,sizeof(painted)));
+            actual_c5_footer_tap(40,440);CHECK(ble_mode==UI_BLE_MODE_LIST);
+            repaint_unified();wifi_ui_fail_fill_after=1;CHECK(live_paint(true)==ESP_FAIL);
+            CHECK(!ble_discovery_live->painted_count);ble_discovery_select_painted(0);
+            CHECK(ble_mode==UI_BLE_MODE_LIST&&!ble_discovery_live->selection_pending);
+        }
+        stop_and_release((uint64_t)clock_ms+250U);clean_live();
+    }
+}
+
+static void unified_family_recency(const char *prefix)
+{
+    static const uint8_t findmy[]={3,3,0x44,0xfd};
+    static const uint8_t ibeacon[27]={26,0xff,0x4c,0,2,0x15};
+    seed_native(CERBERUS_S3_BLE_FILTER_FIND_MY);native_tick(1000,false);
+    s3_payload(0,81,1,findmy,sizeof(findmy),true,false);
+    companion_row(0,81,1,-20);c5_payload(0,findmy,sizeof(findmy));
+    companion_store.rows[0].callback_age_ms=0;clock_ms=1100;native_tick(1100,false);
+    CHECK(live_view.total_count==2U&&strstr(live_badges[1],"RSP"));
+    stop_and_release(1200);clock_ms=31000;repaint_unified();
+    unsigned boundaries=all_boundary_calls(),parsed=unified_classify_calls;
+    const char *labels[]={"SOURCE S3 >","SOURCE C5 >","RECENT ALL >","RECENT S3 >","RECENT C5 >","SOURCE ALL >"};
+    const unsigned counts[]={1,1,2,1,1,2};
+    for(unsigned i=0;i<6U;++i){handle_live_scan_tap(260,85);CHECK(!strcmp(live_view.age_label,labels[i])&&live_view.total_count==counts[i]);}
+    handle_live_scan_tap(260,85);handle_live_scan_tap(260,85);handle_live_scan_tap(260,85);
+    CHECK(live_ble_recent_only&&live_view.total_count==2U);
+    clock_ms=31001;repaint_unified();
+    CHECK(live_view.total_count==1U&&ble_discovery_live->painted_source[0]==CERBERUS_BLE_DISCOVERY_LIST_S3);
+    CHECK(strstr(live_badges[0],"RSP")); /* response age29901, original age30001 */
+    drawn[0]=0;CHECK(live_paint(true)==ESP_OK);save(prefix,"family-recent-response-only");
+    clock_ms=31101;repaint_unified();CHECK(!live_view.total_count);
+    CHECK(unified_classify_calls==parsed&&all_boundary_calls()==boundaries);
+    /* Unknown/future C5 source time cannot pass the recent mask. */
+    companion_store.rows[0].request_started_ms=40000;clock_ms=31100;repaint_unified();
+    CHECK(live_view.total_count==1U&&ble_discovery_live->painted_source[0]==CERBERUS_BLE_DISCOVERY_LIST_S3);
+    CHECK(unified_classify_calls==parsed);
+    companion_store.rows[0].request_started_ms=1000;companion_store.rows[0].timing_flags=0;repaint_unified();
+    CHECK(live_view.total_count==1U); /* S3 exact boundary survives; C5 unknown is excluded. */
+    handle_live_scan_tap(260,85); /* RECENT S3 */
+    handle_live_scan_tap(100,65); /* Flipper clears unsupported recency, preserves S3 source. */
+    CHECK(ble_filter==CERBERUS_S3_BLE_FILTER_FLIPPER&&!live_ble_recent_only&&
+        ble_discovery_live->source_filter==CERBERUS_BLE_DISCOVERY_LIST_S3&&!live_view.total_count);
+    CHECK(all_boundary_calls()==boundaries);clean_live();
+
+    seed_native(CERBERUS_S3_BLE_FILTER_IBEACON);native_tick(1000,false);
+    s3_payload(0,82,1,ibeacon,sizeof(ibeacon),false,true);
+    clock_ms=1100;native_tick(1100,false);stop_and_release(1200);
+    live_ble_recent_only=true;clock_ms=31000;repaint_unified();CHECK(live_view.total_count==1U);
+    clock_ms=31001;repaint_unified();CHECK(!live_view.total_count);
+    CHECK(ble_discovery_live->inventory.entries[0].original_source_ms==1100U&&
+        ble_discovery_live->inventory.entries[0].record.focus.ibeacon_observed_ms==1000U);
+    clean_live();
+}
+
+static void unified_family_cache_and_unavailable(const char *prefix)
+{
+    static const uint8_t flipper[]={3,3,0x82,0x30},ordinary[]={2,1,6};
+    seed_native(CERBERUS_S3_BLE_FILTER_FLIPPER);native_tick(1000,false);clock_ms=1050;
+    companion_row(0,90,1,-20);c5_payload(0,flipper,sizeof(flipper));native_tick(1050,false);
+    CHECK(live_view.total_count==1U&&unified_classify_calls==1U);
+    unsigned parsed=unified_classify_calls;
+    /* Same generation cannot conceal a new full epoch/boot publication. */
+    c5_payload(0,ordinary,sizeof(ordinary));++companion_store.published_epoch;
+    repaint_unified();CHECK(!live_view.total_count&&unified_classify_calls==++parsed);
+    c5_payload(0,flipper,sizeof(flipper));++companion_store.published_boot_id;
+    repaint_unified();CHECK(live_view.total_count==1U&&unified_classify_calls==++parsed);
+    companion_store.rows[0].raw_length=31U;companion_store.rows[0].raw_flags=CERBERUS_BLE_ADVERTISEMENT_TRUNCATED;
+    companion_store.rows[0].receive.source_kind=CERBERUS_DUAL_BLE_RECEIVE_EXTENDED;
+    companion_store.rows[0].receive.callback_length=32U;companion_store.rows[0].receive.data_status=0U;
+    companion_store.rows[0].receive.primary_phy=1U;++companion_store.snapshots;
+    repaint_unified();CHECK(!live_view.total_count&&strstr(live_hint,"C5 UNCLASSIFIED 1"));++parsed;
+    drawn[0]=0;CHECK(live_paint(true)==ESP_OK);
+    CHECK(strstr(drawn,"WAITING FOR HINTS")&&strstr(drawn,"LIVE RESULTS UPDATE AS AVAILABLE"));
+    save(prefix,"family-unclassifiable-prefix");
+    /* A source publication while ALL is visible invalidates cached family
+     * bits even though ALL does not parse/classify its generic results. */
+    ble_filter=CERBERUS_S3_BLE_FILTER_ALL;repaint_unified();
+    companion_row(0,90,1,-20);c5_payload(0,flipper,sizeof(flipper));repaint_unified();
+    CHECK(unified_classify_calls==parsed);
+    ble_filter=CERBERUS_S3_BLE_FILTER_FLIPPER;repaint_unified();CHECK(live_view.total_count==1U&&unified_classify_calls==++parsed);
+    /* OUI-only admission is an address clue, never advertised payload evidence. */
+    ble_filter=CERBERUS_S3_BLE_FILTER_FLOCK;c5_payload(0,ordinary,sizeof(ordinary));
+    companion_store.rows[0].address_type=0;companion_store.rows[0].address[5]=0x58;
+    companion_store.rows[0].address[4]=0x8e;companion_store.rows[0].address[3]=0x81;
+    repaint_unified();CHECK(live_view.total_count==1U&&strstr(live_badges[0],"C5 ADDR CLUE")&&!strstr(live_badges[0],"ADV HINT"));
+    drawn[0]=0;CHECK(live_paint(true)==ESP_OK);save(prefix,"family-flock-address-clue");
+    companion_store.rows[0].address_type=1;++companion_store.snapshots;repaint_unified();CHECK(!live_view.total_count);
+    stop_and_release(1200);clean_live();
+}
 
 static void unified_filters_capacity_and_family(const char *prefix)
 {
@@ -422,23 +603,22 @@ static void unified_filters_capacity_and_family(const char *prefix)
     CHECK(all_boundary_calls()==before&&discovery_ui_allocations==allocated);
     drawn[0]=0;CHECK(live_paint(true)==ESP_OK);save(prefix,"unified-c5-filter");
 
-    /* A family selection is still S3 evidence only; preserve the user's source
-     * preference for the later ALL view and never treat C5 rows as a family. */
+    /* Source preference persists; ordinary C5 AD has no iBeacon hint, and
+     * the old ALL S3 inventory cannot masquerade as the new family bank. */
     handle_live_scan_tap(100,65);
-    CHECK(ble_filter==CERBERUS_S3_BLE_FILTER_IBEACON&&!ble_discovery_unified());
+    CHECK(ble_filter==CERBERUS_S3_BLE_FILTER_IBEACON&&ble_discovery_unified());
     CHECK(ble_discovery_live->source_filter==CERBERUS_BLE_DISCOVERY_LIST_C5);
-    CHECK(!live_view.age_label||!strstr(live_view.age_label,"SOURCE"));
+    CHECK(!strcmp(live_view.age_label,"SOURCE C5 >")&&live_view.total_count==0);
     while(ble_filter!=CERBERUS_S3_BLE_FILTER_ALL)handle_live_scan_tap(100,65);
     CHECK(ble_discovery_unified()&&!strcmp(live_view.age_label,"SOURCE C5 >")&&live_view.total_count==32);
     handle_live_scan_tap(260,85);CHECK(live_view.total_count==64&&!strcmp(live_view.age_label,"SOURCE ALL >"));
     CHECK(all_boundary_calls()==before);
     /* The unified count must never masquerade as a reusable family cache.
      * Same family/epoch/revision before and after an intervening ALL view. */
-    ble_filter=CERBERUS_S3_BLE_FILTER_FLIPPER;repaint_unified();CHECK(live_view.total_count==32);
+    ble_filter=CERBERUS_S3_BLE_FILTER_FLIPPER;repaint_unified();CHECK(live_view.total_count==0);
     ble_filter=CERBERUS_S3_BLE_FILTER_ALL;live_page[SENTINEL_SCAN_BLE]=15;repaint_unified();CHECK(live_view.total_count==64);
     ble_filter=CERBERUS_S3_BLE_FILTER_FLIPPER;repaint_unified();
-    CHECK(live_view.total_count==32&&live_view.page==0&&live_view.row_count==4);
-    for(unsigned i=0;i<4;++i)CHECK(ble_discovery_live->painted_source[i]==CERBERUS_BLE_DISCOVERY_LIST_S3);
+    CHECK(live_view.total_count==0&&live_view.page==0&&live_view.row_count==0);
     ble_filter=CERBERUS_S3_BLE_FILTER_ALL;repaint_unified();CHECK(live_view.total_count==64);
     ble_discovery_live->inventory.family=CERBERUS_S3_BLE_FILTER_FLIPPER;
     repaint_unified();CHECK(live_view.total_count==32&&ble_discovery_live->painted_source[0]==CERBERUS_BLE_DISCOVERY_LIST_C5);
@@ -563,9 +743,22 @@ static void unified_committed_order_cache(void)
     stop_and_release(3000);clean_live();
 }
 
+static void empty_receive_explanation(void)
+{
+    sentinel_scan_view_t view={.kind=SENTINEL_VIEW_BLE,.state=SENTINEL_VIEW_LIVE};
+    drawn[0]=0;CHECK(sentinel_scan_view_draw(&view,0)==ESP_OK);
+    CHECK(strstr(drawn,"LIVE RESULTS UPDATE AS AVAILABLE"));
+    CHECK(!strstr(drawn,"RESULTS APPEAR WHEN THE SWEEP FINISHES"));
+    view.kind=SENTINEL_VIEW_WIFI;
+    drawn[0]=0;CHECK(sentinel_scan_view_draw(&view,0)==ESP_OK);
+    CHECK(strstr(drawn,"RESULTS APPEAR WHEN THE SWEEP FINISHES"));
+    CHECK(!strstr(drawn,"LIVE RESULTS UPDATE AS AVAILABLE"));
+}
+
 int main(int argc,char **argv)
 {
     CHECK(argc==2);
+    empty_receive_explanation();
     first_results_and_frozen_tap(argv[1]);
     continuous_family_and_stop(argv[1]);
     failures_and_navigation();
@@ -577,6 +770,9 @@ int main(int argc,char **argv)
     unified_frozen_c5_selection_save_fox(argv[1]);
     unified_age_failure_and_back(argv[1]);
     unified_committed_order_cache();
+    unified_all_families(argv[1]);
+    unified_family_recency(argv[1]);
+    unified_family_cache_and_unavailable(argv[1]);
     printf("Ordinary BLE live UI: %u checks passed; active updates, frozen painted selection, scoped cleanup and C5 independence\n",live_checks);
     return 0;
 }

@@ -6,6 +6,7 @@
 #include "dual_ble_list.h"
 #include "esp_heap_caps.h"
 #include "ble_receive_info_ui.h"
+#include "dual_ble_hint_ui.h"
 
 enum { DUAL_BLE_UI_NONE, DUAL_BLE_UI_REDRAW, DUAL_BLE_UI_BACK_S3,
     DUAL_BLE_UI_TOGGLE, DUAL_BLE_UI_FOX };
@@ -20,6 +21,8 @@ static uint8_t dual_ble_ui_target[6], dual_ble_ui_type;
 static int dual_ble_ui_mode = -1;
 static bool dual_ble_ui_attempted, dual_ble_ui_detail;
 static bool dual_ble_ui_receive_info;
+static bool dual_ble_ui_hints;
+static uint8_t dual_ble_ui_hint_page, dual_ble_ui_hint_pages;
 static bool dual_ble_ui_from_unified;
 static esp_err_t dual_ble_ui_error;
 
@@ -91,7 +94,10 @@ static inline void dual_ble_ui_get_analyzer_view(cerberus_dual_ble_analyzer_view
 static void dual_ble_ui_open(bool reset_detail)
 {
     dual_ble_ui_from_unified = false;
-    if (reset_detail) { dual_ble_ui_detail = false; dual_ble_ui_receive_info = false; }
+    if (reset_detail) {
+        dual_ble_ui_detail = false; dual_ble_ui_receive_info = false; dual_ble_ui_hints = false;
+        dual_ble_ui_hint_page = dual_ble_ui_hint_pages = 0U;
+    }
 }
 
 static void dual_ble_ui_select_frozen(const cerberus_dual_ble_row_t *row,
@@ -103,6 +109,7 @@ static void dual_ble_ui_select_frozen(const cerberus_dual_ble_row_t *row,
     dual_ble_ui_selected_provenance = *provenance;
     dual_ble_ui_detail = true;
     dual_ble_ui_receive_info = false;
+    dual_ble_ui_hints = false; dual_ble_ui_hint_page = dual_ble_ui_hint_pages = 0U;
     dual_ble_ui_from_unified = true;
 }
 
@@ -127,17 +134,27 @@ static esp_err_t dual_ble_ui_draw_receive(const cerberus_dual_ble_row_t *row)
     return ble_receive_info_ui_draw(&row->receive, row->raw_length, 230U);
 }
 
+static void dual_ble_ui_label(const cerberus_dual_ble_row_t *row,
+    char out[CERBERUS_BLE_NAME_MAX_LENGTH + 1U])
+{
+    if (!row->name[0] && privacy_addresses_masked())
+        memcpy(out, "Unnamed device", sizeof("Unnamed device"));
+    else cerberus_dual_ble_list_label(row, out);
+}
+
 static esp_err_t dual_ble_ui_draw(bool s3_enabled)
 {
     char line[64], identifier[24], name[CERBERUS_BLE_NAME_MAX_LENGTH + 1U];
     uint8_t painted_count = 0U;
+    uint8_t hint_pages = 0U;
     dual_ble_ui_painted_count = 0U;
+    dual_ble_ui_hint_pages = 0U;
     const uint64_t now = dual_ble_ui_clock(NULL);
     cerberus_dual_ble_view_t view; dual_ble_ui_get_view(&view);
     ESP_RETURN_ON_ERROR(draw_small_button(8, 50, 304, 30, "BACK TO BLE LIST"), TAG, "C5 BLE back");
     if (dual_ble_ui_detail) {
         const cerberus_dual_ble_row_t *row = &dual_ble_ui_selected;
-        cerberus_dual_ble_list_label(row, name);
+        dual_ble_ui_label(row, name);
         snprintf(line, sizeof(line), "C5 / %s", name);
         ESP_RETURN_ON_ERROR(draw_centered(96, line, UI_TEXT, 1), TAG, "C5 BLE name");
         cerberus_privacy_format_ble_identifier(row->address, privacy_addresses_masked(), identifier, sizeof(identifier));
@@ -155,11 +172,16 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
         ESP_RETURN_ON_ERROR(draw_centered(162, line, UI_MUTED, 1), TAG, "C5 BLE timing");
         snprintf(line, sizeof(line), "REPORTS %u / VENDOR ID %04X", row->reports, row->manufacturer_id);
         ESP_RETURN_ON_ERROR(draw_centered(186, line, UI_TEXT, 1), TAG, "C5 BLE metadata");
-        ESP_RETURN_ON_ERROR(draw_small_button(8, 198, 148, 26,
-            dual_ble_ui_receive_info ? "RAW ADV" : "RAW ADV *"), TAG, "C5 raw tab");
-        ESP_RETURN_ON_ERROR(draw_small_button(164, 198, 148, 26,
-            dual_ble_ui_receive_info ? "RECEIVE INFO *" : "RECEIVE INFO"), TAG, "C5 metadata tab");
-        if (dual_ble_ui_receive_info) {
+        ESP_RETURN_ON_ERROR(draw_small_button(8, 198, 96, 26,
+            !dual_ble_ui_receive_info && !dual_ble_ui_hints ? "RAW ADV *" : "RAW ADV"), TAG, "C5 raw tab");
+        ESP_RETURN_ON_ERROR(draw_small_button(112, 198, 96, 26,
+            dual_ble_ui_receive_info ? "RX INFO *" : "RX INFO"), TAG, "C5 metadata tab");
+        ESP_RETURN_ON_ERROR(draw_small_button(216, 198, 96, 26,
+            dual_ble_ui_hints ? "HINTS *" : "HINTS"), TAG, "C5 hint tab");
+        if (dual_ble_ui_hints) {
+            ESP_RETURN_ON_ERROR(dual_ble_hint_ui_draw(row, &dual_ble_ui_selected_provenance,
+                dual_ble_ui_hint_page, &hint_pages), TAG, "C5 original hints");
+        } else if (dual_ble_ui_receive_info) {
             ESP_RETURN_ON_ERROR(dual_ble_ui_draw_receive(row), TAG, "C5 receive metadata");
         } else {
             snprintf(line, sizeof(line), "ORIGINAL ADV %u B / FLAGS %02X", row->raw_length, row->raw_flags);
@@ -200,7 +222,7 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
                     &dual_ble_ui_painted_provenance[i])) break;
             uint16_t y = (uint16_t)(150U + i * 42U);
             ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(8, y, 304, 40, UI_PANEL), TAG, "C5 BLE row");
-            cerberus_dual_ble_list_label(row, name);
+            dual_ble_ui_label(row, name);
             ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 3U, name, UI_TEXT, UI_PANEL, 1), TAG, "C5 BLE row name");
             cerberus_privacy_format_ble_identifier(row->address, privacy_addresses_masked(), identifier, sizeof(identifier));
             snprintf(line, sizeof(line), "%s T%u", identifier, row->address_type);
@@ -234,6 +256,7 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
     ESP_RETURN_ON_ERROR(draw_button(20, 370, 280, 40,
         s3_enabled ? "STOP BOTH RECEIVERS" : "START BOTH RECEIVERS"), TAG, "C5 BLE control");
     dual_ble_ui_painted_count = painted_count;
+    dual_ble_ui_hint_pages = hint_pages;
     return ESP_OK;
 }
 
@@ -243,9 +266,17 @@ static int dual_ble_ui_tap(uint16_t x, uint16_t y)
     if (x >= 20U && x < 300U && y >= 370U && y < 410U) return DUAL_BLE_UI_TOGGLE;
     if (dual_ble_ui_detail) {
         if (y >= 198U && y < 224U) {
-            if (x >= 8U && x < 156U) dual_ble_ui_receive_info = false;
-            else if (x >= 164U && x < 312U) dual_ble_ui_receive_info = true;
+            if (x >= 8U && x < 104U) { dual_ble_ui_receive_info = false; dual_ble_ui_hints = false; }
+            else if (x >= 112U && x < 208U) { dual_ble_ui_receive_info = true; dual_ble_ui_hints = false; }
+            else if (x >= 216U && x < 312U) { dual_ble_ui_receive_info = false; dual_ble_ui_hints = true; }
             else return DUAL_BLE_UI_NONE;
+            dual_ble_ui_hint_pages = 0U;
+            return DUAL_BLE_UI_REDRAW;
+        }
+        if (dual_ble_ui_hints && dual_ble_ui_hint_pages > 1U &&
+            x >= 8U && x < 312U && y >= 294U && y < 312U) {
+            dual_ble_ui_hint_page = (uint8_t)((dual_ble_ui_hint_page + 1U) % dual_ble_ui_hint_pages);
+            dual_ble_ui_hint_pages = 0U;
             return DUAL_BLE_UI_REDRAW;
         }
         if (y >= 316U && y < 354U) {
@@ -271,6 +302,7 @@ static int dual_ble_ui_tap(uint16_t x, uint16_t y)
                 dual_ble_ui_selected_provenance = dual_ble_ui_painted_provenance[row];
                 dual_ble_ui_detail = true;
                 dual_ble_ui_receive_info = false;
+                dual_ble_ui_hints = false; dual_ble_ui_hint_page = dual_ble_ui_hint_pages = 0U;
                 return DUAL_BLE_UI_REDRAW;
             }
         }

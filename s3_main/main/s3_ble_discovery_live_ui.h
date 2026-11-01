@@ -3,6 +3,15 @@
 #include "s3_ble_discovery_inventory.h"
 #include "s3_ble_discovery_session.h"
 #include "ble_discovery_list.h"
+#include "dual_ble_family.h"
+
+_Static_assert((int)CERBERUS_DUAL_BLE_FAMILY_IBEACON == (int)CERBERUS_S3_BLE_FOCUS_IBEACON &&
+    (int)CERBERUS_DUAL_BLE_FAMILY_FIND_MY == (int)CERBERUS_S3_BLE_FOCUS_FIND_MY &&
+    (int)CERBERUS_DUAL_BLE_FAMILY_FLIPPER == (int)CERBERUS_S3_BLE_FOCUS_FLIPPER &&
+    (int)CERBERUS_DUAL_BLE_FAMILY_FLOCK == (int)CERBERUS_S3_BLE_FOCUS_FLOCK &&
+    (int)CERBERUS_DUAL_BLE_FAMILY_META_HINT == (int)CERBERUS_S3_BLE_FOCUS_META_HINT &&
+    (int)CERBERUS_DUAL_BLE_FAMILY_HC_NAME_HINT == (int)CERBERUS_S3_BLE_FOCUS_HC_NAME_HINT,
+    "Receiver family category mapping");
 
 typedef struct {
     cerberus_ble_discovery_session_t session;
@@ -18,8 +27,11 @@ typedef struct {
     cerberus_ble_discovery_list_source_t source_filter;
     uint8_t painted_source[4], built_count;
     uint64_t order_s3_epoch, order_s3_revision, order_c5_boot, order_c5_epoch;
-    uint32_t order_c5_snapshots;
-    uint8_t order_s3_count, order_c5_count, order_count, order_sort, order_source;
+    uint32_t order_c5_snapshots, order_s3_mask, order_c5_mask;
+    uint32_t c5_classifiable, c5_oui_only;
+    uint8_t c5_family_bits[CERBERUS_DUAL_BLE_CAPACITY];
+    bool c5_family_cache_valid;
+    uint8_t order_s3_count, order_c5_count, order_count, order_sort, order_source, order_family;
     bool order_valid;
     live_scan_record_t presentation;
     uint64_t last_draw_ms;
@@ -47,9 +59,9 @@ static bool ble_discovery_presenting(void)
 
 static bool ble_discovery_unified(void)
 {
-    /* Family selection controls S3 admission. Generic C5 rows have no proof
-     * that they satisfy that classifier, so only ALL uses the combined list. */
-    return ble_discovery_presenting() && ble_filter == CERBERUS_S3_BLE_FILTER_ALL;
+    /* Each receiver supplies its own family proof; the combined references
+     * never turn C5 original hints into S3 history or response eligibility. */
+    return ble_discovery_presenting();
 }
 
 static bool ble_discovery_keeps_awake(void)
@@ -311,33 +323,93 @@ static uint8_t ble_discovery_combined_order(void)
 {
     ble_discovery_live_store_t *store = ble_discovery_live;
     const cerberus_s3_ble_discovery_inventory_t *s3 =
-        store->inventory.family == CERBERUS_S3_BLE_FILTER_ALL ? &store->inventory : NULL;
+        store->inventory.family == ble_filter ? &store->inventory : NULL;
     const cerberus_dual_ble_scan_t *c5 = dual_ble_ui_store;
     uint64_t epoch = s3 ? s3->epoch : 0U, revision = s3 ? s3->revision : 0U;
     uint64_t boot = c5 ? c5->published_boot_id : 0U, c5_epoch = c5 ? c5->published_epoch : 0U;
     uint32_t snapshots = c5 ? c5->snapshots : 0U;
-    uint8_t s3_count = s3 ? s3->count : 0U, c5_count = c5 ? c5->count : 0U;
-    /* No age predicate is exposed here. Re-sort only when a committed bank
-     * or a presentation choice changes; the four visible ages still repaint. */
-    if (!store->order_valid || snapshots == UINT32_MAX || revision == UINT64_MAX ||
-        store->order_s3_epoch != epoch || store->order_s3_revision != revision ||
+    uint8_t s3_count = s3 ? s3->count : 0U;
+    uint8_t c5_count = c5 && c5->count <= CERBERUS_DUAL_BLE_CAPACITY ? c5->count : 0U;
+    bool c5_changed = !store->order_valid || snapshots == UINT32_MAX ||
         store->order_c5_boot != boot || store->order_c5_epoch != c5_epoch ||
-        store->order_c5_snapshots != snapshots || store->order_s3_count != s3_count ||
-        store->order_c5_count != c5_count || store->order_sort != (uint8_t)live_ble_sort ||
-        store->order_source != (uint8_t)store->source_filter) {
-        store->order_count = cerberus_ble_discovery_list_order(s3, c5 ? c5->rows : NULL, c5_count,
+        store->order_c5_snapshots != snapshots || store->order_c5_count != c5_count;
+    if (c5_changed) store->c5_family_cache_valid = false;
+    if (ble_filter != CERBERUS_S3_BLE_FILTER_ALL && !store->c5_family_cache_valid) {
+        store->c5_classifiable = store->c5_oui_only = 0U;
+        memset(store->c5_family_bits, 0, sizeof(store->c5_family_bits));
+        for (uint8_t i = 0U; i < c5_count; ++i) {
+            cerberus_dual_ble_family_evidence_t evidence;
+            const cerberus_dual_ble_provenance_t provenance = {
+                .boot_id = boot, .epoch = c5_epoch, .generation = c5->published_generation, .index = i};
+            if (cerberus_dual_ble_family_classify(&c5->rows[i], &provenance, &evidence)) {
+                store->c5_classifiable |= UINT32_C(1) << i;
+                store->c5_family_bits[i] = evidence.categories;
+                if (evidence.flock_oui && !cerberus_ble_flock_hints_level(&evidence.flock))
+                    store->c5_oui_only |= UINT32_C(1) << i;
+            }
+        }
+        store->c5_family_cache_valid = true;
+    }
+    const uint64_t now_ms = (uint64_t)(esp_timer_get_time() / 1000LL);
+    uint32_t s3_mask = s3 ? ble_discovery_visible_mask(now_ms) : 0U, c5_mask = 0U;
+    uint8_t wanted = ble_filter == CERBERUS_S3_BLE_FILTER_ALL ? 0U :
+        (uint8_t)(1U << ((unsigned)ble_filter - 1U));
+    for (uint8_t i = 0U; i < c5_count; ++i) {
+        if (wanted && !(store->c5_family_bits[i] & wanted)) continue;
+        if (live_ble_recent_only && cerberus_s3_ble_recent_supported(ble_filter)) {
+            uint32_t upper;
+            if (!cerberus_dual_ble_list_age(&c5->rows[i], now_ms, &upper) ||
+                upper > CERBERUS_DUAL_BLE_RECENT_MS) continue;
+        }
+        c5_mask |= UINT32_C(1) << i;
+    }
+    /* Classify only committed source changes. Age-only repaints recompute
+     * masks, never raw hints; a saturated publication counter cannot prove an
+     * unchanged bank and deliberately forces conservative cache rebuilding. */
+    if (!store->order_valid || c5_changed || revision == UINT64_MAX ||
+        store->order_s3_epoch != epoch || store->order_s3_revision != revision ||
+        store->order_s3_count != s3_count || store->order_sort != (uint8_t)live_ble_sort ||
+        store->order_source != (uint8_t)store->source_filter || store->order_family != (uint8_t)ble_filter ||
+        store->order_s3_mask != s3_mask || store->order_c5_mask != c5_mask) {
+        store->order_count = cerberus_ble_discovery_list_order_masked(s3, c5 ? c5->rows : NULL, c5_count,
             store->source_filter,
             live_ble_sort == CERBERUS_S3_BLE_SORT_SIGNAL_DESC ? CERBERUS_BLE_DISCOVERY_LIST_SIGNAL :
             live_ble_sort == CERBERUS_S3_BLE_SORT_NAME_ASC ? CERBERUS_BLE_DISCOVERY_LIST_NAME :
-            CERBERUS_BLE_DISCOVERY_LIST_SOURCE_ORDER, false, 0U, store->order);
+            CERBERUS_BLE_DISCOVERY_LIST_SOURCE_ORDER, s3_mask, c5_mask, store->order);
         store->order_s3_epoch = epoch; store->order_s3_revision = revision;
         store->order_c5_boot = boot; store->order_c5_epoch = c5_epoch;
         store->order_c5_snapshots = snapshots;
         store->order_s3_count = s3_count; store->order_c5_count = c5_count;
         store->order_sort = (uint8_t)live_ble_sort; store->order_source = (uint8_t)store->source_filter;
+        store->order_family = (uint8_t)ble_filter;
+        store->order_s3_mask = s3_mask; store->order_c5_mask = c5_mask;
         store->order_valid = true;
     }
     return store->order_count;
+}
+
+/* S3 family evidence keeps its original ADV/matched-response/history semantics.
+ * The caller passes the already copied painted entry, never a new bank slot. */
+static void ble_discovery_s3_family_badge(unsigned row,
+    const cerberus_s3_ble_discovery_entry_t *entry, uint64_t now_ms)
+{
+    const cerberus_s3_ble_focus_t *focus = &entry->record.focus;
+    const cerberus_s3_ble_discovery_evidence_t *hints = &focus->discovery;
+    char *out = live_badges[row]; size_t capacity = sizeof(live_badges[row]);
+    if (ble_filter == CERBERUS_S3_BLE_FILTER_FIND_MY)
+        cerberus_findmy_hint_sources_line(&hints->findmy_advertisement, &hints->findmy_scan_response, out, capacity);
+    else if (ble_filter == CERBERUS_S3_BLE_FILTER_FLIPPER)
+        cerberus_flipper_hint_sources_line(&hints->flipper_advertisement, &hints->flipper_scan_response, out, capacity);
+    else if (ble_filter == CERBERUS_S3_BLE_FILTER_META_HINT)
+        cerberus_meta_hint_sources_line(&hints->meta_advertisement, &hints->meta_scan_response, out, capacity);
+    else if (ble_filter == CERBERUS_S3_BLE_FILTER_IBEACON) {
+        cerberus_ibeacon_source_line(focus->ibeacon_scan_response, cerberus_s3_ble_ibeacon_is_current(focus),
+            (uint32_t)now_ms - focus->ibeacon_observed_ms, true, out, capacity);
+        ble_hint_age64_line(out, capacity, focus->ibeacon_observed_ms, entry->source_now_ms, (int64_t)now_ms);
+    } else if (ble_filter == CERBERUS_S3_BLE_FILTER_FLOCK)
+        cerberus_flock_sources_line(&hints->flock_advertisement, &hints->flock_scan_response, focus->flock_oui_clue, out, capacity);
+    else if (ble_filter == CERBERUS_S3_BLE_FILTER_HC_NAME_HINT)
+        cerberus_hc_sources_line(hints->hc_advertisement, hints->hc_scan_response, out, capacity);
 }
 
 /* Freeze the four displayed proofs while building their strings. A later
@@ -367,6 +439,11 @@ static bool ble_discovery_build_unified_row(unsigned row, size_t position, uint6
             snprintf(live_badges[row], sizeof(live_badges[row]), "S3 PEAK / ADV %llus",
                 (unsigned long long)(age / 1000U));
         else snprintf(live_badges[row], sizeof(live_badges[row]), "S3 PEAK / ADV AGE UNKNOWN");
+        if (ble_filter != CERBERUS_S3_BLE_FILTER_ALL) {
+            snprintf(live_details[row], sizeof(live_details[row]), "S3 PEAK %s T%u%s",
+                identifier, peer->address_type, earlier ? " OLD" : "");
+            ble_discovery_s3_family_badge(row, entry, now_ms);
+        }
         out->rssi = peer->rssi;
         out->signal_valid = cerberus_ble_rssi_valid(peer->rssi);
         out->marked = cerberus_settings_ble_is_favorite(peer->address, peer->address_type);
@@ -385,6 +462,16 @@ static bool ble_discovery_build_unified_row(unsigned row, size_t position, uint6
             snprintf(live_badges[row], sizeof(live_badges[row]), "C5 LAST / AGE<=%lus%s",
                 (unsigned long)seconds, age > CERBERUS_DUAL_BLE_RECENT_MS ? " RECENCY?" : "");
         } else snprintf(live_badges[row], sizeof(live_badges[row]), "C5 LAST / ADV AGE UNKNOWN");
+        if (ble_filter != CERBERUS_S3_BLE_FILTER_ALL) {
+            snprintf(live_details[row], sizeof(live_details[row]), "C5 LAST %s T%u", identifier, peer->address_type);
+            const char *kind = ble_filter == CERBERUS_S3_BLE_FILTER_FLOCK &&
+                (store->c5_oui_only & (UINT32_C(1) << ref.index)) ? "C5 ADDR CLUE" : "C5 ADV HINT";
+            if (cerberus_dual_ble_list_age(peer, now_ms, &age)) {
+                uint32_t seconds = age / 1000U + (age % 1000U != 0U);
+                snprintf(live_badges[row], sizeof(live_badges[row]), "%s <=%lus%s",
+                    kind, (unsigned long)seconds, age > CERBERUS_DUAL_BLE_RECENT_MS ? " RECENCY?" : "");
+            } else snprintf(live_badges[row], sizeof(live_badges[row]), "%s / AGE UNKNOWN", kind);
+        }
         out->rssi = peer->rssi;
         out->signal_valid = cerberus_dual_ble_list_rssi_valid(peer);
         out->marked = cerberus_settings_ble_is_favorite(peer->address, peer->address_type);

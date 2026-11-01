@@ -356,10 +356,37 @@ static void generated_cross_product(void)
     }
 }
 
+static void source_masks(void)
+{
+    initialize(32U,32U);
+    for(unsigned i=0;i<32U;++i){
+        strcpy(inventory.entries[i].record.peer.name,"Equal");
+        strcpy(companion[i].name,"Equal");
+        inventory.entries[i].record.peer.rssi=companion[i].rssi=-50;
+        companion[i].timing_flags=CERBERUS_DUAL_BLE_RSSI_VALID;
+    }
+    freeze_inputs();
+    const uint32_t masks[]={0U,UINT32_MAX,UINT32_C(0xaaaaaaaa),UINT32_C(0x55555555),UINT32_C(0x80000001)};
+    for(unsigned source=0;source<3U;++source)for(unsigned sort=0;sort<3U;++sort)
+        for(unsigned a=0;a<5U;++a)for(unsigned b=0;b<5U;++b){
+            memset(&output,0xa5,sizeof(output));
+            unsigned count=cerberus_ble_discovery_list_order_masked(&inventory,companion,32U,
+                source,sort,masks[a],masks[b],output.refs),expected=0U;
+            for(unsigned receiver=1;receiver<=2U;++receiver){
+                if(source&&source!=receiver)continue;
+                for(unsigned i=0;i<32U;++i)if((receiver==1?masks[a]:masks[b])&(UINT32_C(1)<<i))
+                    expect(expected++,receiver,i);
+            }
+            CHECK(count==expected);
+            for(unsigned i=count;i<64U;++i)expect(i,0xa5,0xa5);
+            unchanged();
+        }
+}
+
 int main(void)
 {
     capacity_and_sources(); typed_identity_and_ties(); signal_semantics(); labels();
-    ages_and_recent(); invalid_arguments(); generated_cross_product();
+    ages_and_recent(); invalid_arguments(); generated_cross_product();source_masks();
     printf("BLE discovery list PASS: %u checks; 64 source refs, stable ordering, typed identity and exact/upper ages\n", checks);
     return 0;
 }

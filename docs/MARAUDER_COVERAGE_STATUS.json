@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "checkpoint": "rev106-source-preparation",
-  "scope": "Editorial source/workflow status through rev106 dual-receiver passive BLE Analyzer preparation, following rev105 saved report browsing and rev104 unified live discovery; rev103 remains installed. C5 source-clock callback intervals remain separate from S3 200 ms buckets and report evidence. See DUAL_RADIO_REV106.md for local implementation/validation limits, DUAL_RADIO_REV105.md and DUAL_RADIO_REV104.md for preceding local checkpoints, and DUAL_RADIO_REV103.md for installation evidence. Full Marauder parity remains incomplete. The clean local pinned develop source 79cc6bcba1db6679baee1dab2b0c1ad5010e6363 was inspected for Analyzer behavior on 2026-11-01; this is not a new remote-head check.",
+  "checkpoint": "rev107-source",
+  "scope": "Editorial source/workflow status through rev107 dual-receiver BLE family-view implementation. Rev106/C5 firmware65 is installed; rev107 extends source-specific family presentation and C5 original-ADV details. See DUAL_RADIO_REV107.md for implementation, validation and source-retention limits. Full Marauder parity remains incomplete. The GitHub develop ref was checked on 2026-11-01 and remains at 79cc6bcba1db6679baee1dab2b0c1ad5010e6363, matching the clean pinned source.",
   "status_definitions": {
     "partial": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open.",
     "pending": "The distinct upstream workflow has no verified implementation at this checkpoint.",
@@ -266,10 +266,10 @@
       "symbol": "BT_SCAN_SKIMMERS",
       "family": "ble_tag_and_device_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/WATCH_SIGNATURES.md",
-      "next_gap": "Exact complete-report HC-name hints are implemented. Validate real report formats, source-age display and repeated transitions; a matching name does not confirm a skimmer or physical identity.",
-      "s3_role": "S3 receives BLE broadcasts and applies typed classifiers, evidence display and sessions.",
-      "c5_role": "C5 can survey Wi-Fi concurrently; it does not supply the current BLE inventory.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV107.md",
+      "next_gap": "Rev107 adds combined source-labelled family lists and C5 original-advertisement hints from complete retained payloads. S3 admission, matched-response and historical evidence remain independent. C5 longer complete payloads, family-priority retention, response acquisition, physical formats, saved-file workflows, repeated transitions and sustained performance remain open. No authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV107.md.",
+      "s3_role": "S3 retains its family admission/evidence, classifies complete frozen C5 originals, and owns the source-labelled list and details.",
+      "c5_role": "C5 continues existing passive reception and bounded frozen original-ADV transport with source metadata and timing.",
       "related_menu_entries": [
         245
       ],
@@ -284,7 +284,10 @@
         "s3_main/main/s3_ble_tracker.h",
         "s3_main/main/s3_hc_hint_view.h",
         "s3_main/main/sentinel_live_ui.h",
-        "s3_main/main/ui.c"
+        "s3_main/main/ui.c",
+        "s3_main/main/dual_ble_family.h",
+        "s3_main/main/s3_ble_discovery_live_ui.h",
+        "s3_main/main/dual_ble_ui.h"
       ],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open."
     },
@@ -774,10 +777,10 @@
       "symbol": "BT_SCAN_AIRTAG",
       "family": "ble_tag_and_device_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/WATCH_SIGNATURES.md",
-      "next_gap": "Selected or retained typed S3/C5 BLE observations can be saved as independent .BLE archives. Rev102 v4 retains the frozen C5 receive envelope alongside the separately admitted S3 response prefix, source time and correlation proof introduced in v3. V1/v2 response availability and pre-v4 receive metadata remain UNKNOWN; C5 response evidence remains unavailable. Physical formats, selected/both-bank save/reboot/reopen, Marauder JSON compatibility and full receive/tracking parity remain open. Loaded rows never become live action targets. See BLE_SD_SNAPSHOTS.md and DUAL_RADIO_REV102.md.",
-      "s3_role": "S3 receives BLE broadcasts and applies typed classifiers, evidence display and sessions.",
-      "c5_role": "C5 can survey Wi-Fi concurrently; it does not supply the current BLE inventory.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV107.md",
+      "next_gap": "Rev107 adds combined source-labelled family lists and C5 original-advertisement hints from complete retained payloads. S3 admission, matched-response and historical evidence remain independent. C5 longer complete payloads, family-priority retention, response acquisition, physical formats, saved-file workflows, repeated transitions and sustained performance remain open. No authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV107.md.",
+      "s3_role": "S3 retains its family admission/evidence, classifies complete frozen C5 originals, and owns the source-labelled list and details.",
+      "c5_role": "C5 continues existing passive reception and bounded frozen original-ADV transport with source metadata and timing.",
       "related_menu_entries": [],
       "related_cli_commands": [],
       "cerberus_code": [
@@ -790,7 +793,10 @@
         "s3_main/main/s3_ble_recent.h",
         "s3_main/main/s3_ble_list.h",
         "s3_main/main/sentinel_scan_view.h",
-        "s3_main/main/sentinel_scan_view.c"
+        "s3_main/main/sentinel_scan_view.c",
+        "s3_main/main/dual_ble_family.h",
+        "s3_main/main/s3_ble_discovery_live_ui.h",
+        "s3_main/main/dual_ble_ui.h"
       ],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open."
     },
@@ -814,10 +820,10 @@
       "symbol": "BT_SCAN_FLIPPER",
       "family": "ble_tag_and_device_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/WATCH_SIGNATURES.md",
-      "next_gap": "Rev60 closes source/host gaps for unnamed Flipper service-list discovery, variant-code evidence, strict matched responses and frozen selection into Fox Hunt. Verify physical advertisements/variants, touch/Stop/Back/repeated scans and simultaneous Wi-Fi operation. Upstream's arbitrary payload substring matching is intentionally replaced with structured fields. See BLE_FLIPPER_PARITY.md.",
-      "s3_role": "S3 receives BLE broadcasts and applies typed classifiers, evidence display and sessions.",
-      "c5_role": "C5 can survey Wi-Fi concurrently; it does not supply the current BLE inventory.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV107.md",
+      "next_gap": "Rev107 adds combined source-labelled family lists and C5 original-advertisement hints from complete retained payloads. S3 admission, matched-response and historical evidence remain independent. C5 longer complete payloads, family-priority retention, response acquisition, physical formats, saved-file workflows, repeated transitions and sustained performance remain open. No authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV107.md.",
+      "s3_role": "S3 retains its family admission/evidence, classifies complete frozen C5 originals, and owns the source-labelled list and details.",
+      "c5_role": "C5 continues existing passive reception and bounded frozen original-ADV transport with source metadata and timing.",
       "related_menu_entries": [],
       "related_cli_commands": [],
       "cerberus_code": [
@@ -827,7 +833,10 @@
         "s3_main/main/s3_flipper_hint_view.h",
         "s3_main/main/s3_ble_scanner.c",
         "s3_main/main/sentinel_live_ui.h",
-        "s3_main/main/ui.c"
+        "s3_main/main/ui.c",
+        "s3_main/main/dual_ble_family.h",
+        "s3_main/main/s3_ble_discovery_live_ui.h",
+        "s3_main/main/dual_ble_ui.h"
       ],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open."
     },
@@ -848,7 +857,7 @@
       "family": "ble_general_scanning",
       "status": "partial",
       "cerberus_evidence": "docs/DUAL_RADIO_REV106.md",
-      "next_gap": "Rev106 adds a dedicated passive C5 Analyzer mode with compact atomic boot/job/epoch-bound callback-count and source-elapsed samples; S3 presents independent C5 interval rates beside its own 200 ms callback graph and existing family evidence. Inventory retention/download is bypassed for this mode. See DUAL_RADIO_REV106.md for preparation, local validation and ownership limits. Controlled rate/RF measurements, concurrent physical reception, retry/Stop/Back/next-scan acceptance and sustained headroom remain open. Counts are receiver-specific callbacks, not unique devices or a combined over-air total; C5 excludes responses and includes partial originals. S3 native extended reception remains disabled. Full upstream option and RF-configuration equivalence remain unclaimed.",
+      "next_gap": "Rev106 adds a dedicated passive C5 Analyzer mode with compact atomic boot/job/epoch-bound callback-count and source-elapsed samples; S3 presents independent C5 interval rates beside its own 200 ms callback graph and existing family evidence. Inventory retention/download is bypassed for this mode. See DUAL_RADIO_REV106.md for verified local builds, paired installation and ownership limits. Controlled rate/RF measurements, concurrent physical reception, retry/Stop/Back/next-scan acceptance and sustained headroom remain open. Counts are receiver-specific callbacks, not unique devices or a combined over-air total; C5 excludes responses and includes partial originals. S3 native extended reception remains disabled. Full upstream option and RF-configuration equivalence remain unclaimed.",
       "s3_role": "S3 receives and classifies its own BLE callbacks, renders both independent activity views, and coordinates owner cleanup.",
       "c5_role": "C5 performs dedicated passive BLE reception and bounded source-clock callback accounting without inventory downloads; Wi-Fi ownership remains separate.",
       "related_menu_entries": [],
@@ -1257,10 +1266,10 @@
       "symbol": "BT_SCAN_FLOCK",
       "family": "ble_tag_and_device_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/WATCH_SIGNATURES.md",
-      "next_gap": "Complete-report manufacturer/service/name hints and typed source-aware details exist. Validate actual encodings and repeated/concurrent transitions; advertised hints cannot authenticate device identity. Focused Flock Wardriving parity remains open.",
-      "s3_role": "S3 receives BLE broadcasts and applies typed classifiers, evidence display and sessions.",
-      "c5_role": "C5 can survey Wi-Fi concurrently; it does not supply the current BLE inventory.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV107.md",
+      "next_gap": "Rev107 adds combined source-labelled family lists and C5 original-advertisement hints from complete retained payloads. S3 admission, matched-response and historical evidence remain independent. C5 longer complete payloads, family-priority retention, response acquisition, physical formats, saved-file workflows, repeated transitions and sustained performance remain open. No authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV107.md.",
+      "s3_role": "S3 retains its family admission/evidence, classifies complete frozen C5 originals, and owns the source-labelled list and details.",
+      "c5_role": "C5 continues existing passive reception and bounded frozen original-ADV transport with source metadata and timing.",
       "related_menu_entries": [],
       "related_cli_commands": [],
       "cerberus_code": [
@@ -1270,7 +1279,10 @@
         "s3_main/main/s3_ble_snapshot.h",
         "s3_main/main/s3_flock_hint_view.h",
         "s3_main/main/sentinel_live_ui.h",
-        "s3_main/main/ui.c"
+        "s3_main/main/ui.c",
+        "s3_main/main/dual_ble_family.h",
+        "s3_main/main/s3_ble_discovery_live_ui.h",
+        "s3_main/main/dual_ble_ui.h"
       ],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open."
     },
@@ -1431,10 +1443,10 @@
       "symbol": "BT_SCAN_RAYBAN",
       "family": "ble_tag_and_device_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/WATCH_SIGNATURES.md",
-      "next_gap": "Exact supported Meta manufacturer tuples are shown with source provenance. Validate actual report encodings, response visibility and repeated transitions; advertised identifiers remain unauthenticated hints.",
-      "s3_role": "S3 receives BLE broadcasts and applies typed classifiers, evidence display and sessions.",
-      "c5_role": "C5 can survey Wi-Fi concurrently; it does not supply the current BLE inventory.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV107.md",
+      "next_gap": "Rev107 adds combined source-labelled family lists and C5 original-advertisement hints from complete retained payloads. S3 admission, matched-response and historical evidence remain independent. C5 longer complete payloads, family-priority retention, response acquisition, physical formats, saved-file workflows, repeated transitions and sustained performance remain open. No authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV107.md.",
+      "s3_role": "S3 retains its family admission/evidence, classifies complete frozen C5 originals, and owns the source-labelled list and details.",
+      "c5_role": "C5 continues existing passive reception and bounded frozen original-ADV transport with source metadata and timing.",
       "related_menu_entries": [
         248
       ],
@@ -1446,7 +1458,10 @@
         "s3_main/main/s3_ble_snapshot.h",
         "s3_main/main/s3_meta_hint_view.h",
         "s3_main/main/sentinel_live_ui.h",
-        "s3_main/main/ui.c"
+        "s3_main/main/ui.c",
+        "s3_main/main/dual_ble_family.h",
+        "s3_main/main/s3_ble_discovery_live_ui.h",
+        "s3_main/main/dual_ble_ui.h"
       ],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open."
     },
@@ -1504,10 +1519,10 @@
       "symbol": "BT_SCAN_IBEACON",
       "family": "ble_tag_and_device_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/WATCH_SIGNATURES.md",
-      "next_gap": "The receive view preserves full supported iBeacon tuples and their qualifying source age. Recon journals retain an iBeacon hint flag and typed row totals, not full UUID/major/minor payloads. Verify physical formats, saved evidence and complete upstream recording behavior.",
-      "s3_role": "S3 receives BLE broadcasts and applies typed classifiers, evidence display and sessions.",
-      "c5_role": "C5 can survey Wi-Fi concurrently; it does not supply the current BLE inventory.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV107.md",
+      "next_gap": "Rev107 adds combined source-labelled family lists and C5 original-advertisement hints from complete retained payloads. S3 admission, matched-response and historical evidence remain independent. C5 longer complete payloads, family-priority retention, response acquisition, physical formats, saved-file workflows, repeated transitions and sustained performance remain open. No authenticated identity or full upstream parity is claimed. See DUAL_RADIO_REV107.md.",
+      "s3_role": "S3 retains its family admission/evidence, classifies complete frozen C5 originals, and owns the source-labelled list and details.",
+      "c5_role": "C5 continues existing passive reception and bounded frozen original-ADV transport with source metadata and timing.",
       "related_menu_entries": [
         240
       ],
@@ -1522,7 +1537,10 @@
         "s3_main/main/s3_ble_recent.h",
         "s3_main/main/s3_ble_list.h",
         "s3_main/main/sentinel_scan_view.h",
-        "s3_main/main/sentinel_scan_view.c"
+        "s3_main/main/sentinel_scan_view.c",
+        "s3_main/main/dual_ble_family.h",
+        "s3_main/main/s3_ble_discovery_live_ui.h",
+        "s3_main/main/dual_ble_ui.h"
       ],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open."
     },

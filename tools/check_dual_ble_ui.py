@@ -3,6 +3,8 @@ from pathlib import Path
 import os
 import subprocess
 import sys
+import struct
+import zlib
 root = Path(__file__).resolve().parents[1]
 subprocess.run([sys.executable, str(root / "tools/check_s3_findmy_monitor_ui.py")], check=True)
 out = root / "artifacts/dual-ble-ui-checks"
@@ -12,7 +14,8 @@ ui = (root / "s3_main/main/ui.c").read_text()
 begin = ui.index("static esp_err_t draw_ble_fox_hunt(void)")
 (out / "dual_ble_fox_draw_impl.h").write_text(ui[begin:ui.index("static esp_err_t draw_ble_analyzer(void)", begin)])
 exe = out / "check.exe"
-env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(out / "zig-cache"))
+env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(out / "zig-cache"),
+           ZIG_LOCAL_CACHE_DIR=str(out / "zig-local"))
 subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-UNDEBUG",
     "-Wall", "-Wextra", "-Werror", "-I", str(out),
     "-I", str(root / "artifacts/findmy-monitor-ui-checks"),
@@ -20,3 +23,15 @@ subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-UNDE
     str(root / "tools/host_checks/dual_ble_ui_check.c"), str(root / "s3_main/main/dual_ble_scan.c"),
     str(root / "s3_main/main/privacy.c"), "-o", str(exe)], check=True, env=env)
 subprocess.run([str(exe), str(out / "companion")], check=True)
+def png_chunk(kind, data):
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+for path in sorted(out.glob("companion-*.ppm")):
+    data = path.read_bytes()
+    header = b"P6\n320 480\n255\n"
+    assert data.startswith(header) and len(data) == len(header) + 320 * 480 * 3
+    pixels = data[len(header):]
+    path.with_suffix(".png").write_bytes(b"\x89PNG\r\n\x1a\n" +
+        png_chunk(b"IHDR", struct.pack(">IIBBBBB", 320, 480, 8, 2, 0, 0, 0)) +
+        png_chunk(b"IDAT", zlib.compress(b"".join(b"\0" + pixels[y*960:(y+1)*960] for y in range(480)))) +
+        png_chunk(b"IEND", b""))
+print(out)

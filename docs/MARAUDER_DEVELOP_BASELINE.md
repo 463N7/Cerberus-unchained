@@ -19,6 +19,12 @@ The rev97 ledger was regenerated and checked against that local reference,
 including the five recorded source-file hashes. This recheck updates source
 attribution; it does not establish implementation or hardware parity.
 
+The rev107 source review rechecked `develop` through the GitHub commit API on
+2026-11-01; it still returned `79cc6bcba1db6679baee1dab2b0c1ad5010e6363`.
+The six focused BLE family workflows were inspected at that pinned revision.
+The additional check establishes the reviewed upstream revision, not feature
+completion or physical acceptance.
+
 ## Source difference, `develop` versus pinned `master`
 
 | Surface | `develop` | Added | Removed | Changed |

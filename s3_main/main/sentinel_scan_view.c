@@ -293,7 +293,9 @@ static const char *empty_message(const sentinel_scan_view_t *view)
 static const char *empty_explanation(const sentinel_scan_view_t *view)
 {
     /* Capture age belongs exclusively to the small line below the results. */
-    return view->state == SENTINEL_VIEW_LIVE ? "RESULTS APPEAR WHEN THE SWEEP FINISHES" :
+    return view->state == SENTINEL_VIEW_LIVE ?
+        (view->kind == SENTINEL_VIEW_BLE ? "LIVE RESULTS UPDATE AS AVAILABLE" :
+         "RESULTS APPEAR WHEN THE SWEEP FINISHES") :
         view->state == SENTINEL_VIEW_OFFLINE ? "CHECK THE ONBOARD C5 CONNECTION" :
         view->state == SENTINEL_VIEW_ERROR ? "OPEN TOOLS OR TRY ANOTHER SCAN" :
         "TAP SCAN TO OBSERVE YOUR SURROUNDINGS";

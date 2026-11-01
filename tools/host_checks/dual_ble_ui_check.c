@@ -16,7 +16,12 @@ static esp_err_t draw_button(uint16_t x,uint16_t y,uint16_t w,uint16_t h,const c
 static unsigned companion_exchanges;
 esp_err_t c5_spi_link_dual_ble_exchange(uint8_t cmd,const void *q,size_t qn,void *r,size_t rn)
 {(void)cmd;(void)q;(void)qn;memset(r,0,rn);++companion_exchanges;return ESP_ERR_NOT_SUPPORTED;}
+static unsigned companion_allocations;
+static void *companion_calloc(size_t n,size_t size,unsigned caps)
+{++companion_allocations;return heap_caps_calloc(n,size,caps);}
+#define heap_caps_calloc companion_calloc
 #include "dual_ble_ui.h"
+#undef heap_caps_calloc
 #include "s3_ble_tracker.h"
 static cerberus_c5_ble_result_t ble_fox_hunt_target;
 static bool ble_fox_hunt_start_pending,ble_fox_hunt_exit_pending;
@@ -163,7 +168,14 @@ static void check_list_controls(const char *prefix)
     assert(dual_ble_ui_tap(40,120)==DUAL_BLE_UI_REDRAW);
     assert(dual_ble_ui_sort==CERBERUS_DUAL_BLE_SORT_SIGNAL); /* Complete control cycle. */
     paint_list();assert(strstr(drawn,"46:45:44:43:42:41"));
-    masked=true;paint_list();assert(!strstr(drawn,"46:45:44:43:42:41")&&strstr(drawn,"BLE-"));masked=false;
+    masked=true;paint_list();assert(!strstr(drawn,"46:45:44:43:42:41")&&strstr(drawn,"BLE-")&&strstr(drawn,"Age 0"));
+    dual_ble_ui_store->rows[0].name[0]='\0';paint_list();
+    assert(strstr(drawn,"Unnamed device")&&!strstr(drawn,"46:45:44:43:42:41"));save(prefix,"masked-unnamed-list");
+    assert(dual_ble_ui_tap(20,160)==DUAL_BLE_UI_REDRAW);paint_list();
+    assert(strstr(drawn,"C5 / Unnamed device")&&!strstr(drawn,"46:45:44:43:42:41"));save(prefix,"masked-unnamed-detail");
+    assert(dual_ble_ui_tap(250,210)==DUAL_BLE_UI_REDRAW);paint_list();
+    assert(strstr(drawn,"C5 / Unnamed device")&&!strstr(drawn,"46:45:44:43:42:41"));
+    assert(dual_ble_ui_tap(20,330)==DUAL_BLE_UI_REDRAW);masked=false;
     memset(dual_ble_ui_store->rows[0].name,'N',sizeof(dual_ble_ui_store->rows[0].name));
     dual_ble_ui_store->rows[0].name[1]=(char)0xFF;paint_list();
     assert(strstr(drawn,"N?NNNNNNNNNNNNNNNNNNNNNNNNNNNNNN"));save(prefix,"bounded-name");
@@ -240,7 +252,8 @@ static void check_receive_metadata(const char *prefix)
     assert(strstr(drawn,"PHY 1M PRIMARY / CODED SECONDARY")&&strstr(drawn,"SID 15 / PROPS 00 / CTRL COMPLETE"));
     assert(strstr(drawn,"FULL AD LAYOUT VALID / PREVIEW CUT"));
     assert(!strstr(drawn,"FULL AD LAYOUT INVALID"));save(prefix,"metadata-extended");
-    assert(dual_ble_ui_tap(160,210)==DUAL_BLE_UI_NONE); /* Gap between tabs. */
+    assert(dual_ble_ui_tap(108,210)==DUAL_BLE_UI_NONE); /* Gaps between three tabs. */
+    assert(dual_ble_ui_tap(212,210)==DUAL_BLE_UI_NONE);
     assert(dual_ble_ui_tap(200,224)==DUAL_BLE_UI_NONE);
     assert(dual_ble_ui_tap(20,210)==DUAL_BLE_UI_REDRAW);paint_list();
     assert(strstr(drawn,"ORIGINAL ADV 31 B")&&!strstr(drawn,"CTRL COMPLETE")&&!strstr(drawn,"RX INFO NOT SAVED"));
@@ -314,6 +327,123 @@ static void check_paint_failure_and_unified_selection(const char *prefix)
     assert(!memcmp(&expected,&dual_ble_ui_selected,sizeof(expected))); /* Retained detail is inert off-page. */
     dual_ble_ui_open(false);assert(!dual_ble_ui_from_unified);
     assert(companion_exchanges==exchanges&&starts==radio_starts&&stops==radio_stops);
+}
+
+static void hint_row(cerberus_dual_ble_row_t *row,const uint8_t *bytes,uint8_t length)
+{
+    memset(row,0,sizeof(*row));memcpy(row->address,"ABCDEF",6);row->address_type=1;
+    strcpy(row->name,"Frozen original");row->rssi=-70;row->timing_flags=3;
+    row->request_started_ms=(uint64_t)clock_ms;row->event_type=3;row->raw_length=length;
+    if(length)memcpy(row->raw,bytes,length);
+    row->receive=(cerberus_dual_ble_receive_metadata_t){
+        .source_kind=CERBERUS_DUAL_BLE_RECEIVE_LEGACY,.callback_length=length,.sid=255,
+        .data_status=255,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+}
+static void show_hints(const cerberus_dual_ble_row_t *row,const cerberus_dual_ble_provenance_t *proof)
+{
+    dual_ble_ui_select_frozen(row,proof);
+    assert(!dual_ble_ui_hints&&!dual_ble_ui_receive_info&&!dual_ble_ui_hint_page);
+    assert(dual_ble_ui_tap(250,210)==DUAL_BLE_UI_REDRAW&&dual_ble_ui_hints&&!dual_ble_ui_receive_info);
+    paint_list();assert(strstr(drawn,"C5 ORIGINAL")&&strstr(drawn,"/ HINTS")&&strstr(drawn,"HINTS *"));
+    assert(!strstr(drawn,"BEEP")&&!strstr(drawn,"CONNECT"));
+}
+static void hint_next(void)
+{assert(dual_ble_ui_tap(160,303)==DUAL_BLE_UI_REDRAW);paint_list();}
+static void check_family_hints(const char *prefix)
+{
+    unsigned exchanges=companion_exchanges,radio_starts=starts,radio_stops=stops,allocations=companion_allocations;
+    cerberus_c5_ble_result_t s3_before=ble_selected_result;
+    const cerberus_dual_ble_provenance_t proof={.boot_id=123,.epoch=456,.generation=0,.index=31};
+    cerberus_dual_ble_row_t row;
+    /* Four independent families in one complete original. Aggregate peer
+       metadata is deliberately misleading; only raw AD determines facts. */
+    const uint8_t mixed[]={7,3,0x44,0xfd,0x81,0x30,0x5f,0xfd,6,9,'H','C','-','0','5'};
+    hint_row(&row,mixed,sizeof(mixed));strcpy(row.name,"HC-06");row.manufacturer_id=0x004c;
+    show_hints(&row,&proof);
+    assert(strstr(drawn,"COMPLETE REPORT / 4 FAMILY HINTS")&&strstr(drawn,"FIND MY FLIPPER META HC NAME"));
+    assert(dual_ble_ui_hint_pages==5&&strstr(drawn,"NO RESPONSE DATA"));save(prefix,"hints-mixed-summary");
+    hint_next();assert(strstr(drawn,"FIND MY FORMAT HINTS")&&strstr(drawn,"APPLE NO / FMNA YES / DULT NO"));
+    assert(strstr(drawn,"FMNA UUID WIDTHS: 16"));save(prefix,"hints-findmy");
+    hint_next();assert(strstr(drawn,"FLIPPER ADVERTISED SERVICE CODES")&&strstr(drawn,"CODES: 3081"));
+    assert(strstr(drawn,"SAME-REPORT NAME NO / SERVICE DATA NO"));save(prefix,"hints-flipper");
+    hint_next();assert(strstr(drawn,"META IDENTIFIER HINTS")&&strstr(drawn,"ID FD5F / LIST16"));save(prefix,"hints-meta");
+    hint_next();assert(strstr(drawn,"HC COMPLETE-NAME HINT")&&strstr(drawn,"HC-05")&&!strstr(drawn,"EXACT NAME HC-06"));
+    save(prefix,"hints-hc");hint_next();assert(!dual_ble_ui_hint_page);
+    /* Controls have nonoverlapping bounds and never invoke transport/radio.
+       Pagination is enabled only by a fully successful paint. */
+    assert(dual_ble_ui_tap(108,210)==DUAL_BLE_UI_NONE&&dual_ble_ui_tap(212,210)==DUAL_BLE_UI_NONE);
+    assert(dual_ble_ui_tap(20,224)==DUAL_BLE_UI_NONE&&dual_ble_ui_tap(20,312)==DUAL_BLE_UI_NONE);
+    assert(dual_ble_ui_tap(312,303)==DUAL_BLE_UI_NONE);
+    companion_fail_final_control=true;assert(dual_ble_ui_draw(false)==ESP_FAIL);
+    assert(!dual_ble_ui_hint_pages&&dual_ble_ui_tap(160,303)==DUAL_BLE_UI_NONE);
+    paint_list();hint_next();
+    assert(dual_ble_ui_tap(20,210)==DUAL_BLE_UI_REDRAW&&!dual_ble_ui_hints);paint_list();
+    assert(strstr(drawn,"ORIGINAL ADV 15 B")&&!strstr(drawn,"FIND MY FORMAT HINTS"));
+    assert(dual_ble_ui_tap(160,303)==DUAL_BLE_UI_NONE);
+    assert(dual_ble_ui_tap(200,210)==DUAL_BLE_UI_REDRAW&&dual_ble_ui_receive_info);paint_list();
+    assert(strstr(drawn,"C5 LEGACY CALLBACK")&&!strstr(drawn,"FIND MY FORMAT HINTS"));
+    assert(dual_ble_ui_tap(250,210)==DUAL_BLE_UI_REDRAW);paint_list();
+    assert(strstr(drawn,"FIND MY FORMAT HINTS"));
+    assert(dual_ble_ui_tap(20,330)==DUAL_BLE_UI_BACK_S3&&dual_ble_ui_tap(200,330)==DUAL_BLE_UI_FOX);
+    assert(dual_ble_ui_tap(20,65)==DUAL_BLE_UI_BACK_S3&&dual_ble_ui_tap(100,390)==DUAL_BLE_UI_TOGGLE);
+
+    uint8_t beacon[30]={2,1,6,26,0xff,0x4c,0,2,0x15};
+    for(unsigned i=0;i<16;++i)beacon[9+i]=(uint8_t)i;
+    beacon[25]=beacon[26]=beacon[27]=255;beacon[28]=254;beacon[29]=128;
+    hint_row(&row,beacon,sizeof(beacon));show_hints(&row,&proof);hint_next();
+    assert(strstr(drawn,"IBEACON ADVERTISED FORMAT")&&strstr(drawn,"00010203-0405-0607-0809-0A0B0C0D0E0F"));
+    assert(strstr(drawn,"MAJOR 65535 / MINOR 65534")&&strstr(drawn,"MEASURED POWER -128 dBm (ADVERTISED)"));
+    assert(strstr(drawn,"LAST ADV -70 dBm"));save(prefix,"hints-ibeacon");
+    /* Immutable painted selection, including old generation0 and source age. */
+    cerberus_dual_ble_row_t frozen=dual_ble_ui_selected;
+    memset(dual_ble_ui_store->rows,0,sizeof(dual_ble_ui_store->rows));
+    ++dual_ble_ui_store->published_epoch;++dual_ble_ui_store->published_boot_id;
+    memset(&row,0,sizeof(row));paint_list();
+    assert(!memcmp(&frozen,&dual_ble_ui_selected,sizeof(frozen)));
+    assert(!memcmp(&proof,&dual_ble_ui_selected_provenance,sizeof(proof)));
+    assert(strstr(drawn,"00010203-0405-0607-0809-0A0B0C0D0E0F"));
+    hint_next();assert(strstr(drawn,"META HINT SUPPRESSED BY ID RULE")&&strstr(drawn,"ID 004C / MFG16"));
+
+    const uint8_t flock[]={3,3,0,0x31,3,3,0,0x32};
+    hint_row(&row,flock,sizeof(flock));show_hints(&row,&proof);hint_next();
+    assert(strstr(drawn,"FLOCK ADVERTISED CLUES")&&strstr(drawn,"SERVICES: 3100 3200"));save(prefix,"hints-flock");
+    hint_row(&row,NULL,0);memcpy(row.address,(uint8_t[]){1,2,3,0x81,0x8e,0x58},6);row.address_type=0;
+    show_hints(&row,&proof);assert(strstr(drawn,"C5 ORIGINAL + ADDRESS")&&strstr(drawn,"FLOCK ADDR"));
+    hint_next();assert(strstr(drawn,"PUBLIC ADDRESS PREFIX CLUE / NOT ID")&&strstr(drawn,"FLOCK ADDRESS PREFIX CLUE"));
+    assert(!strstr(drawn,"FLOCK ADVERTISED CLUES"));save(prefix,"hints-flock-address");
+
+    const uint8_t meta_many[]={9,3,0x5f,0xfd,0xb7,0xfe,0xb8,0xfe,0x4c,0};
+    hint_row(&row,meta_many,sizeof(meta_many));show_hints(&row,&proof);
+    assert(dual_ble_ui_hint_pages==3&&strstr(drawn,"NO SUPPORTED FAMILY HINT")&&strstr(drawn,"META ID RULE SUPPRESSES"));
+    hint_next();assert(strstr(drawn,"ID FD5F / LIST16")&&strstr(drawn,"ID FEB7 / LIST16"));
+    assert(strstr(drawn,"ID/CONTEXT PAIRS 1-2 OF 4"));save(prefix,"hints-meta-pairs-first");
+    hint_next();assert(strstr(drawn,"ID FEB8 / LIST16")&&strstr(drawn,"ID 004C / LIST16"));
+    assert(strstr(drawn,"ID/CONTEXT PAIRS 3-4 OF 4")&&!strstr(drawn,"MORE ID/CONTEXT"));save(prefix,"hints-meta-pairs-last");
+    hint_next();assert(!dual_ble_ui_hint_page&&strstr(drawn,"NO SUPPORTED FAMILY HINT"));
+
+    const uint8_t flags[]={2,1,6};hint_row(&row,flags,sizeof(flags));show_hints(&row,&proof);
+    assert(strstr(drawn,"COMPLETE REPORT / 0 FAMILY HINTS")&&strstr(drawn,"NO SUPPORTED FAMILY HINT"));
+    assert(dual_ble_ui_hint_pages==1&&dual_ble_ui_tap(160,303)==DUAL_BLE_UI_NONE);save(prefix,"hints-complete-none");
+    memset(&row.receive,0,sizeof(row.receive));show_hints(&row,&proof);
+    assert(strstr(drawn,"RECEIVE INFO UNAVAILABLE")&&!strstr(drawn,"NO SUPPORTED FAMILY HINT"));save(prefix,"hints-unknown");
+    hint_row(&row,beacon,sizeof(beacon));row.raw_length=31;row.raw_flags=1;
+    row.receive=(cerberus_dual_ble_receive_metadata_t){.source_kind=CERBERUS_DUAL_BLE_RECEIVE_EXTENDED,
+        .callback_length=255,.sid=255,.primary_phy=3,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+    show_hints(&row,&proof);assert(strstr(drawn,"FULL ORIGINAL NOT RETAINED")&&!strstr(drawn,"IBEACON ADVERTISED FORMAT"));
+    save(prefix,"hints-truncated");
+    assert(dual_ble_ui_tap(200,210)==DUAL_BLE_UI_REDRAW);paint_list();assert(strstr(drawn,"CALLBACK 255 B / PREVIEW 31 B"));
+    hint_row(&row,flags,sizeof(flags));row.raw[0]=20;show_hints(&row,&proof);
+    assert(strstr(drawn,"AD EVIDENCE NOT CLASSIFIABLE")&&!strstr(drawn,"NO SUPPORTED FAMILY HINT"));save(prefix,"hints-malformed");
+    hint_row(&row,flags,sizeof(flags));row.raw_flags=CERBERUS_BLE_ADVERTISEMENT_MALFORMED;
+    show_hints(&row,&proof);assert(strstr(drawn,"AD EVIDENCE NOT CLASSIFIABLE")&&!strstr(drawn,"COMPLETE AD NOT VALID"));
+    assert(dual_ble_ui_tap(200,210)==DUAL_BLE_UI_REDRAW);paint_list();
+    assert(strstr(drawn,"FULL AD LAYOUT VALID")&&!strstr(drawn,"FULL AD LAYOUT INVALID"));
+    hint_row(&row,flags,sizeof(flags));cerberus_dual_ble_provenance_t invalid=proof;invalid.epoch=0;
+    show_hints(&row,&invalid);assert(strstr(drawn,"SOURCE PROOF UNAVAILABLE"));
+    show_hints(&row,&proof);dual_ble_ui_open(true);
+    assert(!dual_ble_ui_detail&&!dual_ble_ui_hints&&!dual_ble_ui_receive_info&&!dual_ble_ui_hint_pages&&!dual_ble_ui_hint_page);
+    assert(companion_exchanges==exchanges&&starts==radio_starts&&stops==radio_stops&&companion_allocations==allocations);
+    assert(!memcmp(&s3_before,&ble_selected_result,sizeof(s3_before)));
 }
 
 int main(int argc,char **argv)
@@ -394,7 +524,8 @@ int main(int argc,char **argv)
     check_reader_metrics(argv[1]);
     check_receive_metadata(argv[1]);
     check_paint_failure_and_unified_selection(argv[1]);
+    check_family_hints(argv[1]);
     heap_caps_free(dual_ble_ui_store);dual_ble_ui_store=NULL;
-    puts("Dual BLE UI: stable ordering/age controls, frozen typed rows/receive metadata, raw/info tabs without RF calls, bounded callback/PHY/framing labels, live reader metrics, and old-target sample isolation passed");
+    puts("Dual BLE UI: frozen typed rows, raw/receive/hints tabs, all family evidence and complete Meta paging without RF/allocation, unavailable/nohint distinction, source labels, reader metrics and old-target isolation passed");
     return 0;
 }
