@@ -2,6 +2,7 @@
 
 #include "ble_archive.h"
 #include "airtag_json.h"
+#include "wifi_archive.h"
 #include "esp_err.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -24,11 +25,14 @@ typedef enum {
     CERBERUS_BLE_ARCHIVE_IO_LOAD_AIRTAG_JSON,
     CERBERUS_BLE_ARCHIVE_IO_SAVE_AIRTAG_JSON,
     CERBERUS_BLE_ARCHIVE_IO_EXPORT_AIRTAG_JSON,
+    CERBERUS_BLE_ARCHIVE_IO_SAVE_WIFI,
+    CERBERUS_BLE_ARCHIVE_IO_LOAD_WIFI,
 } cerberus_ble_archive_io_operation_t;
 
 typedef enum {
     CERBERUS_BLE_ARCHIVE_IO_FORMAT_BLE = 0,
     CERBERUS_BLE_ARCHIVE_IO_FORMAT_AIRTAG_JSON,
+    CERBERUS_BLE_ARCHIVE_IO_FORMAT_WIFI,
 } cerberus_ble_archive_io_format_t;
 typedef struct {
     cerberus_ble_archive_io_state_t state;
@@ -65,12 +69,22 @@ esp_err_t cerberus_ble_archive_io_export_airtag_json(const cerberus_ble_archive_
     uint64_t *job_id);
 esp_err_t cerberus_ble_archive_io_copy_airtag_json(uint64_t job_id,
     cerberus_airtag_json_t *document);
+/* Native Wi-Fi observations use their own immutable model and exact-sized
+ * PSRAM arm in the same serialized worker. Save writes a new .WFI file under
+ * /CERBERUS/WIFI; it does not alter live scans, targets or saved trust rules. */
+esp_err_t cerberus_ble_archive_io_save_wifi(const cerberus_wifi_archive_t *document,
+    uint64_t *job_id);
+esp_err_t cerberus_ble_archive_io_load_wifi(const char *relative_path,
+    const char *file_name, uint64_t *job_id);
+esp_err_t cerberus_ble_archive_io_copy_wifi(uint64_t job_id,
+    cerberus_wifi_archive_t *document);
 void cerberus_ble_archive_io_get_status(cerberus_ble_archive_io_status_t *status);
 /* Copies only a fully validated completed native BLE SAVE or LOAD. JSON jobs
- * require copy_airtag_json; both typed getters reject the other format without
- * changing output on failure. The immutable result is pinned and copied outside the critical section;
- * a concurrent Release prevents new readers and defers disposal until all accepted
- * copies return. Historical data never becomes a live scan or active target. */
+ * require copy_airtag_json and Wi-Fi jobs require copy_wifi. Typed getters reject
+ * other formats without changing output. The immutable result is pinned and
+ * copied outside the critical section; a concurrent Release prevents new readers
+ * and defers disposal until accepted copies return. Historical data never becomes
+ * a live scan or active target. */
 esp_err_t cerberus_ble_archive_io_copy_result(uint64_t job_id,
     cerberus_ble_archive_t *document);
 /* Cancel before storage skips it. An in-flight filesystem call is not

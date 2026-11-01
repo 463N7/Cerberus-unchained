@@ -15,8 +15,8 @@ typedef enum { WATCH_LIVE,WATCH_HISTORY,WATCH_DETAILS,WATCH_DEMO,WATCH_FILTERS,W
 static watch_page_t watch_page;
 static sentinel_watch_t watch_state;
 static sentinel_watch_entry_t watch_detail;
-static unsigned watch_filters_page,watch_history_page,watch_demo_scene,recon_confirm;
-static bool watch_paused,c5_online=true;
+static unsigned watch_filters_page,watch_history_page,recon_confirm;
+static bool watch_paused,watch_radar,c5_online=true;
 static char recon_message[49];
 static sentinel_scan_session_t live_session,live_ble_session;
 static cerberus_recon_recorder_status_t recorder_status;
@@ -190,7 +190,7 @@ static void test_paint_failures(const char *directory)
 static void test_options(const char *directory)
 {
     seed(); watch_page=WATCH_OPTIONS; clear_draw(); CHECK(recon_draw_options()==ESP_OK);
-    CHECK(strstr(drawn,"NEARBY INVENTORY") && strstr(drawn,"SCENE GALLERY") && strstr(drawn,"START SD RECORDING"));
+    CHECK(strstr(drawn,"NEARBY INVENTORY") && strstr(drawn,"VIEW: DASHBOARD") && strstr(drawn,"START SD RECORDING"));
     preview(directory,"inventory-options");
     const uint16_t gaps[][2]={{8,164},{8,169},{8,214},{8,223},{8,268},{8,277},{8,322},{8,331},{8,376},{156,332},{164,332}};
     for(size_t i=0;i<sizeof(gaps)/sizeof(gaps[0]);++i) CHECK(!recon_handle_control_tap(gaps[i][0],gaps[i][1],0));

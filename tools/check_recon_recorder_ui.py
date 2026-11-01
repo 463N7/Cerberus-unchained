@@ -22,10 +22,16 @@ end = display.index("\nesp_err_t ", start)
 framebuffer = (root / "tools/host_checks/recon_render.c").read_text(encoding="utf-8").split(
     "/* Exercise the real private controls", 1)[0]
 framebuffer = framebuffer.replace("static unsigned calls;",
-    "static unsigned calls, painted_paused, painted_pausing, painted_resume;")
+    "static unsigned calls, painted_paused, painted_pausing, painted_resume, fail_paint_at;\n"
+    "static char painted_text[65536];\nstatic size_t painted_text_size;")
+framebuffer = framebuffer.replace("    bounds(x,y,w,h);",
+    "    if(fail_paint_at && calls+1==fail_paint_at){++calls;return ESP_FAIL;}\n    bounds(x,y,w,h);")
 framebuffer = framebuffer.replace("    if(!*text)return ESP_OK;",
-    '    if(!strcmp(text,"PAUSED"))++painted_paused;\n'
-    '    if(!strcmp(text,"PAUSING"))++painted_pausing;\n'
+    '    if(fail_paint_at && calls+1==fail_paint_at){++calls;return ESP_FAIL;}\n'
+    '    size_t n=strlen(text);assert(painted_text_size+n+2<sizeof(painted_text));\n'
+    '    memcpy(painted_text+painted_text_size,text,n);painted_text_size+=n;painted_text[painted_text_size++]=\'\\n\';painted_text[painted_text_size]=0;\n'
+    '    if(y==33&&!strcmp(text,"PAUSED"))++painted_paused;\n'
+    '    if(y==33&&!strcmp(text,"PAUSING"))++painted_pausing;\n'
     '    if(!strcmp(text,"RESUME"))++painted_resume;\n'
     "    if(!*text)return ESP_OK;")
 (out / "recon_framebuffer.h").write_text(framebuffer, encoding="utf-8")
@@ -73,7 +79,7 @@ subprocess.run([str(exe), str(out)], check=True, env=env)
 def chunk(kind, payload):
     return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload))
 
-for path in out.glob("options-*.ppm"):
+for path in out.glob("*.ppm"):
     header = b"P6\n320 480\n255\n"
     raw = path.read_bytes()
     assert raw.startswith(header) and len(raw) == len(header) + 320 * 480 * 3

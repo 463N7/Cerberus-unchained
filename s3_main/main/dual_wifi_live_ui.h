@@ -150,6 +150,8 @@ static esp_err_t dual_wifi_live_publish(void)
 static void dual_wifi_live_action(dual_wifi_ui_action_t action)
 {
     switch (action) {
+    case DUAL_WIFI_UI_SAVE_ALL: wifi_archive_save_live(false); return;
+    case DUAL_WIFI_UI_SAVE_SELECTED: wifi_archive_save_live(true); return;
     case DUAL_WIFI_UI_BACK:
         dual_wifi_live_cancel_handoff();
         dual_wifi_return_to_view = false;

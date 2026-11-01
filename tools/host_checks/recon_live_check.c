@@ -154,10 +154,10 @@ static void cleanup_and_reentry(void)
             sentinel_watch_view_t changed=watch_view;changed.releasing=false;
             painted_paused=painted_pausing=painted_resume=0U;calls=0U;
             CHECK(sentinel_watch_view_update(&changed,21000U)==ESP_OK);
-            CHECK(painted_paused==1U&&!painted_pausing&&!painted_resume&&calls>0U);
+            CHECK(painted_paused==1U&&!painted_pausing&&painted_resume==1U&&calls>0U);
             painted_paused=painted_pausing=painted_resume=0U;
             CHECK(sentinel_watch_view_update(&watch_view,21000U)==ESP_OK);
-            CHECK(painted_pausing==1U&&!painted_paused&&!painted_resume);
+            CHECK(painted_pausing==1U&&!painted_paused&&painted_resume==1U);
             CHECK(recon_native.queries==queries);save_preview(preview_directory,"recon-pausing-held");}
         recon_native.stop_error=ESP_OK;recon_native.held=false;
         /* Keep this exited/paused during drain; waking an active Recon page

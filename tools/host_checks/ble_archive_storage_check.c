@@ -35,6 +35,7 @@
 #include "esp_check.h"
 #include "archive_storage_types.h"
 #include "ble_archive.h"
+#include "wifi_archive_io_fixture.h"
 #include "ble_archive_family_fixture.h"
 #include "ble_archive_response_fixture.h"
 #define CERBERUS_STORAGE_MOUNT_PATH "sdcard"
@@ -86,7 +87,7 @@ static int wrapped_stat(const char *path,struct stat *item)
 {
     if(event(STAT)){errno=EIO;return -1;}
     const char *leaf=strrchr(path,'/');
-    if(collide_all&&leaf&&strlen(leaf)==11&&(leaf[1]=='B'||leaf[1]=='A')){memset(item,0,sizeof(*item));item->st_mode=S_IFREG;return 0;}
+    if(collide_all&&leaf&&strlen(leaf)==11&&(leaf[1]=='B'||leaf[1]=='A'||leaf[1]=='W')){memset(item,0,sizeof(*item));item->st_mode=S_IFREG;return 0;}
     int result=stat(path,item);
     if(result==0&&S_ISREG(item->st_mode))item->st_size+=stat_size_delta;
     return result;
@@ -169,9 +170,9 @@ static void setup(void)
     if(cases)CHECK(native_chdir("..")==0);
     char directory[32];snprintf(directory,sizeof(directory),"case%04u",++cases);
     CHECK(native_mkdir(directory)==0&&native_chdir(directory)==0&&native_mkdir("sdcard")==0);
-    CHECK(native_mkdir("sdcard/CERBERUS")==0&&native_mkdir("sdcard/CERBERUS/BLE")==0);
+    CHECK(native_mkdir("sdcard/CERBERUS")==0&&native_mkdir("sdcard/CERBERUS/BLE")==0&&native_mkdir("sdcard/CERBERUS/WIFI")==0);
     storage_mutex=&mutex_token;sd_mounted=true;storage_owner=CERBERUS_STORAGE_OWNER_FIRMWARE;
-    sd_recon.active=wardrive_busy=fail_lock=fail_mutex=false;sd_wifi_capture_file=NULL;sd_ble_archive_next_index=sd_airtag_json_next_index=1;
+    sd_recon.active=wardrive_busy=fail_lock=fail_mutex=false;sd_wifi_capture_file=NULL;sd_ble_archive_next_index=sd_airtag_json_next_index=sd_wifi_archive_next_index=1;
     race_final_path="sdcard/CERBERUS/BLE/B00001.BLE";
     extra_error=no_eof=short_read=collide_all=race_temp=race_final=false;zero_read_at=0;stat_size_delta=0;
     handoff_probes=unmounts=0;probe_handoff=false;
@@ -328,10 +329,118 @@ static void check_json_storage(void)
     CHECK(cerberus_storage_airtag_json_load("/COPIES","import.JsOn",json_output,sizeof(json_output)+1,&got)==ESP_ERR_INVALID_ARG);clean();
 }
 
+static uint8_t wifi_payload[CERBERUS_STORAGE_WIFI_ARCHIVE_MAX_BYTES],wifi_output[CERBERUS_STORAGE_WIFI_ARCHIVE_MAX_BYTES];
+static esp_err_t wifi_save(size_t length){return cerberus_storage_wifi_archive_save(wifi_payload,length,name,sizeof(name));}
+static esp_err_t wifi_load(size_t *length)
+{memset(wifi_output,0xA5,sizeof(wifi_output));*length=123;return cerberus_storage_wifi_archive_load("/CERBERUS/WIFI","W00001.WFI",wifi_output,sizeof(wifi_output),length);}
+static void wifi_failure(size_t length)
+{CHECK(length==0);for(size_t i=0;i<sizeof(wifi_output);++i)CHECK(wifi_output[i]==0);clean();}
+static void wifi_verify(const char *file,const void *expected,size_t length)
+{
+    char path[128];snprintf(path,sizeof(path),"sdcard/CERBERUS/WIFI/%s",file);
+    FILE*f=fopen(path,"rb");CHECK(f);CHECK(fread(wifi_output,1,sizeof(wifi_output),f)==length);
+    CHECK(!memcmp(wifi_output,expected,length)&&fgetc(f)==EOF&&fclose(f)==0);
+}
+static bool wifi_exists(const char *file)
+{char path[128];snprintf(path,sizeof(path),"sdcard/CERBERUS/WIFI/%s",file);struct stat s;return stat(path,&s)==0;}
+static void check_wifi_storage(void)
+{
+    CHECK(CERBERUS_STORAGE_WIFI_ARCHIVE_MAX_BYTES==5216U);
+    for(unsigned i=0;i<sizeof(wifi_payload);++i)wifi_payload[i]=(uint8_t)i;
+    size_t got=0;
+    /* Exact maximum and chunked host reads execute actual storage code. No
+     * parser or source type is inferred by the byte-storage layer. */
+    setup();probe_handoff=true;CHECK(wifi_save(sizeof(wifi_payload))==ESP_OK&&!strcmp(name,"W00001.WFI"));
+    short_read=true;CHECK(wifi_load(&got)==ESP_OK&&got==sizeof(wifi_payload)&&!memcmp(wifi_output,wifi_payload,got));
+    CHECK(calls[READ]>700&&handoff_probes>700);clean();probe_handoff=false;
+    CHECK(cerberus_storage_reserve_for_usb()==ESP_OK&&!sd_mounted&&unmounts==1);clean();
+    setup();put("sdcard/copied.wfi","UPSTREAM",8);put("sdcard/CERBERUS/WIFI/W00001.WFI","KEEP",4);put("sdcard/CERBERUS/WIFI/W00002.TMP","KEEP",4);
+    CHECK(wifi_save(33)==ESP_OK&&!strcmp(name,"W00003.WFI"));wifi_verify("W00001.WFI","KEEP",4);wifi_verify("W00002.TMP","KEEP",4);
+    CHECK(cerberus_storage_wifi_archive_load("/","copied.wfi",wifi_output,sizeof(wifi_output),&got)==ESP_OK&&got==8&&!memcmp(wifi_output,"UPSTREAM",8));
+    setup();race_temp=true;CHECK(wifi_save(33)==ESP_OK&&!strcmp(name,"W00002.WFI"));wifi_verify("W00001.TMP","KEEP",4);
+    setup();race_final_path="sdcard/CERBERUS/WIFI/W00001.WFI";race_final=true;
+    CHECK(wifi_save(33)!=ESP_OK&&!strcmp(name,"W00001.TMP"));wifi_verify("W00001.WFI","KEEP",4);wifi_verify("W00001.TMP",wifi_payload,33);
+    setup();collide_all=true;CHECK(wifi_save(33)==ESP_ERR_NOT_FOUND&&calls[STAT]==1026&&!calls[OPEN]&&!name[0]);clean();
+    setup();sd_wifi_archive_next_index=99999;CHECK(wifi_save(33)==ESP_OK&&!strcmp(name,"W99999.WFI"));CHECK(wifi_save(33)==ESP_OK&&!strcmp(name,"W00001.WFI"));
+    CHECK(sd_ble_archive_next_index==1&&save(33)==ESP_OK&&!strcmp(name,"B00001.BLE"));
+    const enum event failures[]={STAT,OPEN,FDOPEN,WRITE,FLUSH,SYNC,CLOSE,RENAME};
+    for(unsigned n=0;n<sizeof(failures)/sizeof(failures[0]);++n){
+        setup();fault[failures[n]]=1;CHECK(wifi_save(71)!=ESP_OK&&!wifi_exists("W00001.WFI"));
+        if(failures[n]>=FDOPEN)CHECK(wifi_exists("W00001.TMP")&&!strcmp(name,"W00001.TMP"));
+        CHECK(!calls[RENAME]||failures[n]==RENAME);clean();memset(fault,0,sizeof(fault));CHECK(wifi_save(71)==ESP_OK);clean();
+    }
+    for(unsigned nth=3;nth<=5;++nth){setup();fault[STAT]=nth;CHECK(wifi_save(71)!=ESP_OK&&!wifi_exists("W00001.WFI"));clean();}
+    setup();CHECK(native_rmdir("sdcard/CERBERUS/WIFI")==0);fault[MKDIR]=1;CHECK(wifi_save(33)!=ESP_OK&&!name[0]);clean();
+    setup();extra_error=true;CHECK(wifi_save(33)!=ESP_OK&&!calls[RENAME]&&wifi_exists("W00001.TMP"));clean();
+    setup();fault[FDOPEN]=1;fault[RAW_CLOSE]=1;CHECK(wifi_save(33)!=ESP_OK&&calls[RAW_CLOSE]==1);clean();
+    for(unsigned owner=0;owner<7;++owner){
+        setup();if(owner==0)sd_mounted=false;if(owner==1)storage_owner=CERBERUS_STORAGE_OWNER_USB;
+        if(owner==2)sd_recon.active=true;if(owner==3)wardrive_busy=true;if(owner==4)sd_wifi_capture_file=(FILE*)1;
+        if(owner==5)fail_lock=true;if(owner==6){storage_mutex=NULL;fail_mutex=true;}
+        CHECK(wifi_save(33)!=ESP_OK&&!calls[STAT]&&!calls[OPEN]);CHECK(wifi_load(&got)!=ESP_OK);wifi_failure(got);
+    }
+    const enum event read_failures[]={STAT,FOPEN,READ,GETC,CLOSE};
+    for(unsigned n=0;n<sizeof(read_failures)/sizeof(read_failures[0]);++n){
+        setup();put("sdcard/CERBERUS/WIFI/W00001.WFI",wifi_payload,128);fault[read_failures[n]]=1;
+        CHECK(wifi_load(&got)!=ESP_OK);wifi_failure(got);wifi_verify("W00001.WFI",wifi_payload,128);clean();
+    }
+    for(unsigned kind=0;kind<6;++kind){
+        setup();put("sdcard/CERBERUS/WIFI/W00001.WFI",wifi_payload,128);
+        if(kind==0)stat_size_delta=1;if(kind==1)stat_size_delta=-1;if(kind==2)extra_error=true;
+        if(kind==3)no_eof=true;if(kind==4){short_read=true;zero_read_at=3;}if(kind==5)stat_size_delta=CERBERUS_STORAGE_WIFI_ARCHIVE_MAX_BYTES;
+        CHECK(wifi_load(&got)!=ESP_OK);if(kind==5)CHECK(!calls[FOPEN]);wifi_failure(got);
+    }
+    setup();CHECK(wifi_load(&got)==ESP_ERR_NOT_FOUND);wifi_failure(got);
+    put("sdcard/CERBERUS/WIFI/W00001.WFI",wifi_payload,0);CHECK(wifi_load(&got)==ESP_ERR_INVALID_SIZE);wifi_failure(got);
+    setup();CHECK(native_mkdir("sdcard/CERBERUS/WIFI/W00001.WFI")==0);CHECK(wifi_load(&got)==ESP_ERR_INVALID_SIZE&&!calls[FOPEN]);wifi_failure(got);
+    setup();CHECK(native_mkdir("sdcard/COPIES")==0);put("sdcard/COPIES/import.wFi",wifi_payload,77);
+    CHECK(cerberus_storage_wifi_archive_load("/COPIES","import.wFi",wifi_output,sizeof(wifi_output),&got)==ESP_OK&&got==77&&!memcmp(wifi_output,wifi_payload,77));
+    const char*bad[]={"../W00001.WFI","W00001.TMP","B00001.BLE","W00001.WFI/",".WFI",".JSON","","sub/import.wfi","C:import.WFI"};
+    for(unsigned i=0;i<sizeof(bad)/sizeof(bad[0]);++i){unsigned opened=calls[FOPEN];
+        CHECK(cerberus_storage_wifi_archive_load("/COPIES",bad[i],wifi_output,sizeof(wifi_output),&got)==ESP_ERR_INVALID_ARG&&calls[FOPEN]==opened);}
+    CHECK(cerberus_storage_wifi_archive_load("/../COPIES","import.wFi",wifi_output,sizeof(wifi_output),&got)==ESP_ERR_INVALID_ARG);
+    CHECK(wifi_save(0)==ESP_ERR_INVALID_ARG&&wifi_save(sizeof(wifi_payload)+1)==ESP_ERR_INVALID_ARG);
+    CHECK(cerberus_storage_wifi_archive_save(wifi_payload,1,name,10)==ESP_ERR_INVALID_ARG);
+    CHECK(cerberus_storage_wifi_archive_load("/COPIES","import.wFi",wifi_output,1,&got)==ESP_ERR_INVALID_SIZE);
+    CHECK(cerberus_storage_wifi_archive_load("/COPIES","import.wFi",wifi_output,sizeof(wifi_output)+1,&got)==ESP_ERR_INVALID_ARG);clean();
+}
+
+
+static void check_full_wifi_document(void)
+{
+    static cerberus_wifi_archive_t document, decoded;
+    static uint8_t original[CERBERUS_WIFI_ARCHIVE_MAX_SIZE];
+    setup(); archive_test_wifi_document(&document,64);
+    CHECK(cerberus_wifi_archive_validate(&document));
+    size_t encoded=0, got=0;
+    CHECK(cerberus_wifi_archive_encode(&document,wifi_payload,sizeof(wifi_payload),&encoded));
+    CHECK(encoded==5216 && CERBERUS_WIFI_ARCHIVE_MAX_SIZE==CERBERUS_STORAGE_WIFI_ARCHIVE_MAX_BYTES);
+    memcpy(original,wifi_payload,encoded);
+    CHECK(wifi_save(encoded)==ESP_OK&&!strcmp(name,"W00001.WFI"));
+    CHECK(wifi_load(&got)==ESP_OK&&got==encoded);
+    CHECK(cerberus_wifi_archive_decode(wifi_output,got,&decoded)&&!memcmp(&decoded,&document,sizeof(document)));
+    document.rows[63].ssid[0]='!';
+    CHECK(cerberus_wifi_archive_encode(&document,wifi_payload,sizeof(wifi_payload),&encoded));
+    const enum event failures[]={WRITE,FLUSH,SYNC,CLOSE,RENAME};
+    for(unsigned i=0;i<sizeof(failures)/sizeof(failures[0]);++i){
+        memset(fault,0,sizeof(fault)); fault[failures[i]]=calls[failures[i]]+1;
+        CHECK(wifi_save(encoded)!=ESP_OK);
+        char final[16],temporary[16];snprintf(final,sizeof(final),"W%05u.WFI",i+2);
+        snprintf(temporary,sizeof(temporary),"W%05u.TMP",i+2);
+        CHECK(!wifi_exists(final)&&wifi_exists(temporary));
+        wifi_verify("W00001.WFI",original,sizeof(original));clean();
+    }
+    memset(fault,0,sizeof(fault));stat_size_delta=1;
+    unsigned opened=calls[FOPEN];CHECK(wifi_load(&got)==ESP_ERR_INVALID_SIZE&&calls[FOPEN]==opened);
+    wifi_failure(got);
+}
+
 int main(void)
 {
     check_full_v6_document();
     check_json_storage();
+    check_wifi_storage();
+    check_full_wifi_document();
     for(unsigned length=1;length<=sizeof(payload);length=length<128?length+31:sizeof(payload)+1){
         setup();CHECK(save(length)==ESP_OK&&!strcmp(name,"B00001.BLE"));verify(name,payload,length);
         size_t got;CHECK(load(&got)==ESP_OK&&got==length&&!memcmp(output,payload,length));clean();

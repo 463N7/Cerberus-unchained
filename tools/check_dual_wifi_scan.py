@@ -19,5 +19,7 @@ exe = out / ("dual-wifi-scan-check.exe" if os.name == "nt" else "dual-wifi-scan-
 subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
     "-I", str(out), "-I", str(root / "tools/host_checks/stubs"),
     "-I", str(root / "shared"), "-I", str(root / "s3_main/main"),
-    str(root / "tools/host_checks/dual_wifi_scan_check.c"), "-o", str(exe)], check=True, env=env)
+    str(root / "tools/host_checks/dual_wifi_scan_check.c"),
+    str(root / "s3_main/main/wifi_archive.c"), str(root / "s3_main/main/wifi_archive_capture.c"),
+    "-o", str(exe)], check=True, env=env)
 subprocess.run([str(exe)], check=True, env=env)

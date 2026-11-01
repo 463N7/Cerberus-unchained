@@ -31,7 +31,8 @@ def function(text, signature):
 constants = []
 for name in ("CERBERUS_STORAGE_PATH_MAX", "CERBERUS_STORAGE_NAME_MAX",
         "CERBERUS_STORAGE_BLE_ARCHIVE_PATH", "CERBERUS_STORAGE_BLE_ARCHIVE_MAX_BYTES",
-        "CERBERUS_STORAGE_AIRTAG_JSON_MAX_BYTES"):
+        "CERBERUS_STORAGE_AIRTAG_JSON_MAX_BYTES", "CERBERUS_STORAGE_WIFI_ARCHIVE_PATH",
+        "CERBERUS_STORAGE_WIFI_ARCHIVE_MAX_BYTES"):
     constants.append(re.search(r"^#define " + name + r"\s+[^\n]+", header, re.M).group(0))
 end = header.index("} cerberus_storage_owner_t;") + len("} cerberus_storage_owner_t;")
 constants.append(header[header.rindex("typedef enum", 0, end):end])
@@ -64,12 +65,15 @@ for name in ("SD_BLE_ARCHIVE_FILE_LIMIT", "SD_BLE_ARCHIVE_SEARCH_LIMIT"):
     parts.append(re.search(r"^#define " + name + r"\s+[^\n]+", storage, re.M).group(0))
 parts.append(re.search(r"^static unsigned sd_ble_archive_next_index[^\n]+", storage, re.M).group(0))
 parts.append(re.search(r"^static unsigned sd_airtag_json_next_index[^\n]+", storage, re.M).group(0))
+parts.append(re.search(r"^static unsigned sd_wifi_archive_next_index[^\n]+", storage, re.M).group(0))
 parts += [function(storage, signature) for signature in (
     "static bool ble_archive_storage_available(",
     "esp_err_t cerberus_storage_ble_archive_save(",
     "esp_err_t cerberus_storage_ble_archive_load(",
     "esp_err_t cerberus_storage_airtag_json_save(",
     "esp_err_t cerberus_storage_airtag_json_load(",
+    "esp_err_t cerberus_storage_wifi_archive_save(",
+    "esp_err_t cerberus_storage_wifi_archive_load(",
 )]
 (out / "archive_storage_impl.h").write_text("\n\n".join(parts), encoding="utf-8")
 service = (root / "s3_main/main/ble_archive_io.c").read_text(encoding="utf-8")
@@ -87,6 +91,7 @@ for fixture in ("ble_archive_storage_check", "ble_archive_io_check"):
         "-I", str(root / "s3_main/main"), str(root / "tools/host_checks" / (fixture + ".c"))]
     command.append(str(root / "s3_main/main/ble_archive.c"))
     command.append(str(root / "s3_main/main/airtag_json.c"))
+    command.append(str(root / "s3_main/main/wifi_archive.c"))
     subprocess.run([*command, "-o", str(executable)], check=True, env=env)
     with tempfile.TemporaryDirectory(prefix="files-", dir=out) as temporary:
         subprocess.run([str(executable)], cwd=temporary, check=True, env=env)

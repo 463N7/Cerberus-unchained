@@ -12,6 +12,8 @@ typedef enum {
     DUAL_WIFI_UI_BACK,
     DUAL_WIFI_UI_OPEN_AP_TOOLS,
     DUAL_WIFI_UI_UNSUPPORTED,
+    DUAL_WIFI_UI_SAVE_ALL,
+    DUAL_WIFI_UI_SAVE_SELECTED,
 } dual_wifi_ui_action_t;
 
 typedef struct {
@@ -19,7 +21,9 @@ typedef struct {
     cerberus_dual_wifi_row_t painted[4], selected;
     cerberus_dual_wifi_status_t status;
     uint32_t generation, last_draw_ms;
+    uint64_t save_mask; /* Historical file selection, never wifi_targets. */
     uint8_t indexes[CERBERUS_DUAL_WIFI_CAPACITY];
+    uint8_t painted_indexes[4], selected_row;
     uint8_t count, filtered_count, page, painted_count, sort, band;
     bool cache_valid, paint_valid, selected_valid, detail, pending_start, pending_tools, dirty;
 } dual_wifi_ui_store_t;
@@ -131,6 +135,7 @@ static void dual_wifi_ui_snapshot(dual_wifi_ui_store_t *store)
             return;
         }
     }
+    if (store->generation != store->status.generation) store->save_mask = 0U;
     store->generation = store->status.generation;
     store->count = store->status.count;
     store->cache_valid = true;
@@ -269,6 +274,9 @@ static esp_err_t dual_wifi_ui_draw(void)
             }
             ESP_RETURN_ON_ERROR(draw_button(8, 326, 304, 44,
                 status.rebinding ? "CHECKING AP" : "OPEN AP TOOLS"), TAG, "dual selected tools");
+            ESP_RETURN_ON_ERROR(draw_small_button(8, 374, 148, 44,
+                store->save_mask & (UINT64_C(1) << store->selected_row) ? "UNMARK FOR SAVE" : "MARK FOR SAVE"), TAG, "dual saved mark");
+            ESP_RETURN_ON_ERROR(draw_small_button(164, 374, 148, 44, "SAVE SELECTED"), TAG, "dual saved selected");
         } else {
             const char *mode = status.split ? "S3: 2.4 GHz + C5: 5 GHz" :
                 "S3 + C5 / AUTOMATIC RADIO SELECTION";
@@ -282,32 +290,39 @@ static esp_err_t dual_wifi_ui_draw(void)
             static const char *const sorts[] = {"SORT: SIGNAL", "SORT: NAME", "SORT: CHANNEL"};
             ESP_RETURN_ON_ERROR(draw_small_button(8, 90, 148, 32, bands[store->band]), TAG, "dual band");
             ESP_RETURN_ON_ERROR(draw_small_button(164, 90, 148, 32, sorts[store->sort]), TAG, "dual sort");
-            snprintf(line, sizeof(line), "%u RESULTS / PAGE %u OF %u%s", store->cache_valid ? store->filtered_count : 0U,
+            unsigned marked = 0U;
+            for (uint64_t bits = store->save_mask; bits; bits &= bits - 1U) ++marked;
+            snprintf(line, sizeof(line), "%u RESULTS / PAGE %u/%u / SAVE %u%s", store->cache_valid ? store->filtered_count : 0U,
                 store->page + 1U, store->filtered_count ? (store->filtered_count + 3U) / 4U : 1U,
-                busy && store->count ? " / RETAINED" : "");
+                marked, busy && store->count ? " / RETAINED" : "");
             ESP_RETURN_ON_ERROR(draw_centered(132, line, UI_TEXT, 1), TAG, "dual scan count");
             if (store->cache_valid) {
                 for (unsigned i = 0; i < 4U && (unsigned)store->page * 4U + i < store->filtered_count; ++i) {
                     cerberus_dual_wifi_row_t *row = &store->painted[i];
-                    *row = store->rows[store->indexes[store->page * 4U + i]];
+                    store->painted_indexes[i] = store->indexes[store->page * 4U + i];
+                    *row = store->rows[store->painted_indexes[i]];
                     uint16_t y = (uint16_t)(150U + i * 54U);
                     char name[43];
                     dual_wifi_ui_name(&row->ap, name, sizeof(name));
                     ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(8, y, 304, 50, UI_PANEL), TAG, "dual scan row");
-                    snprintf(line, sizeof(line), "%s", name[0] ? name : "[HIDDEN SSID]");
+                    snprintf(line, sizeof(line), "%.36s", name[0] ? name : "[HIDDEN SSID]");
                     ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 5U, line, UI_TEXT, UI_PANEL, 1), TAG, "dual scan name");
                     snprintf(line, sizeof(line), "%s / %s CH%u / %d dBm", dual_wifi_ui_source(row->source),
                         row->ap.channel <= 14U ? "2.4G" : "5G", row->ap.channel, row->ap.rssi);
                     ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 22U, line, UI_MUTED, UI_PANEL, 1), TAG, "dual scan source");
                     snprintf(line, sizeof(line), "%s / TAP FOR DETAILS", wifi_security_text(row->ap.security));
                     ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 36U, line, UI_MUTED, UI_PANEL, 1), TAG, "dual scan security");
+                    ESP_RETURN_ON_ERROR(draw_small_button(276, y + 11U, 30, 28,
+                        store->save_mask & (UINT64_C(1) << store->painted_indexes[i]) ? "X" : "+"), TAG, "dual save checkbox");
                     ++store->painted_count;
                 }
             }
             if (!store->painted_count)
                 ESP_RETURN_ON_ERROR(draw_centered(218, "NO NETWORKS IN THIS VIEW", UI_MUTED, 1), TAG, "dual scan empty");
-            ESP_RETURN_ON_ERROR(draw_button(8, 374, 148, 44, "PREV"), TAG, "dual scan previous");
-            ESP_RETURN_ON_ERROR(draw_button(164, 374, 148, 44, "NEXT"), TAG, "dual scan next");
+            ESP_RETURN_ON_ERROR(draw_small_button(8, 374, 68, 44, "PREV"), TAG, "dual scan previous");
+            ESP_RETURN_ON_ERROR(draw_small_button(84, 374, 68, 44, "NEXT"), TAG, "dual scan next");
+            ESP_RETURN_ON_ERROR(draw_small_button(160, 374, 68, 44, "SAVE ALL"), TAG, "dual save all");
+            ESP_RETURN_ON_ERROR(draw_small_button(236, 374, 76, 44, "SAVE SEL"), TAG, "dual save selection");
         }
     }
     ESP_RETURN_ON_ERROR(draw_button(8, 426, 148, 44, detail ? "BACK TO LIST" : "BACK"), TAG, "dual scan back");
@@ -348,6 +363,13 @@ static dual_wifi_ui_action_t dual_wifi_ui_tap(uint16_t x, uint16_t y)
     }
     if (!store) return DUAL_WIFI_UI_NONE;
     if (store->detail) {
+        if (store->selected_valid && y >= 374U && y < 418U) {
+            if (x >= 8U && x < 156U) {
+                store->save_mask ^= UINT64_C(1) << store->selected_row;
+                return DUAL_WIFI_UI_REDRAW;
+            }
+            if (x >= 164U && x < 312U && store->save_mask) return DUAL_WIFI_UI_SAVE_SELECTED;
+        }
         if (store->selected_valid && !status.rebinding && !store->pending_tools &&
             dual_wifi_ui_inside(x, y, 8, 326, 304, 44)) {
             store->pending_start = false;
@@ -371,12 +393,16 @@ static dual_wifi_ui_action_t dual_wifi_ui_tap(uint16_t x, uint16_t y)
         dual_wifi_ui_indexes(store);
         return DUAL_WIFI_UI_REDRAW;
     }
-    if (dual_wifi_ui_inside(x, y, 8, 374, 148, 44) && store->page) {
+    if (store->cache_valid && dual_wifi_ui_inside(x, y, 160, 374, 68, 44))
+        return DUAL_WIFI_UI_SAVE_ALL;
+    if (store->cache_valid && store->save_mask && dual_wifi_ui_inside(x, y, 236, 374, 76, 44))
+        return DUAL_WIFI_UI_SAVE_SELECTED;
+    if (dual_wifi_ui_inside(x, y, 8, 374, 68, 44) && store->page) {
         --store->page;
         store->paint_valid = false;
         return DUAL_WIFI_UI_REDRAW;
     }
-    if (dual_wifi_ui_inside(x, y, 164, 374, 148, 44) &&
+    if (dual_wifi_ui_inside(x, y, 84, 374, 68, 44) &&
         (unsigned)(store->page + 1U) * 4U < store->filtered_count) {
         ++store->page;
         store->paint_valid = false;
@@ -386,7 +412,12 @@ static dual_wifi_ui_action_t dual_wifi_ui_tap(uint16_t x, uint16_t y)
         (y - 150U) % 54U < 50U) {
         uint8_t i = (uint8_t)((y - 150U) / 54U);
         if (i < store->painted_count) {
+            if (x >= 276U && x < 306U && (y - 150U) % 54U >= 11U && (y - 150U) % 54U < 39U) {
+                store->save_mask ^= UINT64_C(1) << store->painted_indexes[i];
+                store->paint_valid = false; return DUAL_WIFI_UI_REDRAW;
+            }
             store->selected = store->painted[i];
+            store->selected_row = store->painted_indexes[i];
             store->selected_valid = store->detail = true;
             store->paint_valid = false;
             return DUAL_WIFI_UI_REDRAW;

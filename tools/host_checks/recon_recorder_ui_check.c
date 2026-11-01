@@ -258,7 +258,7 @@ static void seed(void)
     sentinel_scan_session_init(&live_session); sentinel_scan_session_init(&live_ble_session);
     live_ble_session_initialized = watch_initialized = true;
     live_store = &store; live_ble_evidence = evidence;
-    watch_page = WATCH_LIVE; current_page = UI_PAGE_WATCH; watch_paused = false;
+    watch_page = WATCH_LIVE; current_page = UI_PAGE_WATCH; watch_paused = false; watch_radar = false;
     c5_online = true; live_radio_busy = false;
     c5_status = (cerberus_c5_status_t){.firmware_version = CERBERUS_WATCH_MIN_FIRMWARE,
         .capabilities = CERBERUS_C5_CAP_WATCH_OBSERVATIONS | CERBERUS_C5_CAP_WIFI_2_4_GHZ};
@@ -270,6 +270,7 @@ static void seed(void)
     raw_identity_bad = raw_final_bad = extra_final_bad = extra_drone = false;
     offer_count = start_calls = stop_calls = 0; start_error = ESP_OK; reject_offer = false;
     drawn_size = 0; drawn[0] = 0; recon_confirm = 0;
+    painted_text_size=0;painted_text[0]=0;fail_paint_at=0;
     memset(&recorder_status, 0, sizeof(recorder_status));
     watch_recording_context = false;
     sentinel_watch_view_invalidate();
@@ -361,7 +362,7 @@ static void test_rejected_banks(void)
         seed(); bank(SENTINEL_SCAN_BLE, 3);
         switch (fault) {
         case 0: watch_paused = true; break;
-        case 1: watch_page = WATCH_DEMO; break;
+        case 1: watch_paused = true; break;
         case 2: live_ble_session.completed = false; break;
         case 3: live_ble_session.active = SENTINEL_SCAN_BLE; break;
         case 4: live_records[SENTINEL_SCAN_BLE].saved_generation++; break;
@@ -572,10 +573,10 @@ static void test_lifecycle(void)
     CHECK(live_session.desired == SENTINEL_SCAN_NONE && live_ble_session.desired == SENTINEL_SCAN_NONE);
     seed(); active_sessions(); watch_page = WATCH_OPTIONS;
     CHECK(recon_handle_control_tap(164,278,5000));
-    CHECK(watch_page == WATCH_DEMO && stop_calls == 1 && !watch_requested_tool() && !watch_ble_requested());
-    CHECK(live_session.desired == SENTINEL_SCAN_NONE && live_ble_session.desired == SENTINEL_SCAN_NONE);
-    CHECK(watch_draw(5000,true) == ESP_OK); watch_handle_tap(20,440);
-    CHECK(watch_page == WATCH_LIVE && start_calls == 0 && stop_calls == 1);
+    CHECK(watch_page == WATCH_OPTIONS && watch_radar && stop_calls == 0 && watch_requested_tool() && watch_ble_requested());
+    CHECK(live_session.desired == SENTINEL_SCAN_WIFI && live_ble_session.desired == SENTINEL_SCAN_BLE);
+    CHECK(watch_draw(5000,true) == ESP_OK); watch_handle_tap(100,440);
+    CHECK(watch_page == WATCH_LIVE && start_calls == 0 && stop_calls == 0);
     seed(); active_sessions(); watch_recording_context = true; current_page = UI_PAGE_MENU;
     watch_ui_tick(5000); watch_ui_tick(6000);
     CHECK(stop_calls == 1 && !watch_recording_context && !offer_count);
@@ -682,16 +683,129 @@ static void test_inventory_integration(void)
     clock_us = 7000000; watch_open(7000);
     CHECK(allocation_calls == 1 && free_calls == 0);
     CHECK(recon_inventory_ui->model.count[0] == 0 && recon_inventory_ui->filter == CERBERUS_RECON_INVENTORY_ALL);
-    CHECK(!recon_inventory_ui->selected_valid && !recon_inventory_ui->paint_valid && recon_inventory_ui->page == 0);
+    CHECK(!recon_inventory_ui->selected_valid && recon_inventory_ui->paint_valid && !recon_inventory_ui->painted_count && recon_inventory_ui->page == 0);
     current_page = UI_PAGE_MENU; watch_ui_tick(8000); watch_ui_tick(9000);
     CHECK(!recon_inventory_ui && free_calls == 1);
+}
+
+static void clear_dashboard_text(void)
+{drawn_size=painted_text_size=0;drawn[0]=painted_text[0]=0;calls=0;}
+static void test_dashboard(const char *directory)
+{
+    seed();watch_inventory_open();bank(SENTINEL_SCAN_WIFI,3);bank(SENTINEL_SCAN_BLE,3);
+    /* Same bytes on S3 BLE public/random and C5 Wi-Fi stay distinct. */
+    memcpy(store.ble[0].address,store.wifi[0].bssid,6);memcpy(store.ble[1].address,store.ble[0].address,6);
+    for(unsigned i=0;i<2;++i){evidence[i].peer=store.ble[i];
+        memcpy(evidence[i].focus.discovery.address,store.ble[i].address,6);
+        memcpy(evidence[i].advertisement.address,store.ble[i].address,6);}
+    CHECK(watch_consume(5000));
+    CHECK(recon_inventory_ui->model.count[0]==3&&recon_inventory_ui->model.count[1]==3);
+    uint32_t added=recon_inventory_ui->model.counters.added;
+    live_session.completed=live_ble_session.completed=true;
+    live_records[SENTINEL_SCAN_WIFI].captured_ms=6000;
+    live_ble_capture_state.epoch=live_ble_lease_state.epoch=++live_ble_capture_epoch;live_ble_lease_epoch=live_ble_capture_epoch;
+    clock_us=6000000;CHECK(watch_consume(6000));
+    CHECK(recon_inventory_ui->model.count[0]==3&&recon_inventory_ui->model.count[1]==3&&recon_inventory_ui->model.counters.added==added);
+    /* The dashboard receives the last32 chronological buckets, not the
+     * oldest32 prefix returned by a capacity-limited public copy. */
+    for(unsigned i=0;i<64;++i)recon_inventory_ui->model.history[i]=(cerberus_recon_inventory_bucket_t){.second=i,.added=i,.expired=64-i};
+    recon_inventory_ui->model.history_count=64;recon_inventory_ui->model.history_head=63;
+    recorder_status.state=CERBERUS_RECON_RECORDER_RECORDING;recorder_status.worker_active=true;recorder_status.counters.written=128;
+    unsigned getters=status_calls,starts=start_calls,stops=stop_calls,offers=(unsigned)offer_count;
+    clear_dashboard_text();CHECK(watch_draw(6000,true)==ESP_OK);
+    CHECK(watch_view.dashboard&&watch_view.dashboard->total==6&&watch_view.dashboard->pages==2&&watch_view.dashboard->count==4);
+    CHECK(watch_view.dashboard->added[0]==32&&watch_view.dashboard->added[31]==63&&watch_view.dashboard->expired[31]==1);
+    CHECK(strstr(painted_text,"RECON / DASHBOARD")&&strstr(painted_text,"LIST CHANGES / LAST 32 SECONDS"));
+    CHECK(strstr(painted_text,"SD: RECORDING / 128 ROWS")&&strstr(painted_text,"C5 / WI-FI")&&strstr(painted_text,"S3 / BLUETOOTH LE"));
+    CHECK(!strstr(painted_text,"SCENE GALLERY")&&!strstr(painted_text,"DEMO ART"));
+    CHECK(recon_inventory_ui->paint_valid&&status_calls==getters&&start_calls==starts&&stop_calls==stops&&offer_count==offers);
+    save_preview(directory,"dashboard-mixed");
+    for(unsigned i=0;i<recon_inventory_ui->painted_count;++i)for(unsigned j=i+1;j<recon_inventory_ui->painted_count;++j){
+        const cerberus_recon_record_t *a=&recon_inventory_ui->painted[i].record,*b=&recon_inventory_ui->painted[j].record;
+        CHECK(a->radio!=b->radio||a->address_type!=b->address_type||memcmp(a->address,b->address,6));
+    }
+    watch_handle_tap(270,388);CHECK(recon_inventory_ui->dashboard_page==1&&recon_inventory_ui->painted_count==2);
+    CHECK(strstr(recon_inventory_ui->dashboard.rows[0].identity,"T1")||strstr(recon_inventory_ui->dashboard.rows[1].identity,"T1"));
+    cerberus_recon_inventory_entry_t frozen=recon_inventory_ui->painted[0];
+    memset(recon_inventory_ui->model.entries,0,sizeof(recon_inventory_ui->model.entries));
+    watch_handle_tap(24,184);CHECK(watch_page==WATCH_INVENTORY_DETAIL&&recon_inventory_ui->detail_from_dashboard);
+    CHECK(!memcmp(&frozen,&recon_inventory_ui->selected,sizeof(frozen)));
+    watch_handle_tap(100,440);CHECK(watch_page==WATCH_LIVE&&recon_inventory_ui->dashboard_page==0);
+    /* Restore a real source publication for failed-paint and Radar tests. */
+    seed();watch_inventory_open();bank(SENTINEL_SCAN_WIFI,2);bank(SENTINEL_SCAN_BLE,2);CHECK(watch_consume(5000));
+    clear_dashboard_text();CHECK(watch_draw(5000,true)==ESP_OK);unsigned painted_calls=calls;
+    for(unsigned fault=1;fault<=painted_calls;fault+=7){
+        clear_dashboard_text();fail_paint_at=fault;CHECK(watch_draw(5000,true)==ESP_FAIL);
+        CHECK(!recon_inventory_ui->paint_valid&&!watch_dashboard_tap(SENTINEL_WATCH_ACTION_ROW_0));
+        fail_paint_at=0;
+    }
+    clear_dashboard_text();CHECK(watch_draw(5000,true)==ESP_OK&&recon_inventory_ui->paint_valid);
+    watch_page=WATCH_OPTIONS;starts=start_calls;stops=stop_calls;
+    CHECK(recon_handle_control_tap(164,278,5000)&&watch_radar&&watch_page==WATCH_OPTIONS);
+    CHECK(start_calls==starts&&stop_calls==stops);watch_handle_tap(100,440);
+    CHECK(watch_page==WATCH_LIVE&&watch_view.radar);
+    CHECK(strstr(painted_text,"POSITIONS ARE LIST SLOTS")&&strstr(painted_text,"NO BEARING OR DISTANCE"));
+    save_preview(directory,"radar-mixed");
+    frozen=recon_inventory_ui->painted[2];watch_handle_tap(24,342);
+    CHECK(watch_page==WATCH_INVENTORY_DETAIL&&!memcmp(&frozen,&recon_inventory_ui->selected,sizeof(frozen)));
+    watch_handle_tap(100,440);CHECK(watch_page==WATCH_LIVE&&watch_radar);
+    watch_last_draw=5000;clear_dashboard_text();watch_ui_tick(5499);CHECK(!calls);
+    watch_ui_tick(5500);CHECK(calls&&watch_last_draw==5500);
+    seed();watch_inventory_open();bank(SENTINEL_SCAN_WIFI,32);bank(SENTINEL_SCAN_BLE,32);CHECK(watch_consume(5000));
+    CHECK(recon_inventory_ui->model.count[0]==32&&recon_inventory_ui->model.count[1]==32);
+    recon_inventory_ui->model.entries[0].record.channel_valid=false;
+    recon_inventory_ui->model.entries[0].record.channel=0;
+    recon_inventory_ui->model.entries[32].age_source_kind=CERBERUS_RECON_SOURCE_S3_CALLBACK_US;
+    clear_dashboard_text();CHECK(watch_draw(5000,true)==ESP_OK);
+    CHECK(strstr(painted_text,"CH?")&&strstr(painted_text,"CAMERA / HIGH")&&!strstr(painted_text,"GOPRO"));
+    static cerberus_recon_record_t displayed[64];unsigned used=0;
+    for(unsigned page=0;page<16;++page){
+        CHECK(recon_inventory_ui->dashboard_page==page&&watch_view.dashboard->total==64&&watch_view.dashboard->pages==16);
+        CHECK(recon_inventory_ui->paint_valid&&recon_inventory_ui->painted_count==4);
+        for(unsigned row=0;row<4;++row){
+            const cerberus_recon_record_t *r=&recon_inventory_ui->painted[row].record;
+            for(unsigned previous=0;previous<used;++previous)
+                CHECK(r->radio!=displayed[previous].radio||r->address_type!=displayed[previous].address_type||memcmp(r->address,displayed[previous].address,6));
+            displayed[used++]=*r;
+        }
+        if(page==8)CHECK(strstr(recon_inventory_ui->dashboard.rows[0].age,"RX "));
+        clear_dashboard_text();watch_handle_tap(270,388);
+    }
+    CHECK(used==64&&recon_inventory_ui->dashboard_page==15);
+    save_preview(directory,"dashboard-full64-final-page");
+    watch_page=WATCH_OPTIONS;CHECK(recon_handle_control_tap(164,278,5000)&&watch_radar);watch_handle_tap(100,440);
+    clear_dashboard_text();CHECK(watch_draw(5000,true)==ESP_OK);painted_calls=calls;
+    const unsigned radar_faults[]={1,40,painted_calls};
+    for(unsigned i=0;i<sizeof(radar_faults)/sizeof(radar_faults[0]);++i){
+        clear_dashboard_text();fail_paint_at=radar_faults[i];CHECK(watch_draw(5000,true)==ESP_FAIL);
+        CHECK(!recon_inventory_ui->paint_valid&&!watch_dashboard_tap(SENTINEL_WATCH_ACTION_ROW_0));fail_paint_at=0;
+    }
+    /* No inventory allocation still has useful source/SD status; changing a
+     * written count without changing the phase must repaint at the next tick. */
+    seed();allocation_fail=true;watch_open(5000);CHECK(!recon_inventory_ui);
+    recorder_status.state=CERBERUS_RECON_RECORDER_RECORDING;recorder_status.worker_active=true;
+    recorder_status.counters.written=1;clear_dashboard_text();CHECK(watch_draw(5000,true)==ESP_OK);
+    CHECK(strstr(painted_text,"INVENTORY UNAVAILABLE")&&strstr(painted_text,"SD: RECORDING / 1 ROWS"));
+    recorder_status.counters.written=2;clear_dashboard_text();CHECK(watch_draw(5500,false)==ESP_OK);
+    CHECK(strstr(painted_text,"SD: RECORDING / 2 ROWS"));save_preview(directory,"dashboard-no-memory");
+    watch_capture_failed[0]=true;live_ble_lease_error=ESP_ERR_TIMEOUT;
+    watch_limited_capture[0]=true;watch_extra_unavailable[1]=true;
+    clear_dashboard_text();CHECK(watch_draw(6000,false)==ESP_OK);
+    CHECK(!strcmp(watch_view.wifi_status,"ERROR / CAPPED")&&!strcmp(watch_view.ble_status,"ERROR / LIMITED"));
+    CHECK(strstr(painted_text,"ERROR / CAPPED")&&strstr(painted_text,"ERROR / LIMITED"));
+    save_preview(directory,"dashboard-limited-no-memory");
+    watch_handle_tap(250,440);CHECK(watch_page==WATCH_OPTIONS);
+    CHECK(recon_handle_control_tap(20,130,5500)&&stop_calls==2);
+    watch_handle_tap(100,440);watch_handle_tap(100,440);CHECK(watch_paused);
+    clear_dashboard_text();CHECK(watch_draw(5500,true)==ESP_OK);save_preview(directory,"dashboard-paused-saving");
+    watch_handle_tap(20,440);CHECK(current_page==UI_PAGE_MENU);
 }
 
 int main(int argc, char **argv)
 {
     CHECK(argc == 2);
     test_accepted_banks(); test_rejected_banks(); test_unfiltered_feed(); test_source_fences();
-    test_controls(argv[1]); test_lifecycle(); test_inventory_integration(); watch_inventory_release();
+    test_controls(argv[1]); test_lifecycle(); test_inventory_integration(); test_dashboard(argv[1]);watch_inventory_release();
     printf("PASS: %u actual Recon UI/journal adapter assertions.\n", checks);
     return 0;
 }

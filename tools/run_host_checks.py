@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the 132 registered host suites through the Find My JSON checkpoint.
+"""Run the 134 registered host suites through the saved Wi-Fi lists checkpoint.
 
 The checked-in synthetic fixtures need no board, radio, or private captures.
 Generated fixtures, native executables, previews, logs, and the result receipt
@@ -45,6 +45,7 @@ CHECKS = (
     'check_wardrive_recent_service.py',
     'check_ble_archive.py',
     'check_airtag_json.py',
+    'check_wifi_archive.py',
     'check_ble_archive_list.py',
     'check_ble_archive_io.py',
     'check_recon_inventory.py',
@@ -141,6 +142,7 @@ SERIAL_CHECKS = (
     'check_ble_archive_ui.py',
     'check_ble_archive_live.py',
     'check_airtag_json_ui.py',
+    'check_wifi_archive_ui.py',
     'check_recon_inventory_ui.py',
     'check_recon_recorder_ui.py',
     'render_recon.py',
@@ -193,8 +195,8 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=3, help="Parallel compiler jobs (default: 3)")
     args = parser.parse_args()
     names = (*CHECKS, *SERIAL_CHECKS)
-    if len(names) != 132 or len(set(names)) != 132:
-        parser.error("Expected 132 unique suites; do not silently skip a suite")
+    if len(names) != 134 or len(set(names)) != 134:
+        parser.error("Expected 134 unique suites; do not silently skip a suite")
     if args.list:
         for name in names:
             print(name)
@@ -221,7 +223,7 @@ def main() -> int:
     changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
     receipt = {
         "format": 1,
-        "suite_set": "rev123",
+        "suite_set": "rev124",
         "recorded_utc": datetime.now(timezone.utc).isoformat(),
         "status": "passed" if not changed and all(r["exit_code"] == 0 for r in results) else "failed",
         "hardware_validated": False,

@@ -41,7 +41,7 @@ static esp_err_t recon_draw_options(void)
     snprintf(confidence, sizeof(confidence), "ALERT: %s", watch_state.minimum_confidence == SENTINEL_WATCH_CONFIDENCE_HIGH ?
         "HIGH ONLY" : watch_state.minimum_confidence == SENTINEL_WATCH_CONFIDENCE_MEDIUM ? "MEDIUM +" : "ALL");
     const char *labels[] = {confidence, watch_state.muted ? "ALERTS: MUTED" : "ALERTS: ON", "TYPE FILTER",
-        "RESET IGNORE / SNOOZE", "CLEAR LIVE HISTORY", "SCENE GALLERY", "NEARBY INVENTORY"};
+        "RESET IGNORE / SNOOZE", "CLEAR LIVE HISTORY", watch_radar ? "VIEW: RADAR" : "VIEW: DASHBOARD", "NEARBY INVENTORY"};
     for (unsigned i = 0; i < 7; ++i)
         ESP_RETURN_ON_ERROR(draw_button(8 + (i % 2U) * 156, 170 + (i / 2U) * 54, 148, 44, labels[i]), TAG, "recon option");
     const char *confirmation = recon_confirm == 4 ? "TAP AGAIN: RESET IGNORE / SNOOZE" :
@@ -132,10 +132,10 @@ static bool recon_handle_control_tap(uint16_t x, uint16_t y, uint32_t now)
             if (confirmation == 5) { sentinel_watch_clear_history(&watch_state); watch_history_page = 0; }
             else recon_confirm = 5;
         } else if (action == 5U) {
-            cerberus_recon_recorder_stop();
-            sentinel_scan_session_select(&live_session, SENTINEL_SCAN_NONE);
-            sentinel_scan_session_select(&live_ble_session, SENTINEL_SCAN_NONE);
-            watch_page = WATCH_DEMO; watch_demo_scene = 0;
+            watch_radar = !watch_radar;
+            if(recon_inventory_ui)recon_inventory_ui->paint_valid=false;
+            snprintf(recon_message,sizeof(recon_message),"%s",watch_radar?
+                "RADAR: SIGNAL ONLY / NO DIRECTION":"DASHBOARD: RETAINED OBSERVATIONS");
         } else {
             if (recon_inventory_ui) {
                 recon_inventory_ui->filter = CERBERUS_RECON_INVENTORY_ALL;

@@ -144,6 +144,7 @@ typedef enum {
     UI_PAGE_REMOTE_ID,
     UI_PAGE_MAC_MONITOR,
     UI_PAGE_BLE_ARCHIVE,
+    UI_PAGE_WIFI_ARCHIVE,
 } ui_page_t;
 
 typedef struct {
@@ -353,6 +354,12 @@ static const cerberus_ui_widget_theme_t ui_colors = {
 #define UI_WIDGET_THEME (&ui_colors)
 
 static esp_err_t draw_detail_page(void);
+static bool wifi_archive_is_file(const char *name);
+static void wifi_archive_open_file(const char *path, const char *name);
+static void wifi_archive_save_live(bool selected_only);
+static esp_err_t wifi_archive_draw(void);
+static void wifi_archive_tap(uint16_t x, uint16_t y);
+static void wifi_archive_tick(bool asleep);
 static esp_err_t ble_archive_draw(void);
 static bool airtag_json_is_file(const char *name);
 static bool airtag_json_is_open(void);
@@ -8081,6 +8088,7 @@ static esp_err_t draw_detail_page(void)
     if (wardrive_gps_view_is_open()) return wardrive_gps_view_draw();
     if (wardrive_recent_is_open()) return wardrive_recent_draw();
     if (current_page == UI_PAGE_BLE_ARCHIVE) return ble_archive_draw();
+    if (current_page == UI_PAGE_WIFI_ARCHIVE) return wifi_archive_draw();
     if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_CSI) return csi_draw(true);
     if (current_page == UI_PAGE_REMOTE_ID) return remote_id_draw(true);
     if (current_page == UI_PAGE_MAC_MONITOR) return mac_monitor_draw(true);
@@ -10715,7 +10723,9 @@ static void handle_files_tap(uint16_t x, uint16_t y)
         } else if (index < file_entry_count && file_entries[index].is_directory) {
             navigate_file_directory(file_entries[index].name);
         } else if (index < file_entry_count) {
-            if (ble_archive_is_file(file_entries[index].name)) {
+            if (wifi_archive_is_file(file_entries[index].name)) {
+                wifi_archive_open_file(file_path, file_entries[index].name);
+            } else if (ble_archive_is_file(file_entries[index].name)) {
                 ble_archive_open_file(file_path, file_entries[index].name);
             } else if (cerberus_bmp_is_file_name(file_entries[index].name)) {
                 open_image_file(file_entries[index].name);
@@ -11347,6 +11357,7 @@ static void handle_scripts_tap(uint16_t x, uint16_t y)
 
 #include "sentinel_live_ui.h"
 #include "dual_wifi_live_ui.h"
+#include "wifi_archive_live_ui.h"
 #include "dual_ble_live_ui.h"
 #include "ble_analyzer_live_ui.h"
 #include "s3_findmy_monitor_ui.h"
@@ -11363,7 +11374,7 @@ static esp_err_t draw_battery_indicator(void)
     cerberus_battery_status_t battery;
     cerberus_battery_get_status(&battery);
     uint16_t background = current_page == UI_PAGE_GUIDE ? 0x0863U : UI_BACKGROUND;
-    if (current_page == UI_PAGE_WATCH && (watch_page == WATCH_LIVE || watch_page == WATCH_DEMO))
+    if (current_page == UI_PAGE_WATCH && watch_page == WATCH_LIVE)
         background = 0x0042U;
     if (current_page == UI_PAGE_REMOTE_ID) background = 0x0042U;
     if (current_page == UI_PAGE_MAC_MONITOR) background = 0x0042U;
@@ -11886,6 +11897,10 @@ static void handle_tap(uint16_t x, uint16_t y)
 
     if (current_page == UI_PAGE_BLE_ARCHIVE) {
         ble_archive_tap(x, y);
+        return;
+    }
+    if (current_page == UI_PAGE_WIFI_ARCHIVE) {
+        wifi_archive_tap(x, y);
         return;
     }
     if (current_page == UI_PAGE_WATCH) {
@@ -12444,6 +12459,7 @@ void cerberus_ui_run(const cerberus_ui_config_t *config)
         }
         if (!screen_asleep) watch_ui_tick((uint32_t)now_ms);
         ble_archive_tick(screen_asleep);
+        wifi_archive_tick(screen_asleep);
         wardrive_recent_release_if_left();
         bool notification_added = cerberus_ui_time_service_tick(now_ms);
         if (notification_added && !screen_asleep && current_page == UI_PAGE_SETTINGS &&

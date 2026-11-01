@@ -14,6 +14,8 @@ _Static_assert(CERBERUS_BLE_ARCHIVE_MAX_SIZE <= CERBERUS_STORAGE_BLE_ARCHIVE_MAX
     "Archive codec must fit its storage bound");
 _Static_assert(CERBERUS_AIRTAG_JSON_MAX_BYTES <= CERBERUS_STORAGE_AIRTAG_JSON_MAX_BYTES,
     "JSON codec must fit its storage bound");
+_Static_assert(CERBERUS_WIFI_ARCHIVE_MAX_SIZE <= CERBERUS_STORAGE_WIFI_ARCHIVE_MAX_BYTES,
+    "Wi-Fi codec must fit its storage bound");
 _Static_assert(CERBERUS_BLE_ARCHIVE_IO_PATH_CAPACITY == CERBERUS_STORAGE_PATH_MAX &&
     CERBERUS_BLE_ARCHIVE_IO_NAME_CAPACITY == CERBERUS_STORAGE_NAME_MAX,
     "Archive paths must fit storage validators");
@@ -36,6 +38,10 @@ typedef struct {
                 uint8_t bytes[CERBERUS_AIRTAG_JSON_MAX_BYTES];
             } buffer;
         } json;
+        struct {
+            cerberus_wifi_archive_t document;
+            uint8_t bytes[CERBERUS_WIFI_ARCHIVE_MAX_SIZE];
+        } wifi;
     } payload;
 } ble_archive_io_context_t;
 static portMUX_TYPE archive_io_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -46,15 +52,33 @@ static bool archive_io_release_requested;
 static uint16_t archive_io_readers;
 
 static bool archive_io_loading(cerberus_ble_archive_io_operation_t operation)
-{ return operation == CERBERUS_BLE_ARCHIVE_IO_LOAD || operation == CERBERUS_BLE_ARCHIVE_IO_LOAD_AIRTAG_JSON; }
+{ return operation == CERBERUS_BLE_ARCHIVE_IO_LOAD ||
+    operation == CERBERUS_BLE_ARCHIVE_IO_LOAD_AIRTAG_JSON || operation == CERBERUS_BLE_ARCHIVE_IO_LOAD_WIFI; }
 
 static bool archive_io_json(cerberus_ble_archive_io_operation_t operation)
-{ return operation >= CERBERUS_BLE_ARCHIVE_IO_LOAD_AIRTAG_JSON; }
+{ return operation == CERBERUS_BLE_ARCHIVE_IO_LOAD_AIRTAG_JSON ||
+    operation == CERBERUS_BLE_ARCHIVE_IO_SAVE_AIRTAG_JSON || operation == CERBERUS_BLE_ARCHIVE_IO_EXPORT_AIRTAG_JSON; }
+
+static bool archive_io_wifi(cerberus_ble_archive_io_operation_t operation)
+{ return operation == CERBERUS_BLE_ARCHIVE_IO_SAVE_WIFI || operation == CERBERUS_BLE_ARCHIVE_IO_LOAD_WIFI; }
 
 static size_t archive_io_allocation_size(cerberus_ble_archive_io_operation_t operation)
 {
-    return offsetof(ble_archive_io_context_t, payload) + (archive_io_json(operation) ?
-        sizeof(((ble_archive_io_context_t *)0)->payload.json) : sizeof(((ble_archive_io_context_t *)0)->payload.native));
+    size_t payload_size;
+    switch (operation) {
+    case CERBERUS_BLE_ARCHIVE_IO_SAVE:
+    case CERBERUS_BLE_ARCHIVE_IO_LOAD:
+        payload_size = sizeof(((ble_archive_io_context_t *)0)->payload.native); break;
+    case CERBERUS_BLE_ARCHIVE_IO_LOAD_AIRTAG_JSON:
+    case CERBERUS_BLE_ARCHIVE_IO_SAVE_AIRTAG_JSON:
+    case CERBERUS_BLE_ARCHIVE_IO_EXPORT_AIRTAG_JSON:
+        payload_size = sizeof(((ble_archive_io_context_t *)0)->payload.json); break;
+    case CERBERUS_BLE_ARCHIVE_IO_SAVE_WIFI:
+    case CERBERUS_BLE_ARCHIVE_IO_LOAD_WIFI:
+        payload_size = sizeof(((ble_archive_io_context_t *)0)->payload.wifi); break;
+    default: return 0U;
+    }
+    return offsetof(ble_archive_io_context_t, payload) + payload_size;
 }
 
 static esp_err_t archive_io_json_error(cerberus_airtag_json_result_t result)
@@ -93,6 +117,7 @@ static void archive_io_finish(ble_archive_io_context_t *context,
     archive_io_status.bytes = (uint32_t)bytes;
     archive_io_status.count = state == CERBERUS_BLE_ARCHIVE_IO_COMPLETE ?
         (archive_io_json(archive_io_status.operation) ? context->payload.json.document.count :
+            archive_io_wifi(archive_io_status.operation) ? context->payload.wifi.document.count :
             context->payload.native.document.count) : 0U;
     memcpy(archive_io_status.file_name, context->file_name, sizeof(context->file_name));
     archive_io_status.worker_active = false;
@@ -110,13 +135,16 @@ static void ble_archive_io_worker(void *argument)
     cerberus_ble_archive_io_operation_t operation = archive_io_status.operation;
     bool save = !archive_io_loading(operation);
     bool json = archive_io_json(operation);
+    bool wifi = archive_io_wifi(operation);
     archive_io_status.state = save ? CERBERUS_BLE_ARCHIVE_IO_SAVING : CERBERUS_BLE_ARCHIVE_IO_LOADING;
     portEXIT_CRITICAL(&archive_io_lock);
     esp_err_t error = ESP_OK;
     size_t length = 0U;
     bool canceled = archive_io_canceled();
-    uint8_t *bytes = json ? context->payload.json.buffer.bytes : context->payload.native.bytes;
-    size_t capacity = json ? sizeof(context->payload.json.buffer.bytes) : sizeof(context->payload.native.bytes);
+    uint8_t *bytes = json ? context->payload.json.buffer.bytes :
+        wifi ? context->payload.wifi.bytes : context->payload.native.bytes;
+    size_t capacity = json ? sizeof(context->payload.json.buffer.bytes) :
+        wifi ? sizeof(context->payload.wifi.bytes) : sizeof(context->payload.native.bytes);
     if (!canceled && operation == CERBERUS_BLE_ARCHIVE_IO_EXPORT_AIRTAG_JSON) {
         cerberus_airtag_json_export_stats_t stats = {0};
         error = archive_io_json_error(cerberus_airtag_json_from_archive(
@@ -128,20 +156,29 @@ static void ble_archive_io_worker(void *argument)
     if (!canceled && error == ESP_OK && save) {
         if (json) error = archive_io_json_error(cerberus_airtag_json_encode(
             &context->payload.json.document, bytes, capacity, &length));
+        else if (wifi) {
+            if (!cerberus_wifi_archive_encode(&context->payload.wifi.document,
+                bytes, capacity, &length)) error = ESP_ERR_INVALID_RESPONSE;
+        }
         else if (!cerberus_ble_archive_encode(&context->payload.native.document,
             bytes, capacity, &length)) error = ESP_ERR_INVALID_RESPONSE;
     }
     canceled = canceled || archive_io_canceled();
     if (!canceled && error == ESP_OK) {
         if (save) error = json ? cerberus_storage_airtag_json_save(bytes, length,
+            context->file_name, sizeof(context->file_name)) : wifi ? cerberus_storage_wifi_archive_save(bytes, length,
             context->file_name, sizeof(context->file_name)) : cerberus_storage_ble_archive_save(bytes, length,
             context->file_name, sizeof(context->file_name));
         else error = json ? cerberus_storage_airtag_json_load(context->relative_path,
+            context->file_name, bytes, capacity, &length) : wifi ? cerberus_storage_wifi_archive_load(context->relative_path,
             context->file_name, bytes, capacity, &length) : cerberus_storage_ble_archive_load(context->relative_path,
             context->file_name, bytes, capacity, &length);
         if (!save && archive_io_canceled()) canceled = true;
         if (!save && !canceled && error == ESP_OK) {
             if (json) error = archive_io_json_error(cerberus_airtag_json_decode(bytes, length, &context->payload.json.document));
+            else if (wifi) {
+                if (!cerberus_wifi_archive_decode(bytes, length, &context->payload.wifi.document)) error = ESP_ERR_INVALID_RESPONSE;
+            }
             else if (!cerberus_ble_archive_decode(bytes, length, &context->payload.native.document)) error = ESP_ERR_INVALID_RESPONSE;
         }
     }
@@ -153,11 +190,14 @@ static void ble_archive_io_worker(void *argument)
 
 static esp_err_t archive_io_start(cerberus_ble_archive_io_operation_t operation,
     const cerberus_ble_archive_t *document, const cerberus_airtag_json_t *json_document,
+    const cerberus_wifi_archive_t *wifi_document,
     const char *relative_path, const char *file_name, uint64_t *job_id)
 {
     if (job_id != NULL) *job_id = 0U;
     bool save = !archive_io_loading(operation);
-    if (job_id == NULL || (!save && (!archive_io_string_fits(relative_path, CERBERUS_BLE_ARCHIVE_IO_PATH_CAPACITY) ||
+    if (job_id == NULL || !archive_io_allocation_size(operation) ||
+        (operation == CERBERUS_BLE_ARCHIVE_IO_SAVE_WIFI && wifi_document == NULL) ||
+        (!save && (!archive_io_string_fits(relative_path, CERBERUS_BLE_ARCHIVE_IO_PATH_CAPACITY) ||
         !archive_io_string_fits(file_name, CERBERUS_BLE_ARCHIVE_IO_NAME_CAPACITY))))
         return ESP_ERR_INVALID_ARG;
     portENTER_CRITICAL(&archive_io_lock);
@@ -170,11 +210,13 @@ static esp_err_t archive_io_start(cerberus_ble_archive_io_operation_t operation,
     archive_io_status.job_id = ++archive_io_last_job;
     *job_id = archive_io_status.job_id;
     archive_io_status.operation = operation;
-    archive_io_status.format = archive_io_json(operation) ? CERBERUS_BLE_ARCHIVE_IO_FORMAT_AIRTAG_JSON : CERBERUS_BLE_ARCHIVE_IO_FORMAT_BLE;
+    archive_io_status.format = archive_io_json(operation) ? CERBERUS_BLE_ARCHIVE_IO_FORMAT_AIRTAG_JSON :
+        archive_io_wifi(operation) ? CERBERUS_BLE_ARCHIVE_IO_FORMAT_WIFI : CERBERUS_BLE_ARCHIVE_IO_FORMAT_BLE;
     archive_io_status.state = CERBERUS_BLE_ARCHIVE_IO_STARTING;
     archive_io_status.worker_active = true;
     archive_io_release_requested = false;
-    const char *path = save ? CERBERUS_STORAGE_BLE_ARCHIVE_PATH : relative_path;
+    const char *path = save ? (archive_io_wifi(operation) ? CERBERUS_STORAGE_WIFI_ARCHIVE_PATH :
+        CERBERUS_STORAGE_BLE_ARCHIVE_PATH) : relative_path;
     memcpy(archive_io_status.relative_path, path, strlen(path) + 1U);
     if (!save) memcpy(archive_io_status.file_name, file_name, strlen(file_name) + 1U);
     portEXIT_CRITICAL(&archive_io_lock);
@@ -187,6 +229,7 @@ static esp_err_t archive_io_start(cerberus_ble_archive_io_operation_t operation,
         if (operation == CERBERUS_BLE_ARCHIVE_IO_SAVE) context->payload.native.document = *document;
         else if (operation == CERBERUS_BLE_ARCHIVE_IO_SAVE_AIRTAG_JSON) context->payload.json.document = *json_document;
         else if (operation == CERBERUS_BLE_ARCHIVE_IO_EXPORT_AIRTAG_JSON) context->payload.json.buffer.export_source = *document;
+        else if (operation == CERBERUS_BLE_ARCHIVE_IO_SAVE_WIFI) context->payload.wifi.document = *wifi_document;
         memcpy(context->relative_path, path, strlen(path) + 1U);
         if (!save) memcpy(context->file_name, file_name, strlen(file_name) + 1U);
         portENTER_CRITICAL(&archive_io_lock);
@@ -208,23 +251,31 @@ static esp_err_t archive_io_start(cerberus_ble_archive_io_operation_t operation,
 esp_err_t cerberus_ble_archive_io_save(const cerberus_ble_archive_t *document, uint64_t *job_id)
 {
     if (document == NULL) { if (job_id != NULL) *job_id = 0U; return ESP_ERR_INVALID_ARG; }
-    return archive_io_start(CERBERUS_BLE_ARCHIVE_IO_SAVE, document, NULL, NULL, NULL, job_id);
+    return archive_io_start(CERBERUS_BLE_ARCHIVE_IO_SAVE, document, NULL, NULL, NULL, NULL, job_id);
 }
 esp_err_t cerberus_ble_archive_io_load(const char *relative_path, const char *file_name, uint64_t *job_id)
-{ return archive_io_start(CERBERUS_BLE_ARCHIVE_IO_LOAD, NULL, NULL, relative_path, file_name, job_id); }
+{ return archive_io_start(CERBERUS_BLE_ARCHIVE_IO_LOAD, NULL, NULL, NULL, relative_path, file_name, job_id); }
 
 esp_err_t cerberus_ble_archive_io_load_airtag_json(const char *relative_path, const char *file_name, uint64_t *job_id)
-{ return archive_io_start(CERBERUS_BLE_ARCHIVE_IO_LOAD_AIRTAG_JSON, NULL, NULL, relative_path, file_name, job_id); }
+{ return archive_io_start(CERBERUS_BLE_ARCHIVE_IO_LOAD_AIRTAG_JSON, NULL, NULL, NULL, relative_path, file_name, job_id); }
 esp_err_t cerberus_ble_archive_io_save_airtag_json(const cerberus_airtag_json_t *document, uint64_t *job_id)
 {
     if (!document) { if (job_id) *job_id = 0U; return ESP_ERR_INVALID_ARG; }
-    return archive_io_start(CERBERUS_BLE_ARCHIVE_IO_SAVE_AIRTAG_JSON, NULL, document, NULL, NULL, job_id);
+    return archive_io_start(CERBERUS_BLE_ARCHIVE_IO_SAVE_AIRTAG_JSON, NULL, document, NULL, NULL, NULL, job_id);
 }
 esp_err_t cerberus_ble_archive_io_export_airtag_json(const cerberus_ble_archive_t *document, uint64_t *job_id)
 {
     if (!document) { if (job_id) *job_id = 0U; return ESP_ERR_INVALID_ARG; }
-    return archive_io_start(CERBERUS_BLE_ARCHIVE_IO_EXPORT_AIRTAG_JSON, document, NULL, NULL, NULL, job_id);
+    return archive_io_start(CERBERUS_BLE_ARCHIVE_IO_EXPORT_AIRTAG_JSON, document, NULL, NULL, NULL, NULL, job_id);
 }
+
+esp_err_t cerberus_ble_archive_io_save_wifi(const cerberus_wifi_archive_t *document, uint64_t *job_id)
+{
+    if (!document) { if (job_id) *job_id = 0U; return ESP_ERR_INVALID_ARG; }
+    return archive_io_start(CERBERUS_BLE_ARCHIVE_IO_SAVE_WIFI, NULL, NULL, document, NULL, NULL, job_id);
+}
+esp_err_t cerberus_ble_archive_io_load_wifi(const char *relative_path, const char *file_name, uint64_t *job_id)
+{ return archive_io_start(CERBERUS_BLE_ARCHIVE_IO_LOAD_WIFI, NULL, NULL, NULL, relative_path, file_name, job_id); }
 
 void cerberus_ble_archive_io_get_status(cerberus_ble_archive_io_status_t *status)
 {
@@ -264,7 +315,7 @@ esp_err_t cerberus_ble_archive_io_copy_result(uint64_t job_id, cerberus_ble_arch
     if (!document) return ESP_ERR_INVALID_ARG;
     ble_archive_io_context_t *borrowed = archive_io_pin(job_id, CERBERUS_BLE_ARCHIVE_IO_FORMAT_BLE);
     if (!borrowed) return ESP_ERR_INVALID_STATE;
-    /* Both typed immutable copies remain outside the interrupt-disabled lock. */
+    /* Typed immutable copies remain outside the interrupt-disabled lock. */
     memcpy(document, &borrowed->payload.native.document, sizeof(*document));
     archive_io_unpin(borrowed); return ESP_OK;
 }
@@ -274,6 +325,14 @@ esp_err_t cerberus_ble_archive_io_copy_airtag_json(uint64_t job_id, cerberus_air
     ble_archive_io_context_t *borrowed = archive_io_pin(job_id, CERBERUS_BLE_ARCHIVE_IO_FORMAT_AIRTAG_JSON);
     if (!borrowed) return ESP_ERR_INVALID_STATE;
     memcpy(document, &borrowed->payload.json.document, sizeof(*document));
+    archive_io_unpin(borrowed); return ESP_OK;
+}
+esp_err_t cerberus_ble_archive_io_copy_wifi(uint64_t job_id, cerberus_wifi_archive_t *document)
+{
+    if (!document) return ESP_ERR_INVALID_ARG;
+    ble_archive_io_context_t *borrowed = archive_io_pin(job_id, CERBERUS_BLE_ARCHIVE_IO_FORMAT_WIFI);
+    if (!borrowed) return ESP_ERR_INVALID_STATE;
+    memcpy(document, &borrowed->payload.wifi.document, sizeof(*document));
     archive_io_unpin(borrowed); return ESP_OK;
 }
 void cerberus_ble_archive_io_cancel(uint64_t job_id)

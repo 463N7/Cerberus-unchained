@@ -31,6 +31,9 @@ extern "C" {
 /* v6: header32 + up to64 receiver-tagged rows of432 bytes. */
 #define CERBERUS_STORAGE_BLE_ARCHIVE_MAX_BYTES 27680U
 #define CERBERUS_STORAGE_AIRTAG_JSON_MAX_BYTES 49152U
+#define CERBERUS_STORAGE_WIFI_ARCHIVE_PATH "/CERBERUS/WIFI"
+/* v1: header96 + up to64 source-tagged rows of80 bytes. */
+#define CERBERUS_STORAGE_WIFI_ARCHIVE_MAX_BYTES 5216U
 
 typedef struct {
     bool mounted;
@@ -197,6 +200,12 @@ esp_err_t cerberus_storage_ble_archive_load(const char *relative_path,
 esp_err_t cerberus_storage_airtag_json_save(const uint8_t *data, size_t length,
     char *file_name, size_t capacity);
 esp_err_t cerberus_storage_airtag_json_load(const char *relative_path,
+    const char *file_name, uint8_t *data, size_t capacity, size_t *length);
+/* Same checked exclusive transaction as .BLE, with an independent generated
+ * Wnnnnn.WFI destination in /CERBERUS/WIFI and Wnnnnn.TMP failure evidence. */
+esp_err_t cerberus_storage_wifi_archive_save(const uint8_t *data, size_t length,
+    char *file_name, size_t capacity);
+esp_err_t cerberus_storage_wifi_archive_load(const char *relative_path,
     const char *file_name, uint8_t *data, size_t capacity, size_t *length);
 esp_err_t cerberus_storage_write_qr_bmp(
     const uint8_t *modules,

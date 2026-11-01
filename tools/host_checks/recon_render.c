@@ -54,10 +54,9 @@ typedef enum {WATCH_LIVE,WATCH_HISTORY,WATCH_DETAILS,WATCH_DEMO,WATCH_FILTERS,WA
 static watch_page_t watch_page;
 static sentinel_watch_t watch_state;
 static sentinel_watch_entry_t watch_detail;
-static unsigned watch_filters_page,watch_history_page,watch_demo_scene,recon_confirm;
-static bool watch_paused,c5_online=true;
+static unsigned watch_filters_page,watch_history_page,recon_confirm;
+static bool watch_paused,watch_radar,c5_online=true;
 static char recon_message[49];
-static sentinel_scan_session_t live_session, live_ble_session;
 static cerberus_recon_recorder_status_t recorder_status;
 esp_err_t cerberus_recon_recorder_start(void)
 { recorder_status.state = CERBERUS_RECON_RECORDER_STARTING; recorder_status.worker_active = true; return ESP_OK; }
@@ -98,21 +97,21 @@ int main(int argc,char **argv)
         .phase="BLUETOOTH LE / PASSIVE / SWEEP 1",.title="RECON / LISTENING",
         .evidence="LISTENING FOR DOCUMENTED DEVICE HINTS",.detail="WI-FI + BLE TAKE TURNS / NO CONNECTIONS"};
     assert(sentinel_watch_view_draw(&v,1600)==ESP_OK); save(argv[1],"live");
-    calls=0;assert(sentinel_watch_view_update(&v,1600)==ESP_OK && calls==0);
+    calls=0;assert(sentinel_watch_view_update(&v,1600)==ESP_OK && calls>0);
     assert(sentinel_watch_view_hit_test(&v,250,440)==SENTINEL_WATCH_ACTION_DEMO);
     assert(sentinel_watch_view_hit_test(&v,78,440)==SENTINEL_WATCH_ACTION_NONE);
     assert(sentinel_watch_view_hit_test(&v,10,360)==SENTINEL_WATCH_ACTION_NONE);
     v.paused=true;v.phase="PAUSED / TAP RESUME TO SCAN";
     assert(sentinel_watch_view_update(&v,2000)==ESP_OK);save(argv[1],"paused");
-    calls=0;assert(sentinel_watch_view_update(&v,6000)==ESP_OK && calls==0);
+    calls=0;assert(sentinel_watch_view_update(&v,6000)==ESP_OK && calls>0);
     v.paused=false;v.radio_online=false;v.phase="RADIO OFFLINE / WAITING FOR LINK";
     assert(sentinel_watch_view_update(&v,6000)==ESP_OK);save(argv[1],"offline");
-    calls=0;assert(sentinel_watch_view_update(&v,10000)==ESP_OK && calls==0);
+    calls=0;assert(sentinel_watch_view_update(&v,10000)==ESP_OK && calls>0);
     v.radio_online=true;v.has_details=true;v.scene=SENTINEL_WATCH_SCENE_FINDMY;
     v.confidence=SENTINEL_WATCH_CONFIDENCE_HIGH;v.title="FIND MY BROADCAST HINT";
     v.phase="FIXTURE PREVIEW / NO LIVE DEVICE";v.evidence="SYNTHETIC TEST EVIDENCE";v.detail="BLE / -62 DBM / TAP FOR EVIDENCE";
     assert(sentinel_watch_view_update(&v,10400)==ESP_OK);save(argv[1],"finding");
-    assert(sentinel_watch_view_hit_test(&v,10,360)==SENTINEL_WATCH_ACTION_DETAILS);
+    assert(sentinel_watch_view_hit_test(&v,10,360)==SENTINEL_WATCH_ACTION_NONE); /* No invisible legacy details hotspot. */
     sentinel_watch_init(&watch_state); watch_page=WATCH_OPTIONS;
     assert(recon_draw_options()==ESP_OK);save(argv[1],"options");
     assert(!recon_handle_control_tap(20,168,0)); /* vertical button gap */
@@ -139,6 +138,6 @@ int main(int argc,char **argv)
     watch_page=WATCH_OPTIONS;
     assert(recon_handle_control_tap(20,310,1000) && watch_state.history_count==1 && recon_confirm==5);
     assert(recon_handle_control_tap(20,310,1000) && watch_state.history_count==0);
-    puts("PASS: native Recon rendering bounds, unchanged-frame caching, paused/offline animation and touch gaps.");
+    puts("PASS: native Recon rendering bounds, bounded dashboard refresh, paused/offline states and touch gaps.");
     puts("PASS: native options/actions/signal layouts and handlers; stale signal, snooze durations and clear confirmation.");
 }

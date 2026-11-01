@@ -1,6 +1,10 @@
 # Recon SD session recording
 
-This guide describes the contributed source. New workflow acceptance on physical hardware remains pending; the installed local Unified checkpoint and the unflashed Unchained adaptation are distinguished in [CONTRIBUTION_REV93.md](CONTRIBUTION_REV93.md).
+This guide describes the recorder used by the current Recon workflow. Rev124's
+dashboard and optional radar view share this recorder and do not start a
+second writer. The last verified installed pair is rev123; the new UI's
+validation is recorded in [the rev124 checkpoint](DUAL_RADIO_REV124.md).
+Earlier contribution evidence remains in [CONTRIBUTION_REV93.md](CONTRIBUTION_REV93.md).
 
 ## Rev91 typed row counters
 
@@ -12,7 +16,7 @@ Rev90 adds an optional SD journal to the existing Recon screen. C5 Wi-Fi and S3 
 
 Open Recon, then its Options screen, and choose **START SD RECORDING**. Recording starts off by default. The existing mounted SD card must belong to the firmware; USB storage mode cannot own it at the same time. The screen shows the session folder, written and missed counts, and any exact storage error.
 
-Choose **STOP AND SAVE RECORDING** to finish. Pause, leaving Recon, entering Scene Gallery, or successful screen sleep also request a stop. Saving is asynchronous: wait for **SAVED** before disconnecting power or attempting to hand the card to USB. Opening or resuming Recon does not automatically restart recording. Clearing live hint history does not remove saved sessions.
+Choose **STOP AND SAVE RECORDING** to finish. Pause, leaving Recon, or successful screen sleep also request a stop. Saving is asynchronous: wait for **SAVED** before disconnecting power or attempting to hand the card to USB. Opening or resuming Recon does not automatically restart recording. Clearing live hint history does not remove saved sessions.
 
 Each session gets a new directory, such as `/CERBERUS/RECON/R00001`, containing:
 

@@ -166,7 +166,7 @@ static void painted_identity_and_handoff(void)
     assert(dual_wifi_ui_enter(false) == ESP_OK && !start_calls);
     draw_ok();
     assert(dual_wifi_ui_store->painted_count == 4 && dual_wifi_ui_store->filtered_count == 64);
-    assert(dual_wifi_ui_tap(180, 390) == DUAL_WIFI_UI_REDRAW);
+    assert(dual_wifi_ui_tap(100, 390) == DUAL_WIFI_UI_REDRAW);
     assert(dual_wifi_ui_store->page == 1);
     assert(dual_wifi_ui_tap(20, 160) == DUAL_WIFI_UI_NONE); /* New page not painted. */
     draw_ok();

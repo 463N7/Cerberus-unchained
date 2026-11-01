@@ -2,6 +2,7 @@
 #include "s3_wifi_scanner.h"
 #include "s3_wifi_owner.h"
 #include "dual_wifi_diagnostics.h"
+#include "wifi_archive_capture.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include <string.h>
@@ -17,6 +18,7 @@ typedef struct {
     cerberus_dual_wifi_row_t pending[CERBERUS_DUAL_WIFI_CAPACITY];
     cerberus_dual_wifi_row_t target;
     cerberus_dual_wifi_status_t status;
+    cerberus_wifi_archive_publication_t publication;
     cerberus_wifi_scan_status_payload_t c5_status;
     cerberus_c5_wifi_relation_bank_t proof;
     cerberus_c5_wifi_relation_reader_t proof_reader;
@@ -111,6 +113,30 @@ esp_err_t cerberus_dual_wifi_scan_get_row(uint8_t index, cerberus_dual_wifi_row_
     if (!store || index >= store->status.count) return ESP_ERR_NOT_FOUND;
     *out = store->retained[index];
     return ESP_OK;
+}
+
+static bool dual_output_overlaps_store(const void *out, size_t size)
+{
+    uintptr_t a=(uintptr_t)out,b=(uintptr_t)store;
+    return store && (a<=b ? b-a<size : a-b<sizeof(*store));
+}
+esp_err_t cerberus_dual_wifi_scan_copy_snapshot(cerberus_dual_wifi_snapshot_t *out)
+{
+    if(!out||dual_output_overlaps_store(out,sizeof(*out)))return ESP_ERR_INVALID_ARG;
+    if(!store||!store->publication.generation)return ESP_ERR_NOT_FOUND;
+    memset(out,0,sizeof(*out));out->publication=store->publication;
+    out->count=(uint8_t)(store->publication.s3_count+store->publication.c5_count);
+    memcpy(out->rows,store->retained,(size_t)out->count*sizeof(out->rows[0]));
+    return ESP_OK;
+}
+esp_err_t cerberus_dual_wifi_scan_capture_archive(int64_t now_us,uint64_t selected_rows,
+    cerberus_wifi_archive_t *out)
+{
+    if(!out||dual_output_overlaps_store(out,sizeof(*out)))return ESP_ERR_INVALID_ARG;
+    if(!store||!store->publication.generation)return ESP_ERR_NOT_FOUND;
+    uint8_t count=(uint8_t)(store->publication.s3_count+store->publication.c5_count);
+    return cerberus_wifi_archive_capture_rows(&store->publication,store->retained,count,
+        now_us,selected_rows,out)?ESP_OK:ESP_ERR_INVALID_RESPONSE;
 }
 
 void cerberus_dual_wifi_scan_stop(void)
@@ -267,6 +293,16 @@ static void dual_finish(void)
         store->status.count = count; ++store->status.generation;
         store->status.completed_ms = dual_now();
         store->status.state = CERBERUS_DUAL_WIFI_COMPLETE;
+        store->publication=(cerberus_wifi_archive_publication_t){
+            .received_us=(uint64_t)store->bank_received_us,
+            .c5_session_id=store->c5_session,.c5_relation_epoch=store->proof.status.epoch,
+            .generation=store->status.generation,.elapsed_ms=store->status.elapsed_ms,
+            .s3_error=store->status.s3_error,.c5_error=store->status.c5_error,
+            .s3_total=store->status.s3_total,.c5_total=store->status.c5_total,
+            .s3_count=store->status.s3_count,.c5_count=store->status.c5_count,
+            .s3_coverage=store->status.split?CERBERUS_WIFI_ARCHIVE_COVERAGE_2G:CERBERUS_WIFI_ARCHIVE_COVERAGE_NONE,
+            .c5_coverage=store->status.split?CERBERUS_WIFI_ARCHIVE_COVERAGE_5G:CERBERUS_WIFI_ARCHIVE_COVERAGE_ALL,
+            .split=store->status.split,.fallback=store->status.fallback};
         /* Only ordinary publication gives retained64 rows this staging bank's
          * identity. Fresh AP rebind leaves retained64 unchanged and ineligible. */
         store->bank_publication = store->status.generation;

@@ -337,6 +337,67 @@ static void check_cached_handoff(void)
     puts("Cached C5 handoff: zero RF/retransfer, original receipt/proof/band, wrap/reboot/stale fences, cancellation retry and staging invalidation passed.");
 }
 
+static void check_archive_publication(void)
+{
+    static cerberus_dual_wifi_snapshot_t frozen, copied;
+    static cerberus_wifi_archive_t saved, before;
+    reset();memset(&saved,0x55,sizeof(saved));before=saved;
+    assert(cerberus_dual_wifi_scan_capture_archive(0,UINT64_MAX,&saved)==ESP_ERR_NOT_FOUND);
+    assert(!memcmp(&saved,&before,sizeof(saved)));
+    assert(cerberus_dual_wifi_scan_start()==ESP_OK);drain();
+    assert(cerberus_dual_wifi_scan_copy_snapshot(&frozen)==ESP_OK);
+    assert(frozen.count==64&&frozen.publication.split&&frozen.publication.s3_count==32&&frozen.publication.c5_count==32);
+    unsigned io=info_reads+status_reads+proof_reads+row_reads+local_starts+local_stops+remote_starts+remote_stops;
+    assert(cerberus_dual_wifi_scan_capture_archive(esp_timer_get_time(),UINT64_MAX,&saved)==ESP_OK);
+    assert(cerberus_wifi_archive_validate(&saved)&&saved.count==64);
+    assert(saved.publication.received_us==(uint64_t)store->bank_received_us);
+    assert(cerberus_dual_wifi_scan_capture_archive(esp_timer_get_time(),UINT64_C(1)<<63,&saved)==ESP_OK);
+    assert(saved.count==1&&saved.subset&&saved.rows[0].source_index==31&&saved.publication.s3_count==32);
+    assert(io==info_reads+status_reads+proof_reads+row_reads+local_starts+local_stops+remote_starts+remote_stops);
+    assert(cerberus_dual_wifi_scan_copy_snapshot((cerberus_dual_wifi_snapshot_t*)store)==ESP_ERR_INVALID_ARG);
+    assert(cerberus_dual_wifi_scan_capture_archive(0,0,(cerberus_wifi_archive_t*)store)==ESP_ERR_INVALID_ARG);
+    cerberus_dual_wifi_row_t cached=frozen.rows[32];
+    assert(cerberus_dual_wifi_scan_begin_rebind(&cached)==ESP_OK);drain();
+    assert(status().rebind_cached&&status().rebind_ready);
+    assert(cerberus_dual_wifi_scan_copy_snapshot(&copied)==ESP_OK&&!memcmp(&copied,&frozen,sizeof(copied)));
+    /* A failed INFO and a queued/cancelled retry must retain complete metadata. */
+    info_error=ESP_ERR_TIMEOUT;assert(cerberus_dual_wifi_scan_start()==ESP_ERR_TIMEOUT);
+    assert(cerberus_dual_wifi_scan_copy_snapshot(&copied)==ESP_OK&&!memcmp(&copied,&frozen,sizeof(copied)));
+    info_error=ESP_OK;assert(cerberus_dual_wifi_scan_start()==ESP_OK);
+    assert(status().s3_count==0&&status().c5_count==0);
+    assert(cerberus_dual_wifi_scan_copy_snapshot(&copied)==ESP_OK&&!memcmp(&copied,&frozen,sizeof(copied)));
+    assert(cerberus_dual_wifi_scan_capture_archive(esp_timer_get_time(),UINT64_MAX,&saved)==ESP_OK);
+    assert(saved.publication.split&&saved.publication.s3_total==40&&saved.publication.c5_total==40);
+    cerberus_dual_wifi_scan_stop();drain();
+    assert(cerberus_dual_wifi_scan_copy_snapshot(&copied)==ESP_OK&&!memcmp(&copied,&frozen,sizeof(copied)));
+    /* A fresh rebind owns a different all-band bank without relabeling retained64. */
+    cerberus_dual_wifi_row_t target=frozen.rows[0];remote_rows[0]=target.ap;
+    assert(cerberus_dual_wifi_scan_begin_rebind(&target)==ESP_OK);drain();assert(status().rebind_ready);
+    assert(cerberus_dual_wifi_scan_copy_snapshot(&copied)==ESP_OK&&!memcmp(&copied,&frozen,sizeof(copied)));
+    assert(cerberus_dual_wifi_scan_capture_archive(esp_timer_get_time(),UINT64_MAX,&saved)==ESP_OK);
+    assert(saved.publication.c5_session_id==frozen.publication.c5_session_id&&saved.publication.c5_coverage==2);
+    /* An interrupted transfer cannot publish partially replaced rows or metadata. */
+    assert(cerberus_dual_wifi_scan_start()==ESP_OK);until_phase(DUAL_PHASE_ROWS);
+    cerberus_dual_wifi_scan_stop();drain();
+    assert(cerberus_dual_wifi_scan_copy_snapshot(&copied)==ESP_OK&&!memcmp(&copied,&frozen,sizeof(copied)));
+    local_start_error=ESP_ERR_INVALID_STATE;
+    assert(cerberus_dual_wifi_scan_start()==ESP_OK);drain();
+    assert(cerberus_dual_wifi_scan_copy_snapshot(&copied)==ESP_OK);
+    assert(copied.count==32&&copied.publication.fallback&&!copied.publication.split&&copied.publication.generation==2);
+    assert(copied.publication.s3_error==ESP_ERR_INVALID_STATE&&copied.publication.c5_coverage==3);
+    assert(cerberus_dual_wifi_scan_capture_archive(esp_timer_get_time(),UINT64_MAX,&saved)==ESP_OK&&saved.count==32);
+    assert(cerberus_dual_wifi_scan_capture_archive(esp_timer_get_time(),UINT64_C(1)<<32,&saved)==ESP_ERR_INVALID_RESPONSE);
+    /* Generation exhaustion leaves the last archive source available. */
+    frozen=copied;store->status.generation=UINT32_MAX;
+    assert(cerberus_dual_wifi_scan_start()==ESP_ERR_INVALID_STATE);
+    assert(cerberus_dual_wifi_scan_copy_snapshot(&copied)==ESP_OK&&!memcmp(&copied,&frozen,sizeof(copied)));
+    reset();local_status.count=remote_status.stored_count=0;
+    assert(cerberus_dual_wifi_scan_start()==ESP_OK);drain();
+    assert(cerberus_dual_wifi_scan_capture_archive(esp_timer_get_time(),UINT64_MAX,&saved)==ESP_OK);
+    assert(saved.count==0&&!saved.subset&&saved.publication.generation==1);
+    puts("Archive publication: no-I/O coherent copy, masks, retry/Stop/rebind preservation, fallback, generation exhaustion and empty bank passed.");
+}
+
 int main(void)
 {
     reset(); allocation_fails = true;
@@ -426,6 +487,7 @@ int main(void)
     assert(status().error == ESP_ERR_INVALID_RESPONSE && !status().rebind_ready); verify_retained(1, 64);
 
     check_cached_handoff();
+    check_archive_publication();
     printf("Coordinator PSRAM model: %zu bytes; status %zu; handoff %zu\n", sizeof(dual_wifi_store_t), sizeof(cerberus_dual_wifi_status_t), sizeof(cerberus_dual_wifi_handoff_t));
     puts("Dual Wi-Fi coordinator: split64, fallback, provenance, lost START recovery, owned cleanup, stale fences, retained banks and exact AP rebind passed.");
     free(store); return 0;

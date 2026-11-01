@@ -2,6 +2,7 @@
  * on-demand store and serializes model updates. Rendering never queries a
  * radio, starts recording, allocates memory or changes the inventory. */
 #include "recon_inventory.h"
+#include "sentinel_watch_view.h"
 
 typedef struct {
     cerberus_recon_inventory_t model;
@@ -10,6 +11,9 @@ typedef struct {
     esp_err_t radio_errors[2];
     uint8_t filter, page, painted_count;
     bool paint_valid, selected_valid;
+    bool detail_from_dashboard;
+    uint8_t dashboard_page;
+    sentinel_watch_dashboard_t dashboard;
 } recon_inventory_ui_store_t;
 static recon_inventory_ui_store_t *recon_inventory_ui;
 static esp_err_t recon_inventory_error;
@@ -199,7 +203,7 @@ static esp_err_t recon_draw_inventory_detail(uint64_t now_us)
         recon_inventory_error_line(line, sizeof(line));
     else snprintf(line, sizeof(line), "LIVE INVENTORY AND SD RECORD ARE SEPARATE");
     ESP_RETURN_ON_ERROR(draw_centered(390, line, UI_MUTED, 1), TAG, "inventory record scope or error");
-    return draw_button(64, 426, 192, 44, "BACK TO INVENTORY");
+    return draw_button(64, 426, 192, 44, recon_inventory_ui->detail_from_dashboard ? "BACK TO RECON" : "BACK TO INVENTORY");
 }
 
 static esp_err_t recon_draw_inventory_activity(uint64_t now_us)
@@ -253,7 +257,9 @@ static bool recon_inventory_handle_tap(uint16_t x, uint16_t y, uint64_t now_us)
     (void)now_us;
     recon_inventory_ui_store_t *store = recon_inventory_ui;
     if (x >= 64U && x < 256U && y >= 426U && y < 470U) {
-        watch_page = watch_page == WATCH_INVENTORY || !store ? WATCH_OPTIONS : WATCH_INVENTORY;
+        watch_page = store && store->detail_from_dashboard && watch_page == WATCH_INVENTORY_DETAIL ? WATCH_LIVE :
+            watch_page == WATCH_INVENTORY || !store ? WATCH_OPTIONS : WATCH_INVENTORY;
+        if(store)store->detail_from_dashboard=false;
         if (store) store->paint_valid = false;
         return true;
     }
@@ -266,7 +272,7 @@ static bool recon_inventory_handle_tap(uint16_t x, uint16_t y, uint64_t now_us)
     if (x >= 8U && x < 312U && y >= 150U && y < 362U && (y - 150U) % 54U < 50U) {
         unsigned row = (y - 150U) / 54U;
         if (!store->paint_valid || row >= store->painted_count) return false;
-        store->selected = store->painted[row]; store->selected_valid = true;
+        store->selected = store->painted[row]; store->selected_valid = true;store->detail_from_dashboard=false;
         store->paint_valid = false; watch_page = WATCH_INVENTORY_DETAIL;
         return true;
     }

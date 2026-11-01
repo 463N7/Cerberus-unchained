@@ -12,6 +12,7 @@
 #include "ble_archive_family_fixture.h"
 #include "ble_archive_response_fixture.h"
 #include "archive_compat_vectors.h"
+#include "wifi_archive_io_fixture.h"
 static unsigned checks;
 #define CHECK(x) do{++checks;if(!(x)){fprintf(stderr,"Archive IO %u: %s\n",__LINE__,#x);exit(1);}}while(0)
 typedef int portMUX_TYPE;
@@ -98,13 +99,33 @@ static esp_err_t cerberus_storage_airtag_json_load(const char*path,const char*na
     if(storage_error==ESP_OK){memcpy(data,json_bytes,json_length);*length=json_length;}else *length=0;
     storage_active=false;return storage_error;
 }
+static uint8_t wifi_bytes[CERBERUS_WIFI_ARCHIVE_MAX_SIZE];
+static size_t wifi_length;
+static unsigned wifi_saves,wifi_loads;
+static esp_err_t cerberus_storage_wifi_archive_save(const uint8_t*data,size_t length,char*name,size_t capacity)
+{
+    CHECK(!locked&&!storage_active&&length<=sizeof(wifi_bytes)&&capacity==256);++wifi_saves;storage_active=true;
+    CHECK(status().worker_active&&status().state==CERBERUS_BLE_ARCHIVE_IO_SAVING);
+    if(storage_hook)storage_hook();
+    if(storage_error==ESP_OK){memcpy(wifi_bytes,data,length);wifi_length=length;strcpy(name,"W00001.WFI");}
+    else if(partial_save)strcpy(name,"W00001.TMP");
+    storage_active=false;return storage_error;
+}
+static esp_err_t cerberus_storage_wifi_archive_load(const char*path,const char*name,uint8_t*data,size_t capacity,size_t*length)
+{
+    CHECK(!locked&&!storage_active&&capacity==sizeof(wifi_bytes));++wifi_loads;storage_active=true;
+    CHECK(status().worker_active&&status().state==CERBERUS_BLE_ARCHIVE_IO_LOADING);
+    strcpy(last_path,path);strcpy(last_name,name);if(storage_hook)storage_hook();
+    if(storage_error==ESP_OK){memcpy(data,wifi_bytes,wifi_length);*length=wifi_length;}else *length=0;
+    storage_active=false;return storage_error;
+}
 /* Interleave Release and nested readers at the actual large copy. No document
  * bytes may be copied while interrupts are disabled, nor freed while pinned. */
 static void (*copy_hook)(void);
 static unsigned document_copies;
 static void *archive_checked_copy(void *out,const void *in,size_t bytes)
 {
-    if(bytes==sizeof(cerberus_ble_archive_t)||bytes==sizeof(cerberus_airtag_json_t)){
+    if(bytes==sizeof(cerberus_ble_archive_t)||bytes==sizeof(cerberus_airtag_json_t)||bytes==sizeof(cerberus_wifi_archive_t)){
         CHECK(!locked);++document_copies;
         void(*hook)(void)=copy_hook;copy_hook=NULL;if(hook)hook();
     }
@@ -203,7 +224,7 @@ static void reset(void)
     CHECK(!locked&&!pending_task&&!storage_active&&!status().worker_active&&!archive_io_readers);
     cerberus_ble_archive_io_release(status().job_id);CHECK(!outstanding&&!archive_io_context);
     free_internal=100000;largest_internal=50000;fail_alloc=fail_task=immediate_task=release_in_alloc=false;
-    storage_hook=copy_hook=conversion_hook=NULL;storage_error=ESP_OK;partial_save=false;saves=loads=json_saves=json_loads=0;last_path[0]=last_name[0]=0;
+    storage_hook=copy_hook=conversion_hook=NULL;storage_error=ESP_OK;partial_save=false;saves=loads=json_saves=json_loads=wifi_saves=wifi_loads=0;last_path[0]=last_name[0]=0;
     memset(&output,0xA5,sizeof(output));untouched=output;
 }
 static void run_worker(void)
@@ -423,6 +444,149 @@ static void check_json_operations(void)
     CHECK(cerberus_ble_archive_io_save_airtag_json(&json_input,NULL)==ESP_ERR_INVALID_ARG);
 }
 
+static cerberus_wifi_archive_t wifi_input,wifi_expected,wifi_output,wifi_untouched,wifi_nested;
+static void fill_wifi(unsigned count)
+{
+    archive_test_wifi_document(&wifi_input,count);
+    CHECK(cerberus_wifi_archive_validate(&wifi_input));wifi_expected=wifi_input;
+    memset(&wifi_output,0xA5,sizeof(wifi_output));wifi_untouched=wifi_output;
+}
+static uint64_t start_wifi(bool save)
+{
+    uint64_t id=0;
+    esp_err_t e=save?cerberus_ble_archive_io_save_wifi(&wifi_input,&id):
+        cerberus_ble_archive_io_load_wifi("/COPIED","saved.wfi",&id);
+    CHECK(e==ESP_OK&&id>last_job);last_job=id;
+    CHECK(status().format==CERBERUS_BLE_ARCHIVE_IO_FORMAT_WIFI);
+    CHECK(allocation_size==offsetof(ble_archive_io_context_t,payload)+sizeof(archive_io_context->payload.wifi));
+    CHECK(allocation_size<archive_io_allocation_size(CERBERUS_BLE_ARCHIVE_IO_SAVE));
+    return id;
+}
+static void seed_wifi_bytes(void)
+{CHECK(cerberus_wifi_archive_encode(&wifi_input,wifi_bytes,sizeof(wifi_bytes),&wifi_length));}
+static void nested_wifi_then_release(void)
+{
+    CHECK(archive_io_readers==1&&outstanding==1);
+    copy_hook=release_during_copy;
+    CHECK(cerberus_ble_archive_io_copy_wifi(status().job_id,&wifi_nested)==ESP_OK);
+    CHECK(!memcmp(&wifi_nested,&wifi_expected,sizeof(wifi_expected))&&archive_io_readers==1&&outstanding==1);
+}
+static void wifi_failed_result(uint64_t id)
+{
+    CHECK(!status().result_ready&&!outstanding);
+    CHECK(cerberus_ble_archive_io_copy_wifi(id,&wifi_output)==ESP_ERR_INVALID_STATE);
+    CHECK(!memcmp(&wifi_output,&wifi_untouched,sizeof(wifi_output)));
+}
+static void check_wifi_operations(void)
+{
+    /* These fixed host allocations were measured before adding the Wi-Fi arm.
+     * The tagged union must never make existing jobs allocate its largest arm. */
+    CHECK(archive_io_allocation_size(CERBERUS_BLE_ARCHIVE_IO_SAVE)==57648);
+    CHECK(archive_io_allocation_size(CERBERUS_BLE_ARCHIVE_IO_SAVE_AIRTAG_JSON)==58760);
+    CHECK(!archive_io_json(CERBERUS_BLE_ARCHIVE_IO_SAVE_WIFI)&&!archive_io_json(CERBERUS_BLE_ARCHIVE_IO_LOAD_WIFI));
+    for(unsigned count=0;count<=64;++count){
+        reset();fill_wifi(count);uint64_t id=start_wifi(true);
+        CHECK(!saves&&!loads&&!json_saves&&!json_loads&&!wifi_saves&&!wifi_loads);
+        CHECK(cerberus_ble_archive_io_copy_wifi(id,&wifi_output)==ESP_ERR_INVALID_STATE);
+        CHECK(!memcmp(&wifi_output,&wifi_untouched,sizeof(wifi_output)));
+        /* Input may change immediately after tap: publication and every row
+         * came from the owned immutable copy, including source age evidence. */
+        memset(&wifi_input,0xCC,sizeof(wifi_input));run_worker();
+        CHECK(status().state==CERBERUS_BLE_ARCHIVE_IO_COMPLETE&&status().count==count&&status().result_ready);
+        CHECK(wifi_saves==1&&!wifi_loads&&!saves&&!loads&&!json_saves&&!json_loads);
+        CHECK(status().bytes==96+80*count&&!strcmp(status().relative_path,"/CERBERUS/WIFI")&&!strcmp(status().file_name,"W00001.WFI"));
+        CHECK(cerberus_ble_archive_io_copy_wifi(id,&wifi_output)==ESP_OK&&!memcmp(&wifi_output,&wifi_expected,sizeof(wifi_output)));
+        CHECK(cerberus_ble_archive_io_copy_result(id,&output)==ESP_ERR_INVALID_STATE&&!memcmp(&output,&untouched,sizeof(output)));
+        memset(&json_output,0xA5,sizeof(json_output));json_untouched=json_output;
+        CHECK(cerberus_ble_archive_io_copy_airtag_json(id,&json_output)==ESP_ERR_INVALID_STATE&&!memcmp(&json_output,&json_untouched,sizeof(json_output)));
+        cerberus_ble_archive_io_release(id);CHECK(!outstanding);
+        id=start_wifi(false);run_worker();
+        CHECK(wifi_loads==1&&wifi_saves==1&&status().count==count&&status().result_ready);
+        CHECK(cerberus_ble_archive_io_copy_wifi(id,&wifi_output)==ESP_OK&&!memcmp(&wifi_output,&wifi_expected,sizeof(wifi_output)));
+        CHECK(!strcmp(last_path,"/COPIED")&&!strcmp(last_name,"saved.wfi"));
+    }
+    reset();fill_wifi(64);
+    CHECK(cerberus_wifi_archive_subset(&wifi_input,UINT64_C(1)|(UINT64_C(1)<<63),&wifi_expected));
+    wifi_input=wifi_expected;uint64_t id=start_wifi(true);run_worker();
+    CHECK(status().count==2&&status().bytes==256);
+    CHECK(cerberus_ble_archive_io_copy_wifi(id,&wifi_output)==ESP_OK&&!memcmp(&wifi_output,&wifi_expected,sizeof(wifi_output)));
+    CHECK(wifi_output.subset&&wifi_output.publication.s3_count==32&&wifi_output.publication.c5_count==32);
+    for(unsigned nested=0;nested<2;++nested){
+        reset();fill_wifi(64);id=start_wifi(true);run_worker();
+        unsigned before=frees,copies=document_copies;copy_hook=nested?nested_wifi_then_release:release_during_copy;
+        CHECK(cerberus_ble_archive_io_copy_wifi(id,&wifi_output)==ESP_OK&&!memcmp(&wifi_output,&wifi_expected,sizeof(wifi_output)));
+        CHECK(!archive_io_readers&&!archive_io_context&&!outstanding&&frees==before+1&&document_copies==copies+1+nested);
+    }
+    reset();fill_wifi(64);id=start_wifi(true);run_worker();archive_io_readers=UINT16_MAX;
+    CHECK(cerberus_ble_archive_io_copy_wifi(id,&wifi_output)==ESP_ERR_INVALID_STATE&&!memcmp(&wifi_output,&wifi_untouched,sizeof(wifi_output)));
+    archive_io_readers=0;
+    for(unsigned save=0;save<2;++save){
+        for(unsigned release=0;release<2;++release){
+            reset();fill_wifi(64);seed_wifi_bytes();id=start_wifi(save!=0);
+            if(release)cerberus_ble_archive_io_release(id);else cerberus_ble_archive_io_cancel(id);
+            CHECK(outstanding==1&&status().worker_active);run_worker();
+            CHECK(status().state==CERBERUS_BLE_ARCHIVE_IO_CANCELED&&!wifi_saves&&!wifi_loads);wifi_failed_result(id);
+        }
+        for(unsigned release=0;release<2;++release){
+            reset();fill_wifi(64);seed_wifi_bytes();storage_hook=release?release_hook:cancel_hook;id=start_wifi(save!=0);run_worker();
+            CHECK(status().cancel_requested&&status().state==(save?CERBERUS_BLE_ARCHIVE_IO_COMPLETE:CERBERUS_BLE_ARCHIVE_IO_CANCELED));
+            CHECK(status().result_ready==(save&&!release));
+            if(save&&!release)CHECK(cerberus_ble_archive_io_copy_wifi(id,&wifi_output)==ESP_OK&&!memcmp(&wifi_output,&wifi_expected,sizeof(wifi_output)));
+            CHECK((save?wifi_saves:wifi_loads)==1);cerberus_ble_archive_io_release(id);CHECK(!outstanding);
+        }
+        for(unsigned kind=0;kind<5;++kind){
+            reset();fill_wifi(64);seed_wifi_bytes();
+            if(kind==0)free_internal=24575;if(kind==1)largest_internal=8191;if(kind==2)fail_alloc=true;if(kind==3)fail_task=true;
+            if(kind==4){release_in_alloc=true;immediate_task=true;}
+            esp_err_t e=save?cerberus_ble_archive_io_save_wifi(&wifi_input,&id):cerberus_ble_archive_io_load_wifi("/","x.WFI",&id);
+            CHECK(id>last_job);last_job=id;
+            CHECK(e==(kind==4?ESP_OK:ESP_ERR_NO_MEM));
+            CHECK(status().state==(kind==4?CERBERUS_BLE_ARCHIVE_IO_CANCELED:CERBERUS_BLE_ARCHIVE_IO_ERROR));
+            CHECK(!pending_task&&!wifi_saves&&!wifi_loads&&!outstanding);
+        }
+    }
+    for(unsigned failure=0;failure<6;++failure){
+        reset();fill_wifi(64);seed_wifi_bytes();
+        if(failure==0){wifi_input.rows[63].source_index=0;id=start_wifi(true);}
+        else if(failure==1){storage_error=ESP_FAIL;partial_save=true;storage_hook=cancel_hook;id=start_wifi(true);}
+        else {if(failure==2)storage_error=ESP_ERR_TIMEOUT;
+            if(failure==3)wifi_bytes[sizeof(wifi_bytes)-1]^=1;
+            if(failure==4)memset(wifi_bytes,0,wifi_length);
+            if(failure==5){fill(1);CHECK(cerberus_ble_archive_encode(&input,wifi_bytes,sizeof(wifi_bytes),&wifi_length));}
+            id=start_wifi(false);}
+        run_worker();CHECK(status().state==CERBERUS_BLE_ARCHIVE_IO_ERROR);wifi_failed_result(id);
+        if(failure==0)CHECK(!wifi_saves);
+        if(failure==1)CHECK(!strcmp(status().file_name,"W00001.TMP")&&status().error==ESP_FAIL);
+    }
+    const size_t short_files[]={0,95,96,175,5215};
+    for(unsigned n=0;n<sizeof(short_files)/sizeof(short_files[0]);++n){
+        reset();fill_wifi(64);seed_wifi_bytes();wifi_length=short_files[n];id=start_wifi(false);run_worker();
+        CHECK(status().state==CERBERUS_BLE_ARCHIVE_IO_ERROR&&status().error==ESP_ERR_INVALID_RESPONSE);wifi_failed_result(id);
+    }
+    reset();fill_wifi(64);seed_wifi_bytes();char path[512]="/COPY",name[256]="before.WFI";
+    CHECK(cerberus_ble_archive_io_load_wifi(path,name,&id)==ESP_OK);path[1]='!';name[0]='!';run_worker();
+    CHECK(!strcmp(last_path,"/COPY")&&!strcmp(last_name,"before.WFI"));
+    uint64_t stale=id;cerberus_ble_archive_io_release(id);id=start_wifi(true);
+    cerberus_ble_archive_io_cancel(stale);cerberus_ble_archive_io_release(stale);
+    CHECK(!status().cancel_requested&&outstanding==1);run_worker();CHECK(status().result_ready);
+    CHECK(cerberus_ble_archive_io_copy_wifi(stale,&wifi_output)==ESP_ERR_INVALID_STATE);
+    reset();fill(1);id=start_save();run_worker();
+    CHECK(cerberus_ble_archive_io_copy_wifi(id,&wifi_output)==ESP_ERR_INVALID_STATE&&!memcmp(&wifi_output,&wifi_untouched,sizeof(wifi_output)));
+    reset();fill_json(1,1);id=start_json(1);run_worker();
+    CHECK(cerberus_ble_archive_io_copy_wifi(id,&wifi_output)==ESP_ERR_INVALID_STATE&&!memcmp(&wifi_output,&wifi_untouched,sizeof(wifi_output)));
+    reset();fill_wifi(1);immediate_task=true;id=start_wifi(true);CHECK(status().result_ready&&!pending_task);reset();
+    char invalid_path[512],invalid_name[256];memset(invalid_path,'X',sizeof(invalid_path));memset(invalid_name,'X',sizeof(invalid_name));
+    CHECK(cerberus_ble_archive_io_load_wifi(invalid_path,"x.WFI",&id)==ESP_ERR_INVALID_ARG&&id==0);
+    CHECK(cerberus_ble_archive_io_load_wifi("/",invalid_name,&id)==ESP_ERR_INVALID_ARG&&id==0);
+    CHECK(cerberus_ble_archive_io_load_wifi(NULL,"x.WFI",&id)==ESP_ERR_INVALID_ARG);
+    CHECK(cerberus_ble_archive_io_load_wifi("/",NULL,&id)==ESP_ERR_INVALID_ARG);
+    CHECK(cerberus_ble_archive_io_save_wifi(NULL,&id)==ESP_ERR_INVALID_ARG&&id==0);
+    CHECK(cerberus_ble_archive_io_save_wifi(&wifi_input,NULL)==ESP_ERR_INVALID_ARG);
+    CHECK(cerberus_ble_archive_io_copy_wifi(0,NULL)==ESP_ERR_INVALID_ARG);
+    CHECK(archive_io_start((cerberus_ble_archive_io_operation_t)99,NULL,NULL,NULL,NULL,NULL,&id)==ESP_ERR_INVALID_ARG&&id==0);
+    CHECK(!archive_io_allocation_size((cerberus_ble_archive_io_operation_t)99)&&!outstanding&&!pending_task);
+}
+
 int main(void)
 {
     CHECK(CERBERUS_STORAGE_BLE_ARCHIVE_MAX_BYTES==27680U&&CERBERUS_BLE_ARCHIVE_MAX_SIZE==27680U);
@@ -543,13 +707,16 @@ int main(void)
     CHECK(cerberus_ble_archive_io_save(NULL,&id)==ESP_ERR_INVALID_ARG&&id==0);CHECK(cerberus_ble_archive_io_load(NULL,"x.BLE",&id)==ESP_ERR_INVALID_ARG);
     CHECK(cerberus_ble_archive_io_save(&input,NULL)==ESP_ERR_INVALID_ARG);CHECK(cerberus_ble_archive_io_copy_result(0,NULL)==ESP_ERR_INVALID_ARG);
     check_json_operations();
+    check_wifi_operations();
     archive_io_last_job=UINT64_MAX;CHECK(cerberus_ble_archive_io_save(&input,&id)==ESP_ERR_INVALID_STATE&&id==0&&!pending_task);
     CHECK(cerberus_ble_archive_io_save_airtag_json(&json_input,&id)==ESP_ERR_INVALID_STATE&&id==0);
     CHECK(cerberus_ble_archive_io_load_airtag_json("/","x.LOG",&id)==ESP_ERR_INVALID_STATE&&id==0);
     CHECK(cerberus_ble_archive_io_export_airtag_json(&input,&id)==ESP_ERR_INVALID_STATE&&id==0);
+    CHECK(cerberus_ble_archive_io_save_wifi(&wifi_input,&id)==ESP_ERR_INVALID_STATE&&id==0);
+    CHECK(cerberus_ble_archive_io_load_wifi("/","x.WFI",&id)==ESP_ERR_INVALID_STATE&&id==0);
     CHECK(!strcmp(cerberus_ble_archive_io_state_name(CERBERUS_BLE_ARCHIVE_IO_CANCELED),"CANCELED"));
     CHECK(!strcmp(cerberus_ble_archive_io_state_name((cerberus_ble_archive_io_state_t)99),"UNKNOWN"));
     cerberus_ble_archive_io_get_status(NULL);cerberus_ble_archive_io_release(0);cerberus_ble_archive_io_cancel(0);
-    CHECK(!outstanding&&allocations>=frees);printf("Archive async lifecycle passed %u checks; host native allocation=%zu JSON allocation=%zu status=%zu.\n",checks,archive_io_allocation_size(CERBERUS_BLE_ARCHIVE_IO_SAVE),archive_io_allocation_size(CERBERUS_BLE_ARCHIVE_IO_SAVE_AIRTAG_JSON),sizeof(cerberus_ble_archive_io_status_t));
+    CHECK(!outstanding&&allocations>=frees);printf("Archive async lifecycle passed %u checks; host native allocation=%zu JSON allocation=%zu Wi-Fi allocation=%zu status=%zu.\n",checks,archive_io_allocation_size(CERBERUS_BLE_ARCHIVE_IO_SAVE),archive_io_allocation_size(CERBERUS_BLE_ARCHIVE_IO_SAVE_AIRTAG_JSON),archive_io_allocation_size(CERBERUS_BLE_ARCHIVE_IO_SAVE_WIFI),sizeof(cerberus_ble_archive_io_status_t));
     return 0;
 }

@@ -1,8 +1,45 @@
 # Recon live inventory and activity
 
-This guide describes the contributed source. New workflow acceptance on physical hardware remains pending; the installed local Unified checkpoint and the unflashed Unchained adaptation are distinguished in [CONTRIBUTION_REV93.md](CONTRIBUTION_REV93.md).
+This guide describes the current source, including the rev124 field dashboard.
+The last verified installed pair is rev123; the new dashboard's validation and
+installation are recorded separately in [the rev124 checkpoint](DUAL_RADIO_REV124.md).
+The earlier contribution's evidence remains in [CONTRIBUTION_REV93.md](CONTRIBUTION_REV93.md).
 
-Recon now retains a generic live inventory from the existing C5 Wi-Fi and S3 BLE scan sessions. Open **Recon → Options → NEARBY INVENTORY** to browse all observations or filter by radio. Ordinary APs and BLE advertisers appear even when they do not match a classification rule. SD recording is optional and independent of this view.
+Recon retains a generic live inventory from the existing C5 Wi-Fi and S3 BLE
+scan sessions. The default dashboard brings that inventory onto the main
+screen. **Recon → Options → NEARBY INVENTORY** retains the expanded inventory
+and radio filters. Ordinary APs and BLE advertisers appear even when they do
+not match a classification rule. SD recording is optional and independent of
+the view.
+
+## Field dashboard
+
+The dashboard replaces the live mascot. It displays the C5 Wi-Fi and S3 BLE
+states separately, SD recording state, recent list changes, and four retained
+observations per page. A repeated observation refreshes its typed-address row
+instead of appending another dashboard row. Category accents have text labels
+and classification confidence; color does not represent danger or authenticated
+identity. Unclassified observations remain visible.
+
+The compact activity display covers the latest 32 one-second inventory
+buckets, labelled **ADDED** and **EXPIRED**. These are retained-list changes,
+not packet rates or physical movement. The full Activity page still provides
+the existing 64-bucket view. The dashboard refreshes periodically every 500 ms
+and on changed data or touch input; the old animated-art loop is not used.
+
+**Options → VIEW** selects the dashboard or an optional radar-style signal
+overview. The alternate view uses numbered list slots and retained RSSI,
+with a dBm scale. It does not show compass bearings, distance, geographic
+position or fabricated detections. Its numbered observations open the same
+frozen details as the dashboard list. Back returns to the originating view.
+Back, Pause/Resume, Log and Options remain available in both views.
+
+SD recording still starts explicitly in Options and uses the same recorder;
+switching visual mode does not create another log or radio session. The
+dashboard reports recording/saving/saved/error state, while Options provides
+the session folder and complete counters. See [session recording](RECON_SESSION_RECORDING.md).
+
+## Inventory and selection
 
 The inventory holds up to 32 Wi-Fi addresses and 32 BLE typed addresses. Four rows appear per page, ordered by the newest accepted sweep copy. Selecting a row opens a frozen copy of that observation, so a later scan, expiry or capacity replacement cannot silently change the selected target. Back returns to the inventory; the Options and Recon routes remain available. The existing privacy setting masks addresses on these screens.
 

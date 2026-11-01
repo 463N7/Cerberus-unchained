@@ -47,6 +47,9 @@ static unsigned corrupt_export;
 static cerberus_dual_wifi_row_t requested;
 static cerberus_dual_wifi_handoff_t export_handoff, imported_handoff;
 static int64_t mock_time_us;
+static unsigned archive_all_calls, archive_selected_calls;
+static void wifi_archive_save_live(bool selected)
+{ if (selected) ++archive_selected_calls; else ++archive_all_calls; }
 
 static bool live_wifi_capture_busy(void) { return readout_busy; }
 static bool live_ble_recon_released(void) { return recon_lease_epoch == 0U; }
@@ -334,6 +337,9 @@ static void cancellation_and_fallback(void)
 int main(void)
 {
     existing_view_checks();
+    dual_wifi_live_action(DUAL_WIFI_UI_SAVE_ALL);
+    dual_wifi_live_action(DUAL_WIFI_UI_SAVE_SELECTED);
+    assert(archive_all_calls == 1U && archive_selected_calls == 1U);
     released_admission(); publication(); rejected_publications(); cancellation_and_fallback();
     cached_c5_handoff();
     bridge_reset(); dual_wifi_ui_leave(); free(live_store);

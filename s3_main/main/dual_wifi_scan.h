@@ -1,6 +1,7 @@
 #pragma once
 
 #include "c5_spi_link.h"
+#include "wifi_archive.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -24,6 +25,12 @@ typedef struct {
     uint8_t source;
     uint8_t source_index;
 } cerberus_dual_wifi_row_t;
+
+typedef struct {
+    cerberus_wifi_archive_publication_t publication;
+    uint8_t count;
+    cerberus_dual_wifi_row_t rows[CERBERUS_DUAL_WIFI_CAPACITY];
+} cerberus_dual_wifi_snapshot_t;
 
 typedef struct {
     uint32_t generation;
@@ -64,6 +71,15 @@ void cerberus_dual_wifi_scan_step(void);
 void cerberus_dual_wifi_scan_stop(void);
 void cerberus_dual_wifi_scan_get_status(cerberus_dual_wifi_status_t *out);
 esp_err_t cerberus_dual_wifi_scan_get_row(uint8_t index, cerberus_dual_wifi_row_t *out);
+/* UI-task-only coherent completed publication copy, no radio/clock/allocation.
+ * Old publication survives retry, Stop, errors and AP rebind. No complete bank
+ * means NOT_FOUND. Failure leaves output unchanged; no internal alias allowed. */
+esp_err_t cerberus_dual_wifi_scan_copy_snapshot(cerberus_dual_wifi_snapshot_t *out);
+/* Direct masked historical capture avoids another full-bank scratch. Caller
+ * supplies the sole save-clock sample; UINT64_MAX selects every retained row.
+ * UI task only, no radio/clock/allocation, failure leaves output unchanged. */
+esp_err_t cerberus_dual_wifi_scan_capture_archive(int64_t now_us, uint64_t selected_rows,
+    cerberus_wifi_archive_t *out);
 
 /* A C5-origin row in the eligible completed ordinary bank can be rebound using
  * owned-status / expected-proof / owned-status validation without new RF.

@@ -9,7 +9,7 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev123`, paired with onboard
+**Current source version: `0.1.0-dev.rev124`, paired with onboard
 C5 protocol firmware revision 69. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -40,6 +40,17 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev124 implements combined S3/C5 Wi-Fi results with SD save/reopen,
+AP/SSID views and copy saving, and Recon gains a factual dashboard in place
+of its live mascot, plus an optional RSSI radar. All 134 host suites and five
+native targets pass on the same 1,108 unchanged inputs. The linked audit measures
+4,800 bytes less fixed S3 data/BSS and a 4,992-byte smaller S3 image; C5 fixed
+memory is unchanged. Optional viewer/worker allocations and physical acceptance
+are tracked separately. The last verified installed pair is rev123/C5 firmware69.
+See [the rev124 checkpoint](docs/DUAL_RADIO_REV124.md) for validation status and
+[saved Wi-Fi lists](docs/WIFI_SAVED_LISTS.md) for the storage and provenance
+contract. These changes do not establish complete Marauder parity.
 
 Rev123 implements Marauder-compatible retained Find My JSON import, offline
 inspection, copy saving and export from complete saved S3/C5 originals and
