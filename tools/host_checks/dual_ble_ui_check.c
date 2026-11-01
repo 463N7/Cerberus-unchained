@@ -225,7 +225,7 @@ static void check_receive_metadata(const char *prefix)
     paint_list();assert(strstr(drawn,"ORIGINAL ADV 31 B")&&strstr(drawn,"RAW ADV *"));
     save(prefix,"metadata-raw-prefix");
     assert(dual_ble_ui_tap(200,210)==DUAL_BLE_UI_REDRAW);paint_list();
-    assert(strstr(drawn,"RX INFO NOT SAVED"));
+    assert(strstr(drawn,"C5 OBSERVATIONS ONLY")&&!strstr(drawn,"RX INFO NOT SAVED"));
     assert(strstr(drawn,"C5 EXTENDED CALLBACK")&&strstr(drawn,"CALLBACK 255 B / PREVIEW 31 B"));
     assert(strstr(drawn,"PHY 1M PRIMARY / CODED SECONDARY")&&strstr(drawn,"SID 15 / PROPS 00 / CTRL COMPLETE"));
     assert(strstr(drawn,"FULL AD LAYOUT VALID / PREVIEW CUT"));

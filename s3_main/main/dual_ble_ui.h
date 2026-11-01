@@ -5,6 +5,7 @@
 #include "dual_ble_scan.h"
 #include "dual_ble_list.h"
 #include "esp_heap_caps.h"
+#include "ble_receive_info_ui.h"
 
 enum { DUAL_BLE_UI_NONE, DUAL_BLE_UI_REDRAW, DUAL_BLE_UI_BACK_S3,
     DUAL_BLE_UI_TOGGLE, DUAL_BLE_UI_FOX };
@@ -96,45 +97,11 @@ static bool dual_ble_ui_selected_peer(cerberus_c5_ble_result_t *out)
     return true;
 }
 
-static const char *dual_ble_ui_phy(uint8_t phy)
-{
-    switch (phy) {
-    case 1U: return "1M";
-    case 2U: return "2M";
-    case 3U: return "CODED";
-    default: return "N/A";
-    }
-}
-
 /* This is the envelope copied with the selected original, never current scan
  * configuration or aggregate peer hints. Drawing does no radio/transport work. */
 static esp_err_t dual_ble_ui_draw_receive(const cerberus_dual_ble_row_t *row)
 {
-    char line[64], sid[4];
-    const cerberus_dual_ble_receive_metadata_t *receive = &row->receive;
-    const bool legacy = receive->source_kind == CERBERUS_DUAL_BLE_RECEIVE_LEGACY;
-    if (!legacy && receive->source_kind != CERBERUS_DUAL_BLE_RECEIVE_EXTENDED) {
-        ESP_RETURN_ON_ERROR(draw_centered(234, "RECEIVE INFO UNAVAILABLE", UI_MUTED, 1), TAG, "C5 metadata missing");
-        ESP_RETURN_ON_ERROR(draw_centered(254, "NO METADATA FOR THIS OBSERVATION", UI_MUTED, 1), TAG, "C5 metadata scope");
-        return draw_centered(278, "RAW BYTES REMAIN AVAILABLE", UI_TEXT, 1);
-    }
-    ESP_RETURN_ON_ERROR(draw_centered(230, legacy ? "C5 LEGACY CALLBACK" :
-        (receive->properties & 0x10U) ? "C5 EXT CALLBACK / LEGACY PDU" :
-        "C5 EXTENDED CALLBACK", UI_TEXT, 1), TAG, "C5 callback kind");
-    snprintf(line, sizeof(line), "CALLBACK %u B / PREVIEW %u B", receive->callback_length, row->raw_length);
-    ESP_RETURN_ON_ERROR(draw_centered(248, line, UI_MUTED, 1), TAG, "C5 callback bytes");
-    if (receive->sid <= 15U) snprintf(sid, sizeof(sid), "%u", receive->sid);
-    else memcpy(sid, "N/A", sizeof(sid));
-    snprintf(line, sizeof(line), "PHY %s PRIMARY / %s SECONDARY", dual_ble_ui_phy(receive->primary_phy),
-        dual_ble_ui_phy(receive->secondary_phy));
-    ESP_RETURN_ON_ERROR(draw_centered(266, line, UI_MUTED, 1), TAG, "C5 physical metadata");
-    if (legacy) snprintf(line, sizeof(line), "SID N/A / PROPS N/A / CTRL STATUS N/A");
-    else snprintf(line, sizeof(line), "SID %s / PROPS %02X / CTRL COMPLETE", sid, receive->properties);
-    ESP_RETURN_ON_ERROR(draw_centered(284, line, UI_MUTED, 1), TAG, "C5 report status");
-    snprintf(line, sizeof(line), "FULL AD LAYOUT %s%s", receive->ad_validation == CERBERUS_DUAL_BLE_AD_VALID ?
-        "VALID" : receive->ad_validation == CERBERUS_DUAL_BLE_AD_INVALID ? "INVALID" : "UNKNOWN",
-        receive->callback_length > row->raw_length ? " / PREVIEW CUT" : "");
-    return draw_centered(302, line, UI_MUTED, 1);
+    return ble_receive_info_ui_draw(&row->receive, row->raw_length, 230U);
 }
 
 static esp_err_t dual_ble_ui_draw(bool s3_enabled)
@@ -150,8 +117,7 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
         ESP_RETURN_ON_ERROR(draw_centered(96, line, UI_TEXT, 1), TAG, "C5 BLE name");
         cerberus_privacy_format_ble_identifier(row->address, privacy_addresses_masked(), identifier, sizeof(identifier));
         ESP_RETURN_ON_ERROR(draw_centered(118, identifier, UI_TEXT, 1), TAG, "C5 BLE address");
-        snprintf(line, sizeof(line), dual_ble_ui_receive_info ?
-            "ADDRESS TYPE %u / RX INFO NOT SAVED" : "ADDRESS TYPE %u / C5 OBSERVATIONS ONLY", row->address_type);
+        snprintf(line, sizeof(line), "ADDRESS TYPE %u / C5 OBSERVATIONS ONLY", row->address_type);
         ESP_RETURN_ON_ERROR(draw_centered(140, line, UI_MUTED, 1), TAG, "C5 BLE type");
         uint32_t age;
         bool known_age = cerberus_dual_ble_list_age(row, now, &age);

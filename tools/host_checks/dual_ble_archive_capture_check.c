@@ -34,6 +34,102 @@ static void reject_unchanged(const cerberus_dual_ble_row_t *source,
     assert(!cerberus_dual_ble_archive_capture_row(&out,source,identity,500));
     assert(!memcmp(&out,&sentinel,sizeof(out)));
 }
+
+static void receive_roundtrip(const cerberus_dual_ble_row_t *source)
+{
+    cerberus_ble_archive_t document={.saved_uptime_ms=500,.count=1},decoded;
+    assert(cerberus_dual_ble_archive_capture_row(&document.rows[0],source,&provenance,500));
+    assert(!memcmp(&document.rows[0].receive,&source->receive,sizeof(source->receive)));
+    assert_exact_times_unknown(&document.rows[0]);
+    assert(cerberus_ble_archive_validate(&document));
+    uint8_t encoded[CERBERUS_BLE_ARCHIVE_MAX_SIZE];size_t length=0;
+    assert(cerberus_ble_archive_encode(&document,encoded,sizeof(encoded),&length));
+    assert(length==CERBERUS_BLE_ARCHIVE_HEADER_SIZE+CERBERUS_BLE_ARCHIVE_ROW_SIZE);
+    assert(cerberus_ble_archive_decode(encoded,length,&decoded));
+    const cerberus_ble_archive_row_t *row=&decoded.rows[0];
+    assert(!memcmp(&row->receive,&source->receive,sizeof(source->receive)));
+    assert(row->receiver_boot_id==provenance.boot_id&&row->scan_epoch==provenance.epoch&&
+        row->generation==provenance.generation&&row->index==provenance.index);
+    assert(row->advertisement_length==source->raw_length&&row->advertisement_flags==source->raw_flags&&
+        row->advertisement_event_type==source->event_type&&!memcmp(row->advertisement,source->raw,source->raw_length));
+    assert(row->age_upper_valid&&row->age_upper_at_save_ms==7400);
+    assert_exact_times_unknown(row);
+}
+
+static void check_receive_capture(void)
+{
+    cerberus_dual_ble_row_t source=observation();
+    receive_roundtrip(&source); /* Old-peer canonical UNKNOWN. */
+    source.receive=(cerberus_dual_ble_receive_metadata_t){
+        .source_kind=CERBERUS_DUAL_BLE_RECEIVE_LEGACY,.callback_length=6,.sid=255,
+        .data_status=255,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+    receive_roundtrip(&source);
+    source.raw_flags=CERBERUS_BLE_ADVERTISEMENT_MALFORMED;
+    receive_roundtrip(&source); /* Parser failure need not invalidate full layout. */
+    source.raw_flags=0;
+    source.receive=(cerberus_dual_ble_receive_metadata_t){
+        .source_kind=CERBERUS_DUAL_BLE_RECEIVE_EXTENDED,.properties=0x13,.callback_length=6,
+        .sid=255,.primary_phy=1,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+    receive_roundtrip(&source); /* Legacy PDU delivered via EXT callback. */
+    source.receive.properties=1;source.receive.sid=7;source.receive.primary_phy=3;source.receive.secondary_phy=2;
+    receive_roundtrip(&source);
+    source.raw[0]=20;source.raw_flags=CERBERUS_BLE_ADVERTISEMENT_MALFORMED;
+    source.receive.ad_validation=CERBERUS_DUAL_BLE_AD_INVALID;
+    receive_roundtrip(&source); /* Malformed full source remains inspectable. */
+    source.raw_length=31;source.raw[0]=32;source.raw[1]=0xff;
+    source.raw_flags=CERBERUS_BLE_ADVERTISEMENT_MALFORMED|CERBERUS_BLE_ADVERTISEMENT_TRUNCATED;
+    source.receive.callback_length=255;source.receive.ad_validation=CERBERUS_DUAL_BLE_AD_VALID;
+    receive_roundtrip(&source); /* Valid full source with an incomplete preview. */
+
+    for(unsigned fault=0;fault<20;++fault){
+        source=observation();
+        source.receive=(cerberus_dual_ble_receive_metadata_t){.source_kind=2,.properties=1,
+            .callback_length=6,.sid=7,.primary_phy=3,.secondary_phy=2,.ad_validation=1};
+        switch(fault){
+        case 0:source.receive.source_kind=3;break;
+        case 1:source.receive.properties=0x80;break;
+        case 2:source.receive.properties=8;break;
+        case 3:source.receive.callback_length=5;break;
+        case 4:source.receive.sid=16;break;
+        case 5:source.receive.primary_phy=0;break;
+        case 6:source.receive.secondary_phy=4;break;
+        case 7:source.receive.data_status=1;break;
+        case 8:source.receive.ad_validation=0;break;
+        case 9:source.receive.ad_validation=3;break;
+        case 10:source.receive.callback_length=255;break;
+        case 11:source.raw_flags=CERBERUS_BLE_ADVERTISEMENT_TRUNCATED;break;
+        case 12:source.event_type=1;break;
+        case 13:source.receive.source_kind=0;break; /* Noncanonical UNKNOWN. */
+        default:
+            source.receive=(cerberus_dual_ble_receive_metadata_t){.source_kind=1,
+                .callback_length=6,.sid=255,.data_status=255,.ad_validation=1};
+            if(fault==14)source.receive.data_status=0;
+            if(fault==15)source.receive.sid=0;
+            if(fault==16)source.receive.primary_phy=1;
+            if(fault==17)source.receive.properties=1;
+            if(fault==18)source.receive.secondary_phy=1;
+            if(fault==19){source.receive.callback_length=32;source.raw_length=31;source.raw_flags=1;}
+            break;
+        }
+        reject_unchanged(&source,&provenance);
+    }
+    /* Saving an earlier selected copy never borrows the live row's newer
+     * receive envelope or its later source identity. Actual publication and
+     * replacement are exercised by dual_ble_integration_check as well. */
+    source=observation();source.receive=(cerberus_dual_ble_receive_metadata_t){
+        .source_kind=2,.properties=1,.callback_length=6,.sid=7,.primary_phy=3,.secondary_phy=2,.ad_validation=1};
+    const cerberus_dual_ble_row_t selected=source;
+    cerberus_dual_ble_provenance_t live_identity=provenance;
+    const cerberus_dual_ble_provenance_t selected_identity=live_identity;
+    source.receive.sid=12;source.raw[2]=0x99;source.rssi=-10;
+    ++live_identity.boot_id;++live_identity.epoch;++live_identity.generation;live_identity.index=0;
+    cerberus_ble_archive_row_t saved;
+    assert(cerberus_dual_ble_archive_capture_row(&saved,&selected,&selected_identity,500));
+    assert(saved.receive.sid==7&&saved.rssi==-93&&saved.advertisement[2]==6&&
+        saved.receiver_boot_id==selected_identity.boot_id&&saved.scan_epoch==selected_identity.epoch&&
+        saved.generation==0&&saved.index==31);
+    assert(source.receive.sid==12&&live_identity.boot_id!=saved.receiver_boot_id);
+}
 int main(void)
 {
     cerberus_dual_ble_row_t source=observation();
@@ -112,6 +208,7 @@ int main(void)
     source.name[32]=0;
     assert(cerberus_dual_ble_archive_capture_row(&row,&source,&provenance,500));
     assert(strlen(row.name)==32);
-    puts("C5 archive capture: frozen identity, raw/aggregate separation, v3 round-trip with UNKNOWN response, checked age bounds and transactional rejection passed");
+    check_receive_capture();
+    puts("C5 archive capture: frozen identity/receive metadata, v4 raw and age round-trips, UNKNOWN response and transactional rejection passed");
     return 0;
 }

@@ -130,10 +130,20 @@ static void golden_and_bounds(void)
         "00000000000000000000000000000000"
         "0000000000000000000000000000000000000000000000000000000000000000"
         "0000000000000000000000000000000000000000000000000000000000000000";
-    uint8_t bytes[MAX + 1], expected[240], v2[176], legacy[160];
+    static const char v4_hex[] =
+        "43424c454152430004002000d8000100f80000008070605040302010e3ef3fcb"
+        "010203040506020703c9a5024c000303f8fe1f00341200000807060504030201"
+        "010000000100000005000000010000004101ff00000000000000000000000000"
+        "000000000000000000000000000000000d180000000000000000000000000000"
+        "0201060000000000000000000000000000000000000000000000000000000000"
+        "0000000000000000000000000000000000000000000000000000000000000000"
+        "0000000000000000000000000000000000000000000000000000000000000000"
+        "000000000000000000000000000000000000000000000000";
+    uint8_t bytes[MAX + 1], expected[248], v3[240], v2[176], legacy[160];
     from_hex(hex, legacy, sizeof(legacy));
     from_hex(v2_hex, v2, sizeof(v2));
-    from_hex(v3_hex, expected, sizeof(expected));
+    from_hex(v3_hex, v3, sizeof(v3));
+    from_hex(v4_hex, expected, sizeof(expected));
     cerberus_ble_archive_t d = sample(1), copy = d, decoded;
     /* This fixed v1 zlib vector predates the v2 writer. Compatibility is
      * checked independently, not by constructing v1 with the new encoder. */
@@ -143,6 +153,13 @@ static void golden_and_bounds(void)
     CHECK(decoded.rows[0].response_state == CERBERUS_BLE_ARCHIVE_RESPONSE_UNKNOWN);
     CHECK(cerberus_ble_archive_decode(v2, sizeof(v2), &decoded));
     CHECK(!memcmp(&decoded, &copy, sizeof(copy)));
+    CHECK(cerberus_ble_archive_decode(v3, sizeof(v3), &decoded));
+    CHECK(!memcmp(&decoded, &copy, sizeof(copy)));
+    for (size_t cut = 0; cut < sizeof(v3); ++cut) bad_decode(v3, cut);
+    for (size_t i = 0; i < sizeof(v3); ++i) {
+        uint8_t corrupt[240]; memcpy(corrupt, v3, sizeof(corrupt)); corrupt[i] ^= 1U;
+        bad_decode(corrupt, sizeof(corrupt));
+    }
     for (size_t cut = 0; cut < sizeof(v2); ++cut) bad_decode(v2, cut);
     for (size_t i = 0; i < sizeof(v2); ++i) {
         uint8_t corrupt[176]; memcpy(corrupt, v2, sizeof(corrupt)); corrupt[i] ^= 1U;
@@ -453,9 +470,49 @@ static void response_semantics(void)
         "0000000000000000000000000000000002030304000002001100000013000000"
         "01000000030000000300000001000000020a0100000000000000000000000000"
         "00000000000000000000000000000000";
+    static const char v4_golden[] =
+        "43424c454152430004002000d8000100f800000080706050403020100ac87290"
+        "010203040506020703c9a5024c00030300fe1f01341200000807060504030201"
+        "010000000100000005000000010000004101ff00000000000000000000000000"
+        "000000000000000000000000000000000d180000000000000000000000000000"
+        "0201060000000000000000000000000000000000000000000000000000000000"
+        "0000000000000000000000000000000002030304000002001100000013000000"
+        "01000000030000000300000001000000020a0100000000000000000000000000"
+        "000000000000000000000000000000000000000000000000";
     cerberus_ble_archive_t good = response_sample(), d, decoded;
-    uint8_t expected[240], wire[MAX], changed[MAX];
-    from_hex(golden, expected, sizeof(expected));
+    uint8_t expected[248], v3[240], wire[MAX], changed[MAX];
+    from_hex(golden, v3, sizeof(v3));
+    from_hex(v4_golden, expected, sizeof(expected));
+    CHECK(cerberus_ble_archive_decode(v3, sizeof(v3), &decoded));
+    CHECK(!memcmp(&good, &decoded, sizeof(good))); /* Immutable v3 PRESENT vector retains its response. */
+    for (size_t cut = 0; cut < sizeof(v3); ++cut) bad_decode(v3, cut);
+    for (size_t i = 0; i < sizeof(v3); ++i) {
+        uint8_t corrupt[240]; memcpy(corrupt, v3, sizeof(corrupt)); corrupt[i] ^= 1U;
+        bad_decode(corrupt, sizeof(corrupt));
+    }
+    uint8_t v3_full[CERBERUS_BLE_ARCHIVE_V3_MAX_SIZE];
+    memcpy(v3_full, v3, HEADER);
+    for (unsigned i = 0; i < 64; ++i) {
+        uint8_t *old = v3_full + HEADER + i * CERBERUS_BLE_ARCHIVE_V3_ROW_SIZE;
+        memcpy(old, v3 + HEADER, CERBERUS_BLE_ARCHIVE_V3_ROW_SIZE);
+        old[5] = (uint8_t)(i % 32U);
+        if (i >= 32U) {
+            old[7] = 5; old[19] = 2; old[22] = 1; memset(old + 32, 0, 16);
+            put64(old + 136, UINT64_C(0x8877665544332211)); memset(old + 144, 0, 64);
+        }
+    }
+    put16(v3_full + 14, 64); put32(v3_full + 16, sizeof(v3_full)); seal(v3_full, sizeof(v3_full));
+    CHECK(cerberus_ble_archive_decode(v3_full, sizeof(v3_full), &decoded));
+    CHECK(decoded.count == 64 && decoded.rows[31].response_state == 2 && decoded.rows[32].response_state == 0);
+    for (unsigned i = 0; i < 64; ++i) {
+        cerberus_dual_ble_receive_metadata_t zero = {0};
+        CHECK(!memcmp(&decoded.rows[i].receive, &zero, sizeof(zero)));
+        if (i < 32U) CHECK(decoded.rows[i].response_source_uptime_ms == good.rows[0].response_source_uptime_ms);
+    }
+    for (size_t cut = 0; cut < sizeof(v3_full); ++cut) bad_decode(v3_full, cut);
+    for (size_t i = 0; i < sizeof(v3_full); ++i) {
+        v3_full[i] ^= 1U; bad_decode(v3_full, sizeof(v3_full)); v3_full[i] ^= 1U;
+    }
     CHECK(encode(&good, wire) == sizeof(expected)); CHECK(!memcmp(wire, expected, sizeof(expected)));
     CHECK(cerberus_ble_archive_decode(expected, sizeof(expected), &decoded));
     CHECK(!memcmp(&good, &decoded, sizeof(good)));
@@ -548,11 +605,118 @@ static void response_semantics(void)
     CHECK(!memcmp(&decoded, &d, sizeof(d)));
 }
 
+static cerberus_ble_archive_t receive_sample(void)
+{
+    cerberus_ble_archive_t d = sample(1);
+    cerberus_ble_archive_row_t *r = &d.rows[0];
+    r->receiver = CERBERUS_BLE_ARCHIVE_RECEIVER_C5; r->rssi_kind = CERBERUS_BLE_ARCHIVE_RSSI_LATEST_ADV;
+    r->source_time_valid = false; r->original_source_uptime_ms = r->copy_ceiling_ms = 0;
+    r->receiver_boot_id = UINT64_C(0x8877665544332211);
+    r->age_upper_valid = true; r->age_upper_at_save_ms = UINT64_C(0xfedcba9876543210);
+    r->advertisement_flags = 0;
+    r->receive = (cerberus_dual_ble_receive_metadata_t){.source_kind=2,.callback_length=3,
+        .sid=7,.primary_phy=3,.secondary_phy=1,.ad_validation=1};
+    return d;
+}
+
+static void receive_semantics(void)
+{
+    static const char golden[] =
+        "43424c454152430004002000d8000100f8000000807060504030201045e6bb85"
+        "010203040506020d03c9a5024c00030300fe1f02341201000807060504030201"
+        "000000000000000000000000000000004101ff00000000000000000000000000"
+        "000000000000000000000000000000000d180000000000000000000000000000"
+        "0201060000000000000000000000000000000000000000000000000000000000"
+        "1032547698badcfe112233445566778800000000000000000000000000000000"
+        "0000000000000000000000000000000000000000000000000000000000000000"
+        "000000000000000000000000000000000200030703010001";
+    cerberus_ble_archive_t good = receive_sample(), d, decoded;
+    uint8_t expected[248], wire[MAX], changed[MAX];
+    from_hex(golden, expected, sizeof(expected));
+    CHECK(encode(&good, wire) == sizeof(expected) && !memcmp(wire, expected, sizeof(expected)));
+    CHECK(cerberus_ble_archive_decode(expected, sizeof(expected), &decoded));
+    CHECK(!memcmp(&good, &decoded, sizeof(good)));
+    uint64_t age = 0;
+    CHECK(cerberus_ble_archive_age_upper_at_save(&decoded, 0, &age) && age == good.rows[0].age_upper_at_save_ms);
+    CHECK(!cerberus_ble_archive_age_at_save(&decoded, 0, &age));
+    CHECK(!decoded.rows[0].response_state && !decoded.rows[0].source_time_valid);
+    for (unsigned field = 0; field < 8; ++field) for (unsigned value = 0; value < 256; ++value) {
+        d = good; uint8_t *meta = (uint8_t *)&d.rows[0].receive; meta[field] = (uint8_t)value;
+        bool valid = field == 0 ? value == 2 : field == 1 ? (value == 0 || value == 2 || value == 4 || value == 6) :
+            field == 2 ? value == 3 : field == 3 ? (value <= 15 || value == 255) :
+            field == 4 ? (value == 1 || value == 3) : field == 5 ? value <= 3 :
+            field == 6 ? value == 0 : (value == 1 || value == 2);
+        CHECK(cerberus_ble_archive_validate(&d) == valid);
+        memcpy(changed, expected, sizeof(expected)); changed[HEADER + 208 + field] = (uint8_t)value;
+        seal(changed, sizeof(expected));
+        if (valid) {
+            CHECK(cerberus_ble_archive_decode(changed, sizeof(expected), &decoded));
+            CHECK(!memcmp(&decoded, &d, sizeof(d)));
+        } else {bad_model(&d); bad_decode(changed, sizeof(expected));}
+    }
+    /* UNKNOWN is eight zero bytes on every source; old bytes cannot silently
+     * turn into observed zero-valued PHY/SID/properties. */
+    for (unsigned receiver = 0; receiver < 3; ++receiver) {
+        d = receiver == 2 ? good : sample(1); d.rows[0].receiver = (uint8_t)receiver;
+        memset(&d.rows[0].receive, 0, sizeof(d.rows[0].receive));
+        CHECK(cerberus_ble_archive_validate(&d)); size_t n = encode(&d, wire);
+        CHECK(cerberus_ble_archive_decode(wire, n, &decoded));
+        cerberus_dual_ble_receive_metadata_t zero = {0};
+        CHECK(!memcmp(&decoded.rows[0].receive, &zero, sizeof(zero)));
+        for (unsigned byte = 0; byte < 8; ++byte) {
+            memcpy(changed, wire, n); changed[HEADER + 208 + byte] = 1; seal(changed, n); bad_decode(changed, n);
+        }
+        if (receiver != 2) {d.rows[0].receive = good.rows[0].receive; bad_model(&d);}
+    }
+    d = good; d.rows[0].advertisement_length = 2; bad_model(&d);
+    d = good; d.rows[0].advertisement_event_type = 0; bad_model(&d);
+    d = good; d.rows[0].advertisement_event_type = 4; bad_model(&d);
+    d = good; d.rows[0].advertisement_flags = 1; bad_model(&d);
+    d = good; d.rows[0].advertisement_flags = 4; bad_model(&d);
+    d = good; d.rows[0].advertisement_flags = 2; CHECK(cerberus_ble_archive_validate(&d));
+    /* Actual full-container VALID and preview/parser MALFORMED are independent. */
+    for (unsigned length = 0; length < 256; ++length) {
+        d = good; d.rows[0].receive.callback_length = (uint8_t)length;
+        d.rows[0].advertisement_length = (uint8_t)(length > 31 ? 31 : length);
+        d.rows[0].advertisement_flags = length > 31 ? 3 : 0;
+        memset(d.rows[0].advertisement, 0, sizeof(d.rows[0].advertisement));
+        for (unsigned i = 0; i < d.rows[0].advertisement_length; ++i) d.rows[0].advertisement[i] = (uint8_t)i;
+        size_t n = encode(&d, wire); CHECK(cerberus_ble_archive_decode(wire, n, &decoded));
+        CHECK(!memcmp(&decoded, &d, sizeof(d)));
+    }
+    d = good;
+    d.rows[0].receive = (cerberus_dual_ble_receive_metadata_t){.source_kind=1,
+        .callback_length=3,.sid=255,.data_status=255,.ad_validation=1};
+    CHECK(cerberus_ble_archive_validate(&d));
+    d.rows[0].receive.data_status = 0; bad_model(&d); /* Legacy status is unavailable, not COMPLETE. */
+    d.rows[0].receive.data_status = 255; d.rows[0].receive.sid = 0; bad_model(&d);
+    const uint8_t properties[] = {0x10,0x12,0x13,0x15}, events[] = {3,2,0,1};
+    for (unsigned i = 0; i < 4; ++i) {
+        d = good; d.rows[0].receive.properties = properties[i]; d.rows[0].receive.sid = 255;
+        d.rows[0].receive.primary_phy = 1; d.rows[0].receive.secondary_phy = 0;
+        d.rows[0].advertisement_event_type = events[i];
+        size_t n = encode(&d, wire); CHECK(cerberus_ble_archive_decode(wire, n, &decoded));
+        CHECK(!memcmp(&d, &decoded, sizeof(d)));
+        d.rows[0].receive.sid = 7; bad_model(&d);
+    }
+    d = sample(64); const cerberus_ble_archive_t response = response_sample();
+    for (unsigned i = 0; i < 64; ++i) {
+        d.rows[i] = i < 32 ? response.rows[0] : good.rows[0];
+        d.rows[i].address[5] = (uint8_t)(i % 32); /* Same typed identity is independent across receivers. */
+    }
+    size_t n = encode(&d, wire); CHECK(n == MAX && cerberus_ble_archive_decode(wire, n, &decoded));
+    CHECK(!memcmp(&d, &decoded, sizeof(d)));
+    CHECK(decoded.rows[31].response_state == 2 && decoded.rows[63].receive.source_kind == 2);
+    for (unsigned byte = 208; byte < 216; ++byte) {
+        memcpy(changed, wire, n); changed[HEADER + 63 * ROW + byte] = 0xfe; seal(changed, n); bad_decode(changed, n);
+    }
+}
+
 static void canonical_mutations(void)
 {
     uint8_t good[MAX], wire[MAX], reencoded[MAX];
-    for (unsigned response = 0; response < 2; ++response) {
-    cerberus_ble_archive_t seed = response ? response_sample() : sample(1);
+    for (unsigned kind = 0; kind < 3; ++kind) {
+    cerberus_ble_archive_t seed = kind == 2 ? receive_sample() : kind == 1 ? response_sample() : sample(1);
     const size_t n = encode(&seed, good);
     for (size_t offset = 0; offset < n; ++offset) {
         if (offset >= 28 && offset < 32) continue;
@@ -642,6 +806,7 @@ int main(void)
     time_and_projection();
     hostile_files();
     response_semantics();
+    receive_semantics();
     canonical_mutations();
     generated_roundtrips();
     printf("BLE archive codec: PASS %u checks; header=%u row=%u max=%u; host document=%zu row=%zu bytes\n",

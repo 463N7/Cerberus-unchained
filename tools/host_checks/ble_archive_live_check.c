@@ -41,6 +41,7 @@ static uint64_t sequence;
 static uint64_t last_canceled_job, last_released_job;
 static cerberus_ble_archive_io_status_t io;
 static cerberus_ble_archive_t saved;
+static size_t saved_length;
 static void *heap_caps_calloc(size_t count,size_t size,unsigned caps)
 { CHECK(caps==(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));CHECK(!allocation);++allocations;
   if(allocation_fails)return NULL;allocation=calloc(count,size);CHECK(allocation);return allocation; }
@@ -52,6 +53,7 @@ esp_err_t cerberus_ble_archive_io_save(const cerberus_ble_archive_t *doc,uint64_
 { ++saves;*job=0;if(start_error)return start_error;CHECK(cerberus_ble_archive_validate(doc));
   static uint8_t encoded[CERBERUS_BLE_ARCHIVE_MAX_SIZE];size_t length=0;
   CHECK(cerberus_ble_archive_encode(doc,encoded,sizeof(encoded),&length));
+  CHECK(length==32U+216U*doc->count);saved_length=length;
   CHECK(cerberus_ble_archive_decode(encoded,length,&saved));
   io=(cerberus_ble_archive_io_status_t){.job_id=++sequence,.worker_active=true,.state=CERBERUS_BLE_ARCHIVE_IO_SAVING};*job=sequence;return ESP_OK; }
 esp_err_t cerberus_ble_archive_io_load(const char *path,const char *name,uint64_t *job)
@@ -233,7 +235,7 @@ static void test_complete_without_result(void)
 }
 static void seed_both(void)
 {
-    seed();dual_ble_ui_store=&companion;companion.count=32;
+    seed_response();dual_ble_ui_store=&companion;companion.count=32;
     companion.published_boot_id=123;companion.published_epoch=456;companion.published_generation=0;
     discovery.inventory.count=32;
     for(unsigned i=0;i<32;++i){
@@ -241,10 +243,20 @@ static void seed_both(void)
         cerberus_s3_ble_discovery_record_t *s=&discovery.inventory.entries[i].record;
         s->peer.address[0]=(uint8_t)i;s->advertisement.address[0]=(uint8_t)i;
         s->peer.address_type=s->advertisement.address_type=0;s->index=(uint8_t)i;
+        memcpy(s->focus.discovery.address,s->peer.address,6);s->focus.discovery.address_type=0;
         cerberus_dual_ble_row_t *c=&companion.rows[i];
         c->address[0]=(uint8_t)i;c->address_type=0;c->rssi=-61;c->timing_flags=3;
         strcpy(c->name,"Frozen C5 row");c->request_started_ms=9900;c->callback_age_ms=5;
         c->raw_length=3;c->raw[0]=2;c->raw[1]=1;c->raw[2]=6;
+        if(i%3==1)c->receive=(cerberus_dual_ble_receive_metadata_t){
+            .source_kind=CERBERUS_DUAL_BLE_RECEIVE_LEGACY,.callback_length=3,
+            .sid=0xff,.data_status=0xff,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+        if(i%3==2||i==31){
+            c->raw_length=31;c->raw[0]=254;c->raw[1]=0xff;c->event_type=3;c->raw_flags=3;
+            c->receive=(cerberus_dual_ble_receive_metadata_t){.source_kind=CERBERUS_DUAL_BLE_RECEIVE_EXTENDED,
+                .callback_length=255,.sid=(uint8_t)(i%16),.primary_phy=3,.secondary_phy=2,
+                .ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+        }
     }
     memset(companion.staging,0xEE,sizeof(companion.staging));
     ble_mode=UI_BLE_MODE_C5;
@@ -261,6 +273,9 @@ static void test_both_and_c5_footer(void)
     CHECK(ble_archive_view->incoming.rows[0].receiver==CERBERUS_BLE_ARCHIVE_RECEIVER_S3);
     CHECK(ble_archive_view->incoming.rows[32].receiver==CERBERUS_BLE_ARCHIVE_RECEIVER_C5&&
         ble_archive_view->incoming.rows[32].age_upper_at_save_ms==105);
+    cerberus_dual_ble_receive_metadata_t frozen_receive=companion.rows[31].receive;
+    CHECK(!memcmp(&ble_archive_view->incoming.rows[63].receive,&frozen_receive,sizeof(frozen_receive)));
+    CHECK(ble_archive_view->incoming.rows[0].response_state==CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT);
     memset(companion.rows,0,sizeof(companion.rows));companion.published_epoch=999;
     discovery.inventory.entries[0].record.peer.address[0]=99;now_us+=2000000;
     s3_released=true;ble_archive_tick(false);CHECK(saves==before);
@@ -268,18 +283,23 @@ static void test_both_and_c5_footer(void)
     CHECK(saves==before+1&&saved.count==64&&saved.rows[32].scan_epoch==456&&
         saved.rows[32].receiver_boot_id==123&&saved.rows[0].address[0]==0&&
         saved.rows[32].age_upper_at_save_ms==105); /* Not refreshed after release. */
+    CHECK(saved_length==13856U&&!memcmp(&saved.rows[63].receive,&frozen_receive,sizeof(frozen_receive)));
+    CHECK(saved.rows[0].response_state==CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT&&saved.rows[0].response_source_uptime_ms==9100);
     CHECK(!memcmp(&selected_before,&ble_selected_result,sizeof(selected_before)));
     complete();CHECK(strstr(drawn,"S3 32 / C5 32 / LEGACY 0"));
     ble_archive_tap(64,426);CHECK(current_page==UI_PAGE_BLE&&ble_mode==UI_BLE_MODE_C5);
 
     seed_both();dual_ble_ui_detail=true;
     CHECK(cerberus_dual_ble_copy_row(&companion,31,&dual_ble_ui_selected,&dual_ble_ui_selected_provenance));
+    frozen_receive=dual_ble_ui_selected.receive;
     companion.published_epoch=999;companion.published_boot_id=888;companion.rows[31].address[0]=99;
+    memset(&companion.rows[31].receive,0,sizeof(companion.rows[31].receive));
     CHECK(archive_root_footer_draw()==ESP_OK&&strstr(drawn,"SAVE SD"));
     archive_root_footer_tap(220,440);ble_archive_tick(false);
     CHECK(saved.count==1&&saved.rows[0].receiver==CERBERUS_BLE_ARCHIVE_RECEIVER_C5&&
         saved.rows[0].address[0]==31&&saved.rows[0].index==31&&saved.rows[0].scan_epoch==456&&
         saved.rows[0].receiver_boot_id==123&&saved.rows[0].generation==0);
+    CHECK(!memcmp(&saved.rows[0].receive,&frozen_receive,sizeof(frozen_receive))&&saved.rows[0].advertisement_length==31);
     complete();ble_archive_return();CHECK(ble_mode==UI_BLE_MODE_C5&&dual_ble_ui_detail);
     archive_root_footer_tap(156,440);CHECK(ble_mode==UI_BLE_MODE_C5); /* Footer gap. */
     archive_root_footer_tap(30,440);CHECK(ble_mode==UI_BLE_MODE_LIST);
@@ -310,10 +330,53 @@ static void test_release_wait(void)
     ble_archive_save_selected();CHECK(saves==before); /* Repeated tap cannot replace frozen incoming. */
     s3_released=true;ble_archive_tick(false);CHECK(saves==before+1);complete();ble_archive_return();
 }
+static void test_receive_metadata_jobs(void)
+{
+    static cerberus_ble_archive_t frozen;
+    /* A selected envelope is frozen before owner drain, along with its bytes
+     * and provenance. Repeated save taps cannot substitute a later selection. */
+    seed_both();dual_ble_ui_detail=true;
+    CHECK(cerberus_dual_ble_copy_row(&companion,31,&dual_ble_ui_selected,&dual_ble_ui_selected_provenance));
+    s3_released=c5_released=false;unsigned before=saves;
+    ble_archive_save_c5(true);CHECK(ble_archive_view->release_pending&&saves==before);
+    frozen=ble_archive_view->incoming;
+    memset(&dual_ble_ui_selected.receive,0,sizeof(dual_ble_ui_selected.receive));
+    memset(companion.rows,0,sizeof(companion.rows));
+    ble_archive_save_c5(true);CHECK(!memcmp(&frozen,&ble_archive_view->incoming,sizeof(frozen)));
+    s3_released=true;ble_archive_tick(false);CHECK(saves==before&&!memcmp(&frozen,&ble_archive_view->incoming,sizeof(frozen)));
+    c5_released=true;ble_archive_tick(false);CHECK(saves==before+1&&!memcmp(&frozen,&saved,sizeof(frozen)));
+    complete();CHECK(!memcmp(&frozen,&ble_archive_view->document,sizeof(frozen)));
+    /* A failed later load leaves the previously published v4 document intact. */
+    ble_archive_open_file("/COPIED","bad.BLE");io.worker_active=false;
+    io.state=CERBERUS_BLE_ARCHIVE_IO_ERROR;io.error=ESP_ERR_INVALID_RESPONSE;
+    ble_archive_tick(false);CHECK(ble_archive_view->has_document&&!memcmp(&frozen,&ble_archive_view->document,sizeof(frozen)));
+    CHECK(strstr(drawn,"PREVIOUS SNAPSHOT RETAINED"));ble_archive_return();
+
+    /* Cancellation before submit starts no worker; an already submitted job
+     * keeps its frozen input and cannot reopen the page on late completion. */
+    for(unsigned submitted=0;submitted<2;++submitted){
+        seed_both();s3_released=c5_released=false;before=saves;
+        ble_archive_save_c5(false);frozen=ble_archive_view->incoming;
+        CHECK(frozen.count==64&&frozen.rows[63].receive.callback_length==255);
+        if(submitted){s3_released=c5_released=true;ble_archive_tick(false);CHECK(!memcmp(&frozen,&saved,sizeof(frozen)));}
+        else CHECK(!memcmp(&frozen,&ble_archive_view->incoming,sizeof(frozen)));
+        memset(companion.rows,0,sizeof(companion.rows));
+        ble_archive_tap(64,426);CHECK(!allocation&&current_page==UI_PAGE_BLE);
+        s3_released=c5_released=true;ble_archive_tick(false);CHECK(saves==before+submitted);
+        if(submitted){CHECK(!memcmp(&frozen,&saved,sizeof(frozen)));complete();CHECK(!allocation);}
+    }
+    /* A release timeout keeps captured evidence reviewable and never retries
+     * a background save after ownership eventually clears. */
+    seed_both();s3_released=c5_released=false;before=saves;
+    ble_archive_save_c5(false);frozen=ble_archive_view->incoming;now_us+=12000000;
+    ble_archive_tick(false);CHECK(ble_archive_view->error==ESP_ERR_TIMEOUT&&saves==before);
+    CHECK(!memcmp(&frozen,&ble_archive_view->incoming,sizeof(frozen)));
+    s3_released=c5_released=true;ble_archive_tick(false);CHECK(saves==before);ble_archive_return();
+}
 int main(void)
 {
     test_capture();test_jobs();test_accepted_job_rejected_by_view();test_complete_without_result();
-    test_both_and_c5_footer();test_release_wait();test_response_capture();
+    test_both_and_c5_footer();test_release_wait();test_response_capture();test_receive_metadata_jobs();
     ble_archive_dispose();CHECK(frees+1==allocations); /* One rejected allocation. */
     printf("%u archive capture/controller checks passed; saves=%u loads=%u copies=%u releases=%u.\n",checks,saves,loads,copies,releases);return 0;
 }

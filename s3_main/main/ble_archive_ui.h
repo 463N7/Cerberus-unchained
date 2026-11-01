@@ -6,6 +6,7 @@
  * the previous document. Historical source clocks are never made current. */
 #include "ble_archive.h"
 #include "cerberus_protocol.h"
+#include "ble_receive_info_ui.h"
 
 typedef enum {
     BLE_ARCHIVE_UI_JOB, BLE_ARCHIVE_UI_LIST, BLE_ARCHIVE_UI_DETAIL,
@@ -237,7 +238,11 @@ static inline esp_err_t ble_archive_ui_detail(ble_archive_ui_store_t *store)
     ESP_RETURN_ON_ERROR(draw_centered(302, line, UI_MUTED, 1), TAG, "archive epoch");
     snprintf(line, sizeof(line), "GEN %u / INDEX %u / REPORTS %u", row->generation, row->index, row->reports_seen);
     ESP_RETURN_ON_ERROR(draw_centered(320, line, UI_MUTED, 1), TAG, "archive source counters");
-    if (row->response_state == CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT) {
+    if (row->receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5) {
+        ESP_RETURN_ON_ERROR(draw_centered(340, row->receive.source_kind ?
+            "C5 RECEIVE INFO RETAINED" : "C5 RECEIVE INFO UNAVAILABLE", UI_TEXT, 1), TAG, "archive receive info");
+        snprintf(line, sizeof(line), "C5 RESPONSE BYTES UNAVAILABLE");
+    } else if (row->response_state == CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT) {
         snprintf(line, sizeof(line), "MATCHED RESPONSE: %u OF %u BYTES", row->response_length,
             row->response_original_length);
         ESP_RETURN_ON_ERROR(draw_centered(340, line, UI_TEXT, 1), TAG, "archive response size");
@@ -251,7 +256,8 @@ static inline esp_err_t ble_archive_ui_detail(ble_archive_ui_store_t *store)
             "NO MATCHED RESPONSE RETAINED" : "RESPONSE BYTES / CORRELATION UNAVAILABLE");
     }
     ESP_RETURN_ON_ERROR(draw_centered(356, line, UI_MUTED, 1), TAG, "archive response evidence");
-    ESP_RETURN_ON_ERROR(draw_button(64, 374, 192, 44, "RAW ADV / RESPONSE"), TAG, "archive raw button");
+    ESP_RETURN_ON_ERROR(draw_button(64, 374, 192, 44,
+        row->receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ? "RAW ADV / RX INFO" : "RAW ADV / RESPONSE"), TAG, "archive raw button");
     return ble_archive_ui_back("BACK TO SNAPSHOT");
 }
 
@@ -306,6 +312,20 @@ static inline esp_err_t ble_archive_ui_raw(ble_archive_ui_store_t *store)
 {
     const cerberus_ble_archive_row_t *row = &store->selected;
     const bool response = store->raw_response;
+    const bool c5 = row->receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5;
+    ESP_RETURN_ON_ERROR(ble_archive_ui_clear(response ? (c5 ? "SAVED RECEIVE INFO" : "SAVED RESPONSE") :
+        "SAVED RAW ADV"), TAG, "archive raw");
+    ESP_RETURN_ON_ERROR(draw_button(8, 54, 148, 28, response ? "ADVERTISEMENT" : "ADVERTISEMENT *"), TAG, "archive ADV selector");
+    ESP_RETURN_ON_ERROR(draw_button(164, 54, 148, 28, c5 ? (response ? "RECEIVE INFO *" : "RECEIVE INFO") :
+        (response ? "RESPONSE *" : "RESPONSE")), TAG, "archive alternate selector");
+    if (c5 && response) {
+        ESP_RETURN_ON_ERROR(ble_receive_info_ui_draw(&row->receive, row->advertisement_length, 116U), TAG, "archive receive metadata");
+        ESP_RETURN_ON_ERROR(draw_centered(224, "HISTORICAL EVIDENCE / RECORDED AT SAVE", UI_MUTED, 1), TAG, "archive receive history");
+        ESP_RETURN_ON_ERROR(draw_centered(244, "NOT CURRENT RADIO STATE", UI_MUTED, 1), TAG, "archive receive clock scope");
+        ESP_RETURN_ON_ERROR(draw_centered(274, "C5 RESPONSE BYTES UNAVAILABLE", UI_MUTED, 1), TAG, "archive receive response scope");
+        ESP_RETURN_ON_ERROR(draw_centered(294, "MISSING BYTES ARE NOT RECONSTRUCTED", UI_MUTED, 1), TAG, "archive receive preview scope");
+        return ble_archive_ui_back("BACK TO DETAILS");
+    }
     const bool available = !response || row->response_state == CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT;
     const uint8_t *data = response ? row->response : row->advertisement;
     const uint8_t size = !available ? 0U : response ? row->response_length : row->advertisement_length;
@@ -314,9 +334,6 @@ static inline esp_err_t ble_archive_ui_raw(ble_archive_ui_store_t *store)
     uint8_t count = ble_archive_ui_payload_fields(data, size, offsets, &bad);
     if ((unsigned)store->raw_page * 3U >= count) store->raw_page = 0U;
     char line[53];
-    ESP_RETURN_ON_ERROR(ble_archive_ui_clear(response ? "SAVED RESPONSE" : "SAVED RAW ADV"), TAG, "archive raw");
-    ESP_RETURN_ON_ERROR(draw_button(8, 54, 148, 28, response ? "ADVERTISEMENT" : "ADVERTISEMENT *"), TAG, "archive ADV selector");
-    ESP_RETURN_ON_ERROR(draw_button(164, 54, 148, 28, response ? "RESPONSE *" : "RESPONSE"), TAG, "archive RSP selector");
     if (!available) {
         ESP_RETURN_ON_ERROR(draw_centered(144, row->response_state == CERBERUS_BLE_ARCHIVE_RESPONSE_NONE ?
             "NO MATCHED RESPONSE RETAINED" : "RESPONSE BYTES / CORRELATION UNAVAILABLE", UI_TEXT, 1), TAG, "archive absent response");
@@ -438,7 +455,8 @@ static inline ble_archive_ui_action_t ble_archive_ui_tap(ble_archive_ui_store_t 
         store->raw_response = x >= 164U; store->raw_page = 0U; return BLE_ARCHIVE_UI_REDRAW;
     } else if (store->view == BLE_ARCHIVE_UI_RAW && store->selected_valid &&
         y >= 374U && y < 418U && ((x >= 8U && x < 156U) || (x >= 164U && x < 312U))) {
-        if (store->raw_response && store->selected.response_state != CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT)
+        if (store->raw_response && (store->selected.receiver == CERBERUS_BLE_ARCHIVE_RECEIVER_C5 ||
+            store->selected.response_state != CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT))
             return BLE_ARCHIVE_UI_NONE;
         uint8_t offsets[15], bad;
         unsigned count = store->raw_response ?

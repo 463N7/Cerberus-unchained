@@ -4,6 +4,7 @@
 #include "dual_ble_owner_check.c"
 #undef main
 #include "dual_ble_scan.h"
+#include "dual_ble_archive_capture.h"
 #include "c5_ble_legacy_getters.h"
 
 typedef struct {
@@ -196,6 +197,12 @@ int main(void)
     assert(painted.address[0]==2&&painted_source.boot_id==source.boot_id&&painted_source.epoch==source.epoch);
     assert(painted.receive.source_kind==CERBERUS_DUAL_BLE_RECEIVE_LEGACY&&painted.receive.callback_length==3);
     assert(row.receive.source_kind==CERBERUS_DUAL_BLE_RECEIVE_EXTENDED&&row.receive.sid==12&&row.receive.callback_length==255);
+    cerberus_ble_archive_row_t archived;
+    assert(cerberus_dual_ble_archive_capture_row(&archived,&painted,&painted_source,now_ms));
+    assert(archived.address[0]==2&&archived.receive.source_kind==CERBERUS_DUAL_BLE_RECEIVE_LEGACY&&
+        archived.receive.callback_length==3&&archived.receiver_boot_id==painted_source.boot_id&&
+        archived.scan_epoch==painted_source.epoch&&archived.generation==painted_source.generation&&
+        archived.index==painted_source.index);
     cerberus_dual_ble_stop(&s);
     for(unsigned tick=0;tick<50U&&!cerberus_dual_ble_released(&s);++tick)integration_tick(&i,&s);
     assert(cerberus_dual_ble_released(&s)&&!dual_attached);
@@ -215,6 +222,12 @@ int main(void)
     assert(s.count==2&&cerberus_dual_ble_row(&s,0,&row)&&row.receive.sid==12&&row.rssi==-90);
     assert(cerberus_dual_ble_row(&s,1,&row)&&row.address_type==0&&row.receive.sid==2);
     assert(painted.address_type==1&&painted.receive.sid==7&&painted.rssi==-30);
+    assert(cerberus_dual_ble_archive_capture_row(&archived,&painted,&painted_source,now_ms));
+    assert(!memcmp(&archived.receive,&painted.receive,sizeof(painted.receive))&&
+        archived.receive.sid==7&&archived.address_type==1&&archived.rssi==-30&&
+        archived.receiver_boot_id==painted_source.boot_id&&archived.scan_epoch==painted_source.epoch&&
+        archived.generation==painted_source.generation&&archived.index==painted_source.index);
+    assert(!memcmp(archived.advertisement,painted.raw,painted.raw_length)&&archived.age_upper_valid);
     cerberus_dual_ble_stop(&s);
     for(unsigned tick=0;tick<50U&&!cerberus_dual_ble_released(&s);++tick)integration_tick(&i,&s);
     assert(cerberus_dual_ble_released(&s)&&!dual_attached);

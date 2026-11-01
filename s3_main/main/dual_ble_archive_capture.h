@@ -23,7 +23,9 @@ static inline bool cerberus_dual_ble_archive_capture_row(cerberus_ble_archive_ro
             CERBERUS_BLE_ADVERTISEMENT_MALFORMED)) ||
         (source->timing_flags & ~(CERBERUS_DUAL_BLE_SEEN | CERBERUS_DUAL_BLE_RSSI_VALID)) ||
         ((source->timing_flags & CERBERUS_DUAL_BLE_RSSI_VALID) &&
-            (source->rssi < -127 || source->rssi > 20))) return false;
+            (source->rssi < -127 || source->rssi > 20)) ||
+        !cerberus_dual_ble_receive_metadata_valid(&source->receive,
+            source->raw_length, source->event_type, source->raw_flags)) return false;
     const char *end = memchr(source->name, 0, sizeof(source->name));
     if (!end) return false;
 
@@ -43,6 +45,9 @@ static inline bool cerberus_dual_ble_archive_capture_row(cerberus_ble_archive_ro
     memcpy(row.advertisement, source->raw, row.advertisement_length);
     row.advertisement_event_type = source->event_type;
     row.advertisement_flags = source->raw_flags;
+    /* Frozen same-original metadata; UNKNOWN from older peers stays UNKNOWN.
+     * Never infer receive provenance from current scanner state or raw hints. */
+    row.receive = source->receive;
     row.reports_seen = source->reports;
     row.generation = provenance->generation;
     row.index = provenance->index;

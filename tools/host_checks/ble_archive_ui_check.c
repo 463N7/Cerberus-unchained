@@ -297,9 +297,86 @@ static void test_response(const char *directory)
         CHECK(ble_archive_ui_tap(&viewer,64,374)==BLE_ARCHIVE_UI_REDRAW&&!viewer.raw_response);
     }
 }
+static void test_receive_info(const char *directory)
+{
+    seed(33);cerberus_ble_archive_row_t *r=&source.rows[32];
+    r->advertisement_event_type=3;r->advertisement_length=31;r->advertisement_flags=3;
+    memset(r->advertisement,0xA5,31);r->advertisement[0]=254;r->advertisement[1]=0xFF;
+    r->receive=(cerberus_dual_ble_receive_metadata_t){
+        .source_kind=CERBERUS_DUAL_BLE_RECEIVE_EXTENDED,.callback_length=255,.sid=15,
+        .primary_phy=3,.secondary_phy=2,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+    CHECK(cerberus_ble_archive_validate(&source));
+    CHECK(ble_archive_ui_begin(&viewer,1,false)&&ble_archive_ui_complete(&viewer,1,&source,"receive-v4.BLE"));
+    viewer.page=8;CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+    cerberus_ble_archive_row_t frozen=viewer.painted[0];
+    /* Selection follows the painted snapshot even if its document is replaced. */
+    viewer.document.rows[32]=viewer.document.rows[0];viewer.document.saved_uptime_ms=7;
+    CHECK(ble_archive_ui_tap(&viewer,8,150)==BLE_ARCHIVE_UI_REDRAW);
+    CHECK(!memcmp(&viewer.selected,&frozen,sizeof(frozen)));
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+    CHECK(strstr(drawn,"C5 RECEIVE INFO RETAINED")&&strstr(drawn,"C5 RESPONSE BYTES UNAVAILABLE")&&
+        strstr(drawn,"RAW ADV / RX INFO")&&!strstr(drawn,"RAW ADV / RESPONSE"));
+    preview(directory,"archive-c5-receive-detail");
+    CHECK(ble_archive_ui_tap(&viewer,64,374)==BLE_ARCHIVE_UI_REDRAW&&!viewer.raw_response);
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+    CHECK(strstr(drawn,"MALFORMED OR CUT AD AT BYTE 0")&&strstr(drawn,"RECEIVE INFO"));
+    CHECK(ble_archive_ui_tap(&viewer,160,60)==BLE_ARCHIVE_UI_NONE);
+    CHECK(ble_archive_ui_tap(&viewer,164,54)==BLE_ARCHIVE_UI_REDRAW&&viewer.raw_response);
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+    CHECK(strstr(drawn,"SAVED RECEIVE INFO")&&strstr(drawn,"RECEIVE INFO *")&&strstr(drawn,"C5 EXTENDED CALLBACK"));
+    CHECK(strstr(drawn,"CALLBACK 255 B / PREVIEW 31 B")&&strstr(drawn,"PHY CODED PRIMARY / 2M SECONDARY")&&
+        strstr(drawn,"SID 15 / PROPS 00 / CTRL COMPLETE")&&strstr(drawn,"FULL AD LAYOUT VALID / PREVIEW CUT"));
+    CHECK(strstr(drawn,"HISTORICAL EVIDENCE")&&strstr(drawn,"NOT CURRENT RADIO STATE")&&
+        strstr(drawn,"C5 RESPONSE BYTES UNAVAILABLE")&&strstr(drawn,"MISSING BYTES ARE NOT RECONSTRUCTED"));
+    CHECK(!strstr(drawn,"PREV FIELDS")&&!strstr(drawn,"COMPLETE FIELDS")&&!strstr(drawn,"SAVED RESPONSE"));
+    CHECK(ble_archive_ui_tap(&viewer,8,374)==BLE_ARCHIVE_UI_NONE&&
+        ble_archive_ui_tap(&viewer,164,374)==BLE_ARCHIVE_UI_NONE&&viewer.raw_page==0);
+    preview(directory,"archive-c5-receive-extended");
+    unsigned total=calls;
+    for(unsigned failure=1;failure<=total;++failure){
+        clear_draw();fail_after=failure;CHECK(ble_archive_ui_draw(&viewer,ESP_OK)!=ESP_OK);
+        CHECK(!memcmp(&viewer.selected,&frozen,sizeof(frozen)));
+    }
+    clear_draw();privacy_mask=true;CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+    CHECK(!strstr(drawn,"C0:00:00:00:00:01"));
+    viewer.selected.receive.ad_validation=CERBERUS_DUAL_BLE_AD_INVALID;
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK&&strstr(drawn,"FULL AD LAYOUT INVALID / PREVIEW CUT"));
+    preview(directory,"archive-c5-receive-invalid");
+    viewer.selected.receive=(cerberus_dual_ble_receive_metadata_t){
+        .source_kind=CERBERUS_DUAL_BLE_RECEIVE_LEGACY,.callback_length=31,.sid=255,
+        .data_status=255,.ad_validation=CERBERUS_DUAL_BLE_AD_INVALID};
+    viewer.selected.advertisement_flags=2;
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK&&strstr(drawn,"C5 LEGACY CALLBACK")&&
+        strstr(drawn,"SID N/A / PROPS N/A / CTRL STATUS N/A")&&strstr(drawn,"PHY N/A PRIMARY / N/A SECONDARY"));
+    CHECK(!strstr(drawn,"PREVIEW CUT"));preview(directory,"archive-c5-receive-legacy");
+    viewer.selected.receive=(cerberus_dual_ble_receive_metadata_t){
+        .source_kind=CERBERUS_DUAL_BLE_RECEIVE_EXTENDED,.properties=0x10,.sid=255,
+        .primary_phy=1,.ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+    viewer.selected.advertisement_length=0;viewer.selected.advertisement_flags=0;
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK&&strstr(drawn,"C5 EXT CALLBACK / LEGACY PDU")&&
+        strstr(drawn,"CALLBACK 0 B / PREVIEW 0 B")&&strstr(drawn,"SID N/A / PROPS 10 / CTRL COMPLETE"));
+    preview(directory,"archive-c5-receive-legacy-pdu");
+    /* Pre-v4 reports and older peers are represented as canonical UNKNOWN. */
+    memset(&viewer.selected.receive,0,sizeof(viewer.selected.receive));
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK&&strstr(drawn,"RECEIVE INFO UNAVAILABLE")&&
+        strstr(drawn,"NO METADATA FOR THIS OBSERVATION")&&strstr(drawn,"RAW BYTES REMAIN AVAILABLE"));
+    CHECK(!strstr(drawn,"CTRL COMPLETE")&&!strstr(drawn,"FULL AD LAYOUT")&&!strstr(drawn,"PREV FIELDS"));
+    preview(directory,"archive-c5-receive-unknown");
+    CHECK(ble_archive_ui_tap(&viewer,64,426)==BLE_ARCHIVE_UI_REDRAW&&viewer.view==BLE_ARCHIVE_UI_DETAIL);
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK&&strstr(drawn,"C5 RECEIVE INFO UNAVAILABLE"));
+    CHECK(ble_archive_ui_tap(&viewer,64,374)==BLE_ARCHIVE_UI_REDRAW&&!viewer.raw_response);
+    CHECK(ble_archive_ui_tap(&viewer,64,426)==BLE_ARCHIVE_UI_REDRAW&&viewer.view==BLE_ARCHIVE_UI_DETAIL);
+    CHECK(ble_archive_ui_tap(&viewer,64,426)==BLE_ARCHIVE_UI_REDRAW&&viewer.view==BLE_ARCHIVE_UI_LIST);
+    viewer.page=0;clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);
+    CHECK(ble_archive_ui_tap(&viewer,8,150)==BLE_ARCHIVE_UI_REDRAW&&!viewer.raw_response);
+    CHECK(ble_archive_ui_tap(&viewer,64,374)==BLE_ARCHIVE_UI_REDRAW);
+    CHECK(ble_archive_ui_tap(&viewer,164,54)==BLE_ARCHIVE_UI_REDRAW);
+    clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK&&strstr(drawn,"SAVED RESPONSE")&&
+        !strstr(drawn,"RECEIVE INFO"));
+}
 int main(int argc,char **argv)
 {
-    CHECK(argc==2);test_jobs(argv[1]);test_list(argv[1]);test_paint_and_privacy();test_raw(argv[1]);test_receivers(argv[1]);test_response(argv[1]);
+    CHECK(argc==2);test_jobs(argv[1]);test_list(argv[1]);test_paint_and_privacy();test_raw(argv[1]);test_receivers(argv[1]);test_response(argv[1]);test_receive_info(argv[1]);
     printf("BLE archive UI PASS %u assertions; PSRAM model=%zu bytes; no clock, heap, SD, IO worker or radio linked\n",
         checks,sizeof(ble_archive_ui_store_t));
     return 0;

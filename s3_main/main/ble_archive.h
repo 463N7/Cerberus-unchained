@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "dual_ble_protocol.h"
 
 /* Portable, bounded, passive BLE evidence. No radio, filesystem, allocation,
  * ESP-IDF types, native struct serialization, or active-target eligibility.
@@ -10,7 +11,8 @@
 enum {
     CERBERUS_BLE_ARCHIVE_LEGACY_VERSION = 1,
     CERBERUS_BLE_ARCHIVE_V2_VERSION = 2,
-    CERBERUS_BLE_ARCHIVE_VERSION = 3,
+    CERBERUS_BLE_ARCHIVE_V3_VERSION = 3,
+    CERBERUS_BLE_ARCHIVE_VERSION = 4,
     CERBERUS_BLE_ARCHIVE_MAX_ROWS_PER_RECEIVER = 32,
     CERBERUS_BLE_ARCHIVE_MAX_ROWS = 64,
     CERBERUS_BLE_ARCHIVE_NAME_MAX = 32,
@@ -21,8 +23,10 @@ enum {
     CERBERUS_BLE_ARCHIVE_LEGACY_MAX_SIZE = 4128,
     CERBERUS_BLE_ARCHIVE_V2_ROW_SIZE = 144,
     CERBERUS_BLE_ARCHIVE_V2_MAX_SIZE = 9248,
-    CERBERUS_BLE_ARCHIVE_ROW_SIZE = 208,
-    CERBERUS_BLE_ARCHIVE_MAX_SIZE = 13344,
+    CERBERUS_BLE_ARCHIVE_V3_ROW_SIZE = 208,
+    CERBERUS_BLE_ARCHIVE_V3_MAX_SIZE = 13344,
+    CERBERUS_BLE_ARCHIVE_ROW_SIZE = 216,
+    CERBERUS_BLE_ARCHIVE_MAX_SIZE = 13856,
     CERBERUS_BLE_ARCHIVE_RSSI_UNAVAILABLE = 127,
 };
 enum {
@@ -87,6 +91,11 @@ typedef struct {
     uint32_t response_original_observed_ms, response_observed_ms;
     uint64_t response_source_uptime_ms;
     uint8_t response[CERBERUS_BLE_ARCHIVE_ADV_MAX];
+    /* Same-original C5 callback envelope, separate from aggregate peer hints.
+     * Known values must match this row's raw length/event/flags. S3, LEGACY
+     * and all pre-v4 files retain canonical allzero UNKNOWN; neither a saved
+     * peer boot/epoch nor a raw prefix reconstructs absent receive metadata. */
+    cerberus_dual_ble_receive_metadata_t receive;
 } cerberus_ble_archive_row_t;
 
 typedef struct {
@@ -97,9 +106,10 @@ typedef struct {
 
 bool cerberus_ble_archive_validate(const cerberus_ble_archive_t *document);
 
-/* Encode v3: header32 + count*row208. Decode also accepts v2 row144 and
- * v1 row128/count<=32, mapping v1's unspecified source to LEGACY. Old rows
- * have UNKNOWN response availability, never a fabricated sequence or time.
+/* Encode v4: header32 + count*row216. Decode also accepts v3 row208, v2 row144
+ * and v1 row128/count<=32, mapping v1's unspecified source to LEGACY. V3
+ * response evidence remains intact. Pre-v3 rows have UNKNOWN response;
+ * all pre-v4 rows have UNKNOWN receive metadata, never fabricated provenance.
  * Little-endian integers, zero padding
  * and reserved bytes. CRC-32/ISO-HDLC covers ALL encoded bytes, treating the
  * header CRC field as zero. This detects corruption, not authenticity.

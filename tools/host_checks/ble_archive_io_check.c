@@ -142,6 +142,17 @@ static void fill(unsigned count)
             r->source_time_valid=false;r->copy_ceiling_ms=r->original_source_uptime_ms=0;
             r->receiver_boot_id=0xC501;r->scan_epoch_valid=true;r->scan_epoch=55;r->generation=7;
             r->age_upper_valid=true;r->age_upper_at_save_ms=123+i;
+            if(i%3==1){
+                r->receive=(cerberus_dual_ble_receive_metadata_t){.source_kind=CERBERUS_DUAL_BLE_RECEIVE_LEGACY,
+                    .callback_length=31,.sid=0xff,.data_status=0xff,.ad_validation=CERBERUS_DUAL_BLE_AD_INVALID};
+                r->advertisement_flags=2;
+            } else if(i%3==2||i==63){
+                r->receive=(cerberus_dual_ble_receive_metadata_t){.source_kind=CERBERUS_DUAL_BLE_RECEIVE_EXTENDED,
+                    .callback_length=255,.sid=(uint8_t)(i%16),.primary_phy=1,.secondary_phy=3,
+                    .ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+                r->advertisement_event_type=3;r->advertisement_flags=3;
+                r->advertisement[0]=254;r->advertisement[1]=0xff;
+            }
         }
     }
     CHECK(cerberus_ble_archive_validate(&input));expected=input;
@@ -191,6 +202,7 @@ static void nested_copy_then_release(void)
 
 int main(void)
 {
+    CHECK(CERBERUS_STORAGE_BLE_ARCHIVE_MAX_BYTES==13856U&&CERBERUS_BLE_ARCHIVE_MAX_SIZE==13856U);
     console_check(CERBERUS_BLE_ARCHIVE_IO_IDLE);
     CHECK(!strcmp(console_text,"ble_archive_state=IDLE\r\nble_archive_active=0\r\nble_archive_error=0\r\n"
         "ble_archive_job_id=0\r\nble_archive_operation=0\r\nble_archive_cancel_requested=0\r\n"
@@ -199,10 +211,13 @@ int main(void)
         reset();fill(count);uint64_t id=start_save();CHECK(!saves&&!loads&&status().worker_active&&outstanding==1);
         console_check(CERBERUS_BLE_ARCHIVE_IO_STARTING);
         CHECK(cerberus_ble_archive_io_copy_result(id,&output)==ESP_ERR_INVALID_STATE&&!memcmp(&output,&untouched,sizeof(output)));
-        input.rows[0].name[0]='!';uint64_t unused;CHECK(cerberus_ble_archive_io_save(&input,&unused)==ESP_ERR_INVALID_STATE);
+        input.rows[0].name[0]='!';
+        for(unsigned i=32;i<count;++i)memset(&input.rows[i].receive,0,sizeof(input.rows[i].receive));
+        uint64_t unused;CHECK(cerberus_ble_archive_io_save(&input,&unused)==ESP_ERR_INVALID_STATE);
         run_worker();CHECK(status().state==CERBERUS_BLE_ARCHIVE_IO_COMPLETE&&status().result_ready&&status().count==count);
         console_check(CERBERUS_BLE_ARCHIVE_IO_COMPLETE);
-        CHECK(status().bytes==32+208*count&&!strcmp(status().relative_path,"/CERBERUS/BLE")&&!strcmp(status().file_name,"B00001.BLE"));
+        CHECK(status().bytes==32+216*count&&!strcmp(status().relative_path,"/CERBERUS/BLE")&&!strcmp(status().file_name,"B00001.BLE"));
+        if(count==64)CHECK(storage_length==13856U&&storage_bytes[13855]==CERBERUS_DUAL_BLE_AD_VALID);
         CHECK(cerberus_ble_archive_io_copy_result(id,&output)==ESP_OK&&!memcmp(&output,&expected,sizeof(output)));
         cerberus_ble_archive_io_release(id);CHECK(!outstanding&&!status().result_ready);
         console_check(CERBERUS_BLE_ARCHIVE_IO_COMPLETE);
@@ -234,25 +249,28 @@ int main(void)
     }
     for(unsigned operation=0;operation<2;++operation){
         for(unsigned release=0;release<2;++release){
-            reset();fill(3);CHECK(cerberus_ble_archive_encode(&input,storage_bytes,sizeof(storage_bytes),&storage_length));
+            reset();fill(64);CHECK(cerberus_ble_archive_encode(&input,storage_bytes,sizeof(storage_bytes),&storage_length));
             id=operation?start_load():start_save();if(release)cerberus_ble_archive_io_release(id);else cerberus_ble_archive_io_cancel(id);
             CHECK(outstanding==1&&status().worker_active);run_worker();
             CHECK(status().state==CERBERUS_BLE_ARCHIVE_IO_CANCELED&&!saves&&!loads&&!outstanding&&!status().result_ready);
         }
         for(unsigned release=0;release<2;++release){
-            reset();fill(3);CHECK(cerberus_ble_archive_encode(&input,storage_bytes,sizeof(storage_bytes),&storage_length));
+            reset();fill(64);CHECK(cerberus_ble_archive_encode(&input,storage_bytes,sizeof(storage_bytes),&storage_length));
             storage_hook=release?release_hook:cancel_hook;id=operation?start_load():start_save();run_worker();
             CHECK(status().cancel_requested&&status().state==(operation?CERBERUS_BLE_ARCHIVE_IO_CANCELED:CERBERUS_BLE_ARCHIVE_IO_COMPLETE));
             CHECK(status().result_ready==(!operation&&!release));
+            if(!operation&&!release){
+                CHECK(cerberus_ble_archive_io_copy_result(id,&output)==ESP_OK&&!memcmp(&output,&expected,sizeof(output)));
+            }
             if(!operation){CHECK(saves==1&&!strcmp(status().file_name,"B00001.BLE"));}
             cerberus_ble_archive_io_release(id);CHECK(!outstanding);
         }
     }
-    reset();fill(1);storage_error=ESP_FAIL;partial_save=true;id=start_save();run_worker();
+    reset();fill(64);storage_error=ESP_FAIL;partial_save=true;id=start_save();run_worker();
     CHECK(status().state==CERBERUS_BLE_ARCHIVE_IO_ERROR&&!strcmp(status().file_name,"B00001.TMP")&&!outstanding);
     console_check(CERBERUS_BLE_ARCHIVE_IO_ERROR);
     CHECK(cerberus_ble_archive_io_copy_result(id,&output)!=ESP_OK&&!memcmp(&output,&untouched,sizeof(output)));
-    reset();fill(1);CHECK(cerberus_ble_archive_encode(&input,storage_bytes,sizeof(storage_bytes),&storage_length));storage_bytes[44]^=1;
+    reset();fill(64);CHECK(cerberus_ble_archive_encode(&input,storage_bytes,sizeof(storage_bytes),&storage_length));storage_bytes[13855]^=1;
     id=start_load();run_worker();CHECK(status().state==CERBERUS_BLE_ARCHIVE_IO_ERROR&&status().error==ESP_ERR_INVALID_RESPONSE&&!outstanding);
     CHECK(cerberus_ble_archive_io_copy_result(id,&output)!=ESP_OK&&!memcmp(&output,&untouched,sizeof(output)));
     reset();storage_error=ESP_ERR_TIMEOUT;id=start_load();run_worker();CHECK(status().state==CERBERUS_BLE_ARCHIVE_IO_ERROR&&!outstanding);

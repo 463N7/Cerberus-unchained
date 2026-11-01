@@ -34,6 +34,7 @@
 #include "esp_err.h"
 #include "esp_check.h"
 #include "archive_storage_types.h"
+#include "ble_archive.h"
 #define CERBERUS_STORAGE_MOUNT_PATH "sdcard"
 #define TAG "archive-storage-test"
 #define ESP_LOGI(...) ((void)0)
@@ -187,8 +188,59 @@ static esp_err_t load(size_t *length)
 static void failure_output(size_t length){CHECK(length==0);for(size_t i=0;i<sizeof(output);++i)CHECK(output[i]==0);}
 static void clean(void){CHECK(!locked&&!streams&&!descriptors&&locks==unlocks);}
 
+static void check_full_v4_document(void)
+{
+    static cerberus_ble_archive_t document,decoded;
+    static uint8_t original[CERBERUS_BLE_ARCHIVE_MAX_SIZE];
+    CHECK(CERBERUS_STORAGE_BLE_ARCHIVE_MAX_BYTES==13856U&&CERBERUS_BLE_ARCHIVE_MAX_SIZE==13856U);
+    memset(&document,0,sizeof(document));document.count=64;document.saved_uptime_ms=100;
+    for(unsigned i=0;i<64;++i){
+        cerberus_ble_archive_row_t *r=&document.rows[i];
+        r->receiver=i<32?CERBERUS_BLE_ARCHIVE_RECEIVER_S3:CERBERUS_BLE_ARCHIVE_RECEIVER_C5;
+        r->address[0]=(uint8_t)(i%32);r->address_type=(uint8_t)(i%4);r->index=(uint8_t)(i%32);
+        r->rssi=-42;r->rssi_valid=true;r->scan_epoch_valid=true;r->scan_epoch=UINT64_C(0x1234567812345678);
+        r->advertisement_length=3;memcpy(r->advertisement,"\002\001\006",3);
+        if(i<32){
+            r->source_time_valid=true;r->original_source_uptime_ms=90;r->copy_ceiling_ms=100;
+            r->response_state=CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT;
+            r->response_length=r->response_original_length=3;r->response_event_type=4;
+            memcpy(r->response,"\002\011R",3);
+            r->response_original_sequence=1;r->response_sequence=2;
+            r->response_original_observed_ms=90;r->response_observed_ms=91;
+            r->response_source_uptime_ms=91;r->response_time_valid=true;
+        }else{
+            r->rssi_kind=CERBERUS_BLE_ARCHIVE_RSSI_LATEST_ADV;
+            r->receiver_boot_id=UINT64_C(0xabcdef0123456789);r->age_upper_valid=true;r->age_upper_at_save_ms=500+i;
+            r->advertisement_length=31;r->advertisement[0]=254;r->advertisement[1]=0xff;
+            r->advertisement_event_type=3;r->advertisement_flags=3;
+            r->receive=(cerberus_dual_ble_receive_metadata_t){.source_kind=CERBERUS_DUAL_BLE_RECEIVE_EXTENDED,
+                .callback_length=255,.sid=(uint8_t)(i%16),.primary_phy=3,.secondary_phy=2,
+                .ad_validation=CERBERUS_DUAL_BLE_AD_VALID};
+        }
+    }
+    setup();size_t encoded=0;
+    CHECK(cerberus_ble_archive_encode(&document,payload,sizeof(payload),&encoded)&&encoded==13856U);
+    CHECK(payload[8]==4&&payload[12]==216&&payload[encoded-1]==CERBERUS_DUAL_BLE_AD_VALID);
+    memcpy(original,payload,encoded);
+    CHECK(save(encoded)==ESP_OK&&!strcmp(name,"B00001.BLE"));
+    size_t got=0;CHECK(load(&got)==ESP_OK&&got==encoded&&!memcmp(output,payload,encoded));
+    CHECK(cerberus_ble_archive_decode(output,got,&decoded)&&!memcmp(&decoded,&document,sizeof(document)));
+    /* Failure publishing another full-size document leaves the prior mixed
+     * snapshot and its final receive-envelope byte untouched. */
+    document.rows[63].receive.sid=1;
+    CHECK(cerberus_ble_archive_encode(&document,payload,sizeof(payload),&encoded));
+    fault[WRITE]=calls[WRITE]+1;
+    CHECK(save(encoded)!=ESP_OK&&!exists("B00002.BLE")&&exists("B00002.TMP"));
+    verify("B00001.BLE",original,sizeof(original));clean();
+    /* A full-size file that grows by one byte is rejected before fopen. */
+    memset(fault,0,sizeof(fault));stat_size_delta=1;
+    unsigned opened=calls[FOPEN];CHECK(load(&got)==ESP_ERR_INVALID_SIZE&&calls[FOPEN]==opened);
+    failure_output(got);clean();
+}
+
 int main(void)
 {
+    check_full_v4_document();
     for(unsigned length=1;length<=sizeof(payload);length=length<128?length+31:sizeof(payload)+1){
         setup();CHECK(save(length)==ESP_OK&&!strcmp(name,"B00001.BLE"));verify(name,payload,length);
         size_t got;CHECK(load(&got)==ESP_OK&&got==length&&!memcmp(output,payload,length));clean();

@@ -69,9 +69,9 @@ for fixture in ("ble_archive_storage_check", "ble_archive_io_check"):
     executable = out / (fixture + ".exe")
     command = [sys.executable, "-m", "ziglang", "cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-O1", "-Wall", "-Wextra", "-Werror",
         "-I", str(out), "-I", str(root / "tools/host_checks/stubs"),
+        "-I", str(root / "shared"),
         "-I", str(root / "s3_main/main"), str(root / "tools/host_checks" / (fixture + ".c"))]
-    if fixture == "ble_archive_io_check":
-        command.append(str(root / "s3_main/main/ble_archive.c"))
+    command.append(str(root / "s3_main/main/ble_archive.c"))
     subprocess.run([*command, "-o", str(executable)], check=True, env=env)
     with tempfile.TemporaryDirectory(prefix="files-", dir=out) as temporary:
         subprocess.run([str(executable)], cwd=temporary, check=True, env=env)

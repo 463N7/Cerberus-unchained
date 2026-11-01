@@ -1,5 +1,50 @@
 # BLE receive-list parity audit
 
+## Rev102 source candidate: C5 receive metadata in saved reports
+
+The v4 archive candidate retains the frozen C5 receive envelope alongside the
+same original ADV, RSSI semantics, age bound and full-width boot/epoch
+provenance. Its eight bytes describe callback source, delivered length,
+properties, SID, primary/secondary PHY, controller status and independent
+full AD-layout validity. Saving never fetches a replacement row or borrows
+metadata from a later scan. Selected saves use the painted/selected copy;
+SAVE BOTH uses only each receiver's committed evidence. Normal receiver
+cleanup precedes submission to the existing immutable file worker.
+
+The existing `.BLE` browser opens v4 files and v1/v2/v3 predecessors. Old
+files retain canonical UNKNOWN receive metadata; v1's receiver stays LEGACY,
+and v3 S3 response evidence remains intact. V4 uses a 32-byte header and
+216-byte rows, with at most 64 source observations, 32 per receiver, and
+**13,856 encoded bytes**. Known C5 metadata must match its saved raw prefix;
+S3 and LEGACY receive envelopes remain UNKNOWN. Full AD-layout validity is
+independent of prefix truncation/parser flags, and a controller COMPLETE
+report does not imply full payload retention.
+
+Saved C5 details offer **ADVERTISEMENT / RECEIVE INFO** in the same offline
+viewer. Receive information is explicitly historical, has no field-pagination
+controls, and provides no scan-response bytes or live actions. S3 retains its
+separate ADVERTISEMENT / RESPONSE view and independent response timing. The
+live and offline receive panes share one bounded renderer; neither reads
+current radio state to fill missing fields.
+
+Focused host validation passes **1,881 offline UI**, **924 controller**,
+**297,359 actual-storage**, and **15,021 worker/lifecycle** checks. The tests
+include full-size mixed reports, immutable receive bytes after later bank
+replacement, staging isolation, pending-release cancellation, pinned concurrent
+copies and failed-I/O preservation. Current host layouts are **15,376 bytes
+per document**, **32,304 bytes for the UI store**, and **30,000 bytes for the
+worker context**. Embedded documents are included in the store totals; these
+are host sizes pending native measurement, not runtime heap or stack acceptance.
+
+[The rev102 checkpoint](DUAL_RADIO_REV102.md) owns current build, installation
+and physical-acceptance status; this source section does not claim rev102 is
+installed. Physical save/reopen/reboot and receive-pane acceptance remain
+pending, as do controlled extended/coded reception and sustained transitions.
+Full payload retention, C5 scan-response evidence, broader history, source
+filters and full upstream family/option parity remain incomplete. See the
+[SD workflow](BLE_SD_SNAPSHOTS.md) and [wire format](BLE_ARCHIVE_FORMAT.md).
+Earlier sections below retain their revision-specific scope and exclusions.
+
 ## Rev101 source milestone: same-original C5 receive metadata
 
 The implementation preserves callback source, delivered length, SID/PHY, properties,
