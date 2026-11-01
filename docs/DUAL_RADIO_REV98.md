@@ -43,9 +43,9 @@ All five native targets pass on unchanged inputs matching the host receipt:
 S3, onboard C5, temporary bridge, expansion WROOM and expansion XIAO. The
 isolated toolchain uses PlatformIO 6.2.0, ESP-IDF 6.0.1 and GCC 15.2.0.
 Receipts, logs, effective SDK configurations and both application ELFs are
-retained under `artifacts/rev98-final-native-evidence`. Rev97 remains installed
-until matched packaging and installation are recorded. Physical latency,
-callback contention and touchscreen behavior remain pending.
+retained under `artifacts/rev98-final-native-evidence`. The matched package is
+installed as recorded below. Physical latency, callback contention and
+touchscreen behavior remain pending.
 
 The completed S3 native build has unchanged linked internal sections:
 26,412 bytes of `.dram0.data` and 145,904 bytes of `.dram0.bss`. Its optional
@@ -69,6 +69,40 @@ mutex-take call uses zero ticks. These checks exclude deeper RTOS, ROM, timer,
 logging, task-entry and interrupt/context-switch frames; they are not a complete
 stack bound or measured runtime headroom. Evidence is in
 `artifacts/device-rev98/c5-snapshot-native-stack.json` and `.txt`.
+
+## Installed package and idle boot evidence
+
+The installed paired package is
+`cerberus-unchained-0.1.0-dev.rev98-20261101T055514Z`, from source commit
+`eda8da95b9f9bc95dc7600492a126c26b839eb36`, with firmware source SHA-256
+`b525eb39097ae3b558f87475a404d7db188f209fa5ed789bbfad43989c05d517`.
+Package hashes, chip headers, partitions and image bounds pass. The three
+onboard application hashes exactly match the full native-matrix images.
+
+First-2-MiB backups of the prior rev97 S3 and C5 were read, checked against the
+installed package and verified against each chip. They cover every update
+write region; higher flash was preserved, including the older main crash
+record. The older complete S3 backup is also retained. Each bridge, C5 and S3
+write verified three image hashes after checking the exact ROM/stub identity.
+
+Rev98 boots with C5 firmware 62 online, an active display buffer and SD mounted.
+USB storage is inactive and the boot reports no previous reset fault. The
+existing 26,240-byte main crash record predates rev97/rev98 and remains present.
+No new RF or touchscreen test was performed while the owner was unavailable.
+
+The settled idle read shows 134,652 bytes of free S3 internal RAM, a 94,208-byte
+largest internal block, 1,428,324 bytes of free PSRAM and ten tasks. S3 console
+stack low-water is 1,100 bytes. C5 reports 59 KiB free and a 54 KiB minimum at
+boot; its largest block is not exposed. Startup SPI telemetry shows four
+initial READY timeouts with four legacy fallbacks, zero mutex timeouts and
+zero driver errors. These figures are idle/startup evidence, not sustained
+scan or callback-load acceptance.
+
+Backups, write logs, matching-input checks, boot captures and
+`installation-receipt.json` are retained under `artifacts/device-rev98`.
+The coverage ledger's `rev98-source-preparation` entry preserves the earlier
+source checkpoint; this document records the later build and installation
+evidence. Full upstream parity remains open.
 
 ## Next owner checks
 
