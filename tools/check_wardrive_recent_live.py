@@ -11,6 +11,14 @@ import sys
 root = Path(__file__).resolve().parents[1]
 out = root / 'artifacts/wardrive-recent-live-checks'
 out.mkdir(parents=True, exist_ok=True)
+ui = (root / 's3_main/main/ui.c').read_text(encoding='utf-8')
+# Compile the actual final repaint guard, including its complete condition and
+# draw/update body. The full acquisition tick is exercised by wardrive_ui.
+tick_start = ui.index('static void wardrive_tick(uint32_t now_ms, bool asleep)\n{')
+tick = ui[tick_start:ui.index('static void handle_tap(uint16_t x, uint16_t y)\n{', tick_start)]
+repaint = tick[tick.index('    if (!asleep && (wardrive_last_draw_ms'):tick.rindex('\n}')]
+(out / 'recent_repaint_impl.h').write_text(
+    'static void actual_wardrive_repaint(uint32_t now_ms,bool asleep)\n{\n' + repaint + '\n}\n', encoding='utf-8')
 display = (root / 's3_main/main/display.c').read_text(encoding='utf-8')
 start = display.index('static const uint8_t *font5x7(')
 (out / 'display_font.h').write_text(display[start:display.index('\nesp_err_t ', start)], encoding='utf-8')
@@ -32,11 +40,10 @@ subprocess.run([sys.executable, '-m', 'ziglang', 'cc', '-std=c11', '-O1', '-Wall
     str(root / 's3_main/main/wardrive_recent.c'), str(root / 's3_main/main/wardrive_core.c'),
     str(root / 's3_main/main/privacy.c'), '-o', str(exe)], check=True, env=env)
 subprocess.run([str(exe)], check=True, env=env)
-ui = (root / 's3_main/main/ui.c').read_text(encoding='utf-8')
 for route in ('#include "wardrive_recent_live_ui.h"',
               'if (wardrive_recent_is_open()) return wardrive_recent_draw();',
               'wardrive_recent_release_if_left();',
-              '(wardrive_recent_is_open() ? 500U : 1000U)',
+              '(wardrive_recent_is_open() || wardrive_gps_view_is_open() ? 500U : 1000U)',
               'wardrive_recent_close();'):
     assert route in ui, route
 tap = ui[ui.index('static void handle_tap(uint16_t x, uint16_t y)\n{'):]

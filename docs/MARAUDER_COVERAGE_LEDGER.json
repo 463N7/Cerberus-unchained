@@ -1,7 +1,7 @@
 {
   "format": 2,
-  "audit_checkpoint": "rev121-source",
-  "scope": "Source/workflow status through local rev114-121 candidates: shared dual-receiver Find My monitoring, independent ordinary BLE discovery/retries, exact S3 Analyzer/Fox/Recon/Wardriving ownership and evidence, shared S3 BLE host leases, and C5 receive-control and Channel Survey cleanup work. These candidates are not installed; rev113/C5 firmware68 remains the verified installed baseline (writes, paired boot and SD mount; later read-only diagnostics also recorded). See DUAL_RADIO_REV114.md through DUAL_RADIO_REV121.md for separate source/build/package evidence and acceptance limits. Physical RF, touchscreen transitions, recovery, storage and loaded-memory acceptance remain distinct from host/native checks. Full Marauder parity is incomplete. A read-only GitHub comparison at 2026-11-01 16:21:17 UTC found develop identical to 79cc6bcba1db6679baee1dab2b0c1ad5010e6363. RECEIVE_REMAINING_GAPS.md records receiver, GPS, storage and device-info scope.",
+  "audit_checkpoint": "rev122-source",
+  "scope": "Source/workflow status through local rev114-122 candidates: exact S3 receive and shared-host ownership, C5 receive-control/Channel Survey cleanup, and integrated GPS Data/received-NMEA presentation with independent field freshness and retained UART cleanup. These candidates are not installed; rev113/C5 firmware68 remains the last verified installed baseline. See DUAL_RADIO_REV114.md through DUAL_RADIO_REV122.md for separate source/build/package evidence and acceptance limits. Physical RF, touchscreen, recovery, storage, GPS, expansion and loaded-memory acceptance remain distinct from host/native checks. Full Marauder parity is incomplete. A read-only GitHub comparison at 2026-11-01 19:05:21 UTC found develop identical to 79cc6bcba1db6679baee1dab2b0c1ad5010e6363. RECEIVE_REMAINING_GAPS.md records remaining scope.",
   "contribution_summary": "docs/CONTRIBUTION_REV93.md",
   "prior_public_contribution": "docs/CONTRIBUTION_REV81.md",
   "upstream": "https://github.com/justcallmekoko/ESP32Marauder",
@@ -813,12 +813,12 @@
       "family": "gps_inputs_and_poi",
       "status": "hardware_limited",
       "cerberus_evidence": "docs/WARDRIVING_SOURCE_INVENTORY.md",
-      "next_gap": "Rev52 installs optional UART2 NMEA status, fresh-fix/UTC-gated WiGLE and unlocated fallback logging with host checks. No GPS receiver is attached or live-accepted. Metadata records GPS at result receipt because radio observations lack synchronized RF timestamps. Separate GPS data/NMEA views, PPS, POI and tracker workflows remain open. RECEIVE_REMAINING_GAPS.md distinguishes missing DATA/NMEA presentation, raw-input retention and field freshness from physical GPS acceptance.",
+      "next_gap": "Rev122 implements GPS DATA and received-NMEA views through the existing integrated Wardriving UART owner, independent GGA metadata freshness, bounded optional raw-line retention, and cleanup ownership. Existing fix/UTC-gated WiGLE and unlocated fallback semantics remain. No GPS receiver is attached or live-accepted. Standalone GPS acquisition, upstream generated-sentence/serial behavior, richer receiver metadata, PPS, POI and tracker controls remain open. Location metadata is at result receipt, not synchronized RF time. See DUAL_RADIO_REV122.md and RECEIVE_REMAINING_GAPS.md.",
       "s3_role": "S3 parses optional serial GPS, timestamps, stores and presents location status.",
       "c5_role": "C5 supplies radio observations; S3 attaches location at result receipt, without a synchronized RF timestamp claim.",
       "related_menu_entries": [],
       "related_cli_commands": [],
-      "hardware_note": "No GPS module is attached. Rev52 installs UART NMEA status and GPS-aware WiGLE/unlocated logging, but receiver input and geotagged export have no live acceptance. Location metadata describes result receipt, not synchronized RF observation time.",
+      "hardware_note": "No GPS module is attached. Integrated optional UART status and GPS-aware logging exist; local rev122 adds software view/freshness/cleanup work. Receiver input, location display and geotagged export remain physically unaccepted.",
       "status_detail": "Optional GPS hardware was not available for validation; location and POI/tracker workflows remain open.",
       "upstream_value": 31,
       "upstream_source": {
@@ -1029,12 +1029,12 @@
       "family": "gps_inputs_and_poi",
       "status": "hardware_limited",
       "cerberus_evidence": "docs/WARDRIVING_SOURCE_INVENTORY.md",
-      "next_gap": "Rev52 installs optional UART2 NMEA status, fresh-fix/UTC-gated WiGLE and unlocated fallback logging with host checks. No GPS receiver is attached or live-accepted. Metadata records GPS at result receipt because radio observations lack synchronized RF timestamps. Separate GPS data/NMEA views, PPS, POI and tracker workflows remain open. RECEIVE_REMAINING_GAPS.md distinguishes missing DATA/NMEA presentation, raw-input retention and field freshness from physical GPS acceptance.",
+      "next_gap": "Rev122 implements GPS DATA and received-NMEA views through the existing integrated Wardriving UART owner, independent GGA metadata freshness, bounded optional raw-line retention, and cleanup ownership. Existing fix/UTC-gated WiGLE and unlocated fallback semantics remain. No GPS receiver is attached or live-accepted. Standalone GPS acquisition, upstream generated-sentence/serial behavior, richer receiver metadata, PPS, POI and tracker controls remain open. Location metadata is at result receipt, not synchronized RF time. See DUAL_RADIO_REV122.md and RECEIVE_REMAINING_GAPS.md.",
       "s3_role": "S3 parses optional serial GPS, timestamps, stores and presents location status.",
       "c5_role": "C5 supplies radio observations; S3 attaches location at result receipt, without a synchronized RF timestamp claim.",
       "related_menu_entries": [],
       "related_cli_commands": [],
-      "hardware_note": "No GPS module is attached. Rev52 installs UART NMEA status and GPS-aware WiGLE/unlocated logging, but receiver input and geotagged export have no live acceptance. Location metadata describes result receipt, not synchronized RF observation time.",
+      "hardware_note": "No GPS module is attached. Integrated optional UART status and GPS-aware logging exist; local rev122 adds software view/freshness/cleanup work. Receiver input, location display and geotagged export remain physically unaccepted.",
       "status_detail": "Optional GPS hardware was not available for validation; location and POI/tracker workflows remain open.",
       "upstream_value": 40,
       "upstream_source": {
@@ -1432,12 +1432,12 @@
       "family": "gps_inputs_and_poi",
       "status": "hardware_limited",
       "cerberus_evidence": "docs/WARDRIVING_SOURCE_INVENTORY.md",
-      "next_gap": "Rev52 installs optional UART2 NMEA status, fresh-fix/UTC-gated WiGLE and unlocated fallback logging with host checks. No GPS receiver is attached or live-accepted. Metadata records GPS at result receipt because radio observations lack synchronized RF timestamps. Separate GPS data/NMEA views, PPS, POI and tracker workflows remain open. RECEIVE_REMAINING_GAPS.md distinguishes missing DATA/NMEA presentation, raw-input retention and field freshness from physical GPS acceptance.",
+      "next_gap": "Rev122 implements GPS DATA and received-NMEA views through the existing integrated Wardriving UART owner, independent GGA metadata freshness, bounded optional raw-line retention, and cleanup ownership. Existing fix/UTC-gated WiGLE and unlocated fallback semantics remain. No GPS receiver is attached or live-accepted. Standalone GPS acquisition, upstream generated-sentence/serial behavior, richer receiver metadata, PPS, POI and tracker controls remain open. Location metadata is at result receipt, not synchronized RF time. See DUAL_RADIO_REV122.md and RECEIVE_REMAINING_GAPS.md.",
       "s3_role": "S3 parses optional serial GPS, timestamps, stores and presents location status.",
       "c5_role": "C5 supplies radio observations; S3 attaches location at result receipt, without a synchronized RF timestamp claim.",
       "related_menu_entries": [],
       "related_cli_commands": [],
-      "hardware_note": "No GPS module is attached. Rev52 installs UART NMEA status and GPS-aware WiGLE/unlocated logging, but receiver input and geotagged export have no live acceptance. Location metadata describes result receipt, not synchronized RF observation time.",
+      "hardware_note": "No GPS module is attached. Integrated optional UART status and GPS-aware logging exist; local rev122 adds software view/freshness/cleanup work. Receiver input, location display and geotagged export remain physically unaccepted.",
       "status_detail": "Optional GPS hardware was not available for validation; location and POI/tracker workflows remain open.",
       "upstream_value": 55,
       "upstream_source": {
@@ -1611,12 +1611,12 @@
       "family": "gps_inputs_and_poi",
       "status": "hardware_limited",
       "cerberus_evidence": "docs/WARDRIVING_SOURCE_INVENTORY.md",
-      "next_gap": "Rev52 installs optional UART2 NMEA status, fresh-fix/UTC-gated WiGLE and unlocated fallback logging with host checks. No GPS receiver is attached or live-accepted. Metadata records GPS at result receipt because radio observations lack synchronized RF timestamps. Separate GPS data/NMEA views, PPS, POI and tracker workflows remain open. RECEIVE_REMAINING_GAPS.md distinguishes missing DATA/NMEA presentation, raw-input retention and field freshness from physical GPS acceptance.",
+      "next_gap": "Rev122 implements GPS DATA and received-NMEA views through the existing integrated Wardriving UART owner, independent GGA metadata freshness, bounded optional raw-line retention, and cleanup ownership. Existing fix/UTC-gated WiGLE and unlocated fallback semantics remain. No GPS receiver is attached or live-accepted. Standalone GPS acquisition, upstream generated-sentence/serial behavior, richer receiver metadata, PPS, POI and tracker controls remain open. Location metadata is at result receipt, not synchronized RF time. See DUAL_RADIO_REV122.md and RECEIVE_REMAINING_GAPS.md.",
       "s3_role": "S3 parses optional serial GPS, timestamps, stores and presents location status.",
       "c5_role": "C5 supplies radio observations; S3 attaches location at result receipt, without a synchronized RF timestamp claim.",
       "related_menu_entries": [],
       "related_cli_commands": [],
-      "hardware_note": "No GPS module is attached. Rev52 installs UART NMEA status and GPS-aware WiGLE/unlocated logging, but receiver input and geotagged export have no live acceptance. Location metadata describes result receipt, not synchronized RF observation time.",
+      "hardware_note": "No GPS module is attached. Integrated optional UART status and GPS-aware logging exist; local rev122 adds software view/freshness/cleanup work. Receiver input, location display and geotagged export remain physically unaccepted.",
       "status_detail": "Optional GPS hardware was not available for validation; location and POI/tracker workflows remain open.",
       "upstream_value": 63,
       "upstream_source": {
@@ -2525,7 +2525,7 @@
         44,
         48
       ],
-      "next_gap": "GPS-optional unified logging and NMEA status exist. Physical GPS input, located export, POI/geofence/tracker controls and six-C5 backboard behavior remain unverified."
+      "next_gap": "GPS-optional unified logging exists; rev122 implements integrated GPS Data/received-NMEA views, independent metadata freshness and retained UART cleanup. Physical GPS input, located export, standalone acquisition, generated NMEA/serial behavior, POI/geofence/tracker controls and six-C5 backboard acceptance remain open."
     },
     {
       "name": "dynamic_menu_options",

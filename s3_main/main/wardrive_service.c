@@ -286,6 +286,7 @@ static void snapshot_optional_gps(bool enabled,
     snapshot->sentence_age_ms = UINT32_MAX;
     snapshot->fix_age_ms = UINT32_MAX;
     snapshot->utc_age_ms = UINT32_MAX;
+    snapshot->gga_age_ms = UINT32_MAX;
     if (uart_error != NULL) *uart_error = ESP_OK;
 }
 
@@ -1322,12 +1323,16 @@ static void wardrive_worker(void *unused)
     portEXIT_CRITICAL(&wardrive_lock);
     stop_scans_and_close_file(wifi_own, wifi_generation,
         wifi_start_uncertain, wifi_start_baseline, ble_epoch, ble_pending);
-    gps_error = stop_optional_gps(gps_enabled);
-    if (gps_error != ESP_OK) {
+    /* A timeout or driver-delete error is retained GPS ownership, not a
+     * terminal session. Reuse this worker for paced cleanup, with files already
+     * drained above and the workspace still owned until the UART is released. */
+    do {
+        gps_error = stop_optional_gps(gps_enabled);
         portENTER_CRITICAL(&wardrive_lock);
         wardrive_status.gps_error = gps_error;
         portEXIT_CRITICAL(&wardrive_lock);
-    }
+        if (gps_error != ESP_OK) vTaskDelay(pdMS_TO_TICKS(WARDRIVE_POLL_MS));
+    } while (gps_error != ESP_OK);
     release_workspace();
     portENTER_CRITICAL(&wardrive_lock);
     wardrive_status.elapsed_ms = (uint32_t)(now_ms64() - started_ms);

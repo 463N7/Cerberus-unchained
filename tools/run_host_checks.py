@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the 128 registered host suites through the C5 ownership checkpoint.
+"""Run the 130 registered host suites through the GPS Data/NMEA checkpoint.
 
 The checked-in synthetic fixtures need no board, radio, or private captures.
 Generated fixtures, native executables, previews, logs, and the result receipt
@@ -91,6 +91,7 @@ CHECKS = (
     'check_wardrive_wigle.py',
     'check_wardrive_gps_optional.py',
     'check_wardrive_gps_core.py',
+    'check_wardrive_gps_uart.py',
     'check_wardrive_expansion.py',
     'check_wardrive_expansion_activation.py',
     'check_recon_store.py',
@@ -152,6 +153,7 @@ SERIAL_CHECKS = (
     'check_csi_live_ui.py',
     'render_wifi_target.py',
     'check_wardrive_ui.py',
+    'check_wardrive_gps_ui.py',
     'check_s3_ble_discovery_ui.py',
     'render_network_picker.py',
 )
@@ -189,8 +191,8 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=3, help="Parallel compiler jobs (default: 3)")
     args = parser.parse_args()
     names = (*CHECKS, *SERIAL_CHECKS)
-    if len(names) != 128 or len(set(names)) != 128:
-        parser.error("Expected 128 unique suites; do not silently skip a suite")
+    if len(names) != 130 or len(set(names)) != 130:
+        parser.error("Expected 130 unique suites; do not silently skip a suite")
     if args.list:
         for name in names:
             print(name)
@@ -217,7 +219,7 @@ def main() -> int:
     changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
     receipt = {
         "format": 1,
-        "suite_set": "rev121",
+        "suite_set": "rev122",
         "recorded_utc": datetime.now(timezone.utc).isoformat(),
         "status": "passed" if not changed and all(r["exit_code"] == 0 for r in results) else "failed",
         "hardware_validated": False,

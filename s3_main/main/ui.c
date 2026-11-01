@@ -367,6 +367,12 @@ static void wardrive_recent_open(void);
 static void wardrive_recent_close(void);
 static void wardrive_recent_handle_tap(uint16_t x, uint16_t y);
 static void wardrive_recent_release_if_left(void);
+static bool wardrive_gps_view_is_open(void);
+static esp_err_t wardrive_gps_view_draw(void);
+static void wardrive_gps_view_open(void);
+static void wardrive_gps_view_close(void);
+static void wardrive_gps_view_handle_tap(uint16_t x, uint16_t y);
+static void wardrive_gps_view_release_if_hidden(uint32_t now_ms, bool asleep);
 static esp_err_t draw_live_scan(void);
 static bool live_is_view(void);
 static void live_scan_tick(uint32_t now, bool asleep);
@@ -7971,19 +7977,19 @@ static esp_err_t draw_wardrive(void)
 
     ESP_RETURN_ON_ERROR(draw_centered(60, "CONTINUOUS SCAN / STOP TO SAVE", UI_MUTED, 1), TAG, "wardrive mode");
     bool gps_selected = active ? status.gps_requested : wardrive_gps_enabled;
-    const char *gps_line = gps_selected ? "GPS ON / ABSENT / UNLOC CSV" :
-        "GPS OFF / UNLOC CSV";
+    const char *gps_line = gps_selected ? "GPS DATA > ON / NO RECENT NMEA" :
+        "GPS DATA > OFF / UNLOC CSV";
     uint16_t gps_color = UI_MUTED;
     if (gps_selected && status.gps_error != ESP_OK) {
-        gps_line = "GPS UART ERROR / UNLOC CSV";
+        gps_line = "GPS DATA > UART ERROR / UNLOC CSV";
         gps_color = UI_BAD;
     } else if (gps_selected && status.gps.state == CERBERUS_WARDRIVE_GPS_NO_FIX) {
-        gps_line = "GPS SIGNAL / NO FIX";
+        gps_line = "GPS DATA > NMEA / NO FIX";
     } else if (gps_selected && status.gps.state == CERBERUS_WARDRIVE_GPS_STALE) {
-        gps_line = "GPS FIX STALE / UNLOC CSV";
+        gps_line = "GPS DATA > FIX STALE / UNLOC CSV";
     } else if (gps_selected && status.gps.state == CERBERUS_WARDRIVE_GPS_FRESH) {
         gps_line = status.gps.utc_valid ?
-            "GPS FIX + UTC / WIGLE CSV" : "GPS FIX / UTC UNVERIFIED";
+            "GPS DATA > FIX + UTC / WIGLE CSV" : "GPS DATA > FIX / UTC UNVERIFIED";
         gps_color = status.gps.utc_valid ? UI_GOOD : UI_MUTED;
     }
     ESP_RETURN_ON_ERROR(draw_centered(80, gps_line, gps_color, 1), TAG, "wardrive GPS");
@@ -8063,6 +8069,7 @@ static esp_err_t draw_wardrive(void)
 
 static esp_err_t draw_detail_page(void)
 {
+    if (wardrive_gps_view_is_open()) return wardrive_gps_view_draw();
     if (wardrive_recent_is_open()) return wardrive_recent_draw();
     if (current_page == UI_PAGE_BLE_ARCHIVE) return ble_archive_draw();
     if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_CSI) return csi_draw(true);
@@ -11333,6 +11340,7 @@ static void handle_scripts_tap(uint16_t x, uint16_t y)
 #include "s3_findmy_monitor_ui.h"
 #include "ble_archive_live_ui.h"
 #include "wardrive_recent_live_ui.h"
+#include "wardrive_gps_live_ui.h"
 #include "sentinel_watch_ui.h"
 #include "remote_id_live_ui.h"
 #include "mac_monitor_live_ui.h"
@@ -11380,6 +11388,7 @@ static void open_tool_page(ui_page_t page)
         ble_sound_last_draw_ms = 0U;
     }
     if (current_page == UI_PAGE_WARDRIVE) {
+        wardrive_gps_view_close();
         wardrive_recent_close();
         wardrive_gps_enabled = false;
         wardrive_start_pending = false;
@@ -11646,6 +11655,10 @@ static void ble_attack_tick(uint32_t now_ms, bool asleep)
 static void wardrive_handle_tap(uint16_t x, uint16_t y)
 {
     if (x < 24U || x >= 296U) return;
+    if (y >= 72U && y < 98U) {
+        wardrive_gps_view_open();
+        return;
+    }
     if (y >= 380U && y < 412U && x >= 164U) {
         wardrive_recent_open();
         return;
@@ -11680,6 +11693,7 @@ static void wardrive_handle_tap(uint16_t x, uint16_t y)
 
 static void wardrive_tick(uint32_t now_ms, bool asleep)
 {
+    wardrive_gps_view_release_if_hidden(now_ms, asleep);
     if (current_page != UI_PAGE_WARDRIVE) return;
     cerberus_wardrive_status_t status;
     cerberus_wardrive_get_status(&status);
@@ -11722,7 +11736,7 @@ static void wardrive_tick(uint32_t now_ms, bool asleep)
     }
     if (!asleep && (wardrive_last_draw_ms == 0U ||
         (uint32_t)(now_ms - wardrive_last_draw_ms) >=
-            (wardrive_recent_is_open() ? 500U : 1000U))) {
+            (wardrive_recent_is_open() || wardrive_gps_view_is_open() ? 500U : 1000U))) {
         ESP_ERROR_CHECK(draw_detail_page());
         wardrive_last_draw_ms = now_ms;
     }
@@ -11731,6 +11745,10 @@ static void wardrive_tick(uint32_t now_ms, bool asleep)
 static void handle_tap(uint16_t x, uint16_t y)
 {
     if (x >= CERBERUS_LCD_WIDTH || y >= CERBERUS_LCD_HEIGHT) {
+        return;
+    }
+    if (wardrive_gps_view_is_open()) {
+        wardrive_gps_view_handle_tap(x, y);
         return;
     }
     if (wardrive_recent_is_open()) {

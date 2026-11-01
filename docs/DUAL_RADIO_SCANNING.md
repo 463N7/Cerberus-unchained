@@ -2,6 +2,19 @@
 
 ## Current local checkpoint
 
+[Rev122](DUAL_RADIO_REV122.md) implements integrated GPS DATA/received-NMEA
+observation through S3's existing UART owner while C5 remains available for
+Wardriving Wi-Fi. Independent GGA freshness, optional bounded trace storage
+and retained UART cleanup are part of this candidate. Implementation, focused
+checks and independent reviews are complete, including frozen paging with
+ages at copy and entire raw-line masking. All 130 host suites, five native
+builds, the linked resource audit and matched package verification pass.
+Measured S3 fixed data/BSS grows by 128 bytes; the optional trace/display copies
+total 2,624 bytes of PSRAM before allocator overhead. C5 fixed data/BSS is
+unchanged. Entry-frame measurements remain separate from runtime stack margin.
+Rev113 remains the last verified installed build; no new physical GPS or
+concurrent-radio performance acceptance is claimed.
+
 [Rev121](DUAL_RADIO_REV121.md) implements C5 receive cleanup bound to private
 scan epochs, retained SDK ownership and Channel Survey admission/retry. Focused
 regressions, independent review, all 128 host suites, five native builds and

@@ -29,6 +29,12 @@ static esp_err_t draw_detail_page(void)
     if(wardrive_recent_is_open())return wardrive_recent_draw();
     ++summary_draws;return ESP_OK;
 }
+/* GPS rendering/observer lifetime has its own actual-production suite. Only
+ * that viewer's visibility is a boundary for this shared repaint guard. */
+static bool gps_view_opened;
+static bool wardrive_gps_view_is_open(void)
+{ return gps_view_opened && current_page == UI_PAGE_WARDRIVE; }
+#include "recent_repaint_impl.h"
 static char diagnostic[4096];
 static void console_printf(const char *format,...)
 {
@@ -107,9 +113,27 @@ static void test_console(void)
     CHECK(strstr(diagnostic,"rows=10\r\nretained_events=24\r\nclock_faults=4294967295\r\n"));
     CHECK(strstr(diagnostic,"receipt_scope=S3_processing_uptime_not_RF_time")&&strstr(diagnostic,"append_scope=API_accepted_not_SD_durability"));
 }
+static void test_actual_repaint_cadence(void)
+{
+    seed();wardrive_recent_open();wardrive_last_draw_ms=1000U;
+    unsigned copied=copies,draws=summary_draws,stops=stop_requests,allocated=allocations;
+    actual_wardrive_repaint(1499U,false);CHECK(copies==copied&&wardrive_last_draw_ms==1000U);
+    actual_wardrive_repaint(1500U,false);CHECK(copies==copied+1U&&wardrive_last_draw_ms==1500U);
+    actual_wardrive_repaint(2500U,true);CHECK(copies==copied+1U&&wardrive_last_draw_ms==1500U);
+    CHECK(summary_draws==draws&&stop_requests==stops&&allocations==allocated);
+    wardrive_recent_close();wardrive_last_draw_ms=3000U;
+    actual_wardrive_repaint(3999U,false);CHECK(summary_draws==draws&&wardrive_last_draw_ms==3000U);
+    actual_wardrive_repaint(4000U,false);CHECK(summary_draws==draws+1U&&wardrive_last_draw_ms==4000U);
+    gps_view_opened=true;wardrive_last_draw_ms=5000U;
+    actual_wardrive_repaint(5499U,false);CHECK(summary_draws==draws+1U);
+    actual_wardrive_repaint(5500U,false);CHECK(summary_draws==draws+2U&&wardrive_last_draw_ms==5500U);
+    wardrive_last_draw_ms=0U;actual_wardrive_repaint(6000U,true);CHECK(summary_draws==draws+2U);
+    actual_wardrive_repaint(6000U,false);CHECK(summary_draws==draws+3U&&wardrive_last_draw_ms==6000U);
+    CHECK(stop_requests==stops&&allocations==allocated);gps_view_opened=false;
+}
 int main(void)
 {
-    test_routes();test_unavailable();test_console();
+    test_routes();test_unavailable();test_console();test_actual_repaint_cadence();
     CHECK(releases+2==allocations); /* Two failed optional UI allocations. */
     printf("Wardriving recent live adapter/compact console: %u checks; frozen selection, Stop/Back, pending cancellation, allocation failure and cleanup pass. Host UI store=%zu bytes.\n",checks,sizeof(wardrive_recent_ui_store_t));
 }

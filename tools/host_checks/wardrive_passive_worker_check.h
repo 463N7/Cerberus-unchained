@@ -27,6 +27,19 @@ static void check_held_cleanup(void)
 static void run_passive_worker_cases(void)
 {
     unsigned before=checks;
+    /* GPS cleanup is a held resource after radios/files drain, never an early
+     * terminal state or workspace free. The same worker retries with backoff. */
+    reset();CHECK(cerberus_wardrive_start(false,true)==ESP_OK);
+    auto_complete=true;stop_after_append=4;gps_stop_failures=4;inspect_gps_cleanup=true;
+    run_pending_worker();
+    CHECK(gps_stop_calls==5 && gps_cleanup_checks==5 && !gps_stop_failures);
+    CHECK(wardrive_status.state==CERBERUS_WARDRIVE_STOPPED && wardrive_status.gps_error==ESP_OK);
+    CHECK(sd_appends==4 && worker_delays>=4 && frees==1 && !workspace);
+    CHECK(!passive_source.attached && !storage_owned && !worker_active);
+    /* The next session can start normally; GPS OFF still invokes no UART API. */
+    reset();CHECK(cerberus_wardrive_start(false,false)==ESP_OK);
+    cerberus_wardrive_request_stop();run_pending_worker();
+    CHECK(!gps_calls && !gps_stop_calls && wardrive_status.state==CERBERUS_WARDRIVE_STOPPED);
     /* Existing first-use host warming may yield. A replacement/reset must not
      * cause the wrapper to release another caller's shared owner label. */
     for(unsigned fault=0;fault<5;++fault){

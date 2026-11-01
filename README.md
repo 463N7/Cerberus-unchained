@@ -9,7 +9,7 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev121`, paired with onboard
+**Current source version: `0.1.0-dev.rev122`, paired with onboard
 C5 protocol firmware revision 69. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -40,6 +40,18 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev122 implements integrated GPS DATA and received-NMEA views, independent GGA
+metadata freshness and retained UART cleanup. GPS remains optional and OFF
+unless selected through Wardriving. Focused checks and independent reviews
+pass, including stable paging, whole-line privacy masking and retained UART
+cleanup. All 130 host suites, five native builds, the linked resource audit and
+matched package verification pass. Measured S3 fixed data/BSS grows by 128 bytes;
+the optional trace and display copy use 2,624 bytes of PSRAM, excluding allocator
+overhead. C5 fixed data/BSS is unchanged. See
+[rev122](docs/DUAL_RADIO_REV122.md). No GPS module is attached, and rev113 remains
+the last verified installed build. This is not a full-parity or physical
+acceptance claim.
 
 Rev121 implements C5 receive cleanup and Channel Survey handoffs. Independent
 review, all 128 host suites, five native builds, resource measurements and

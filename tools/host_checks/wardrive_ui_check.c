@@ -38,6 +38,9 @@ enum { CERBERUS_STORAGE_OWNER_USB=2 };
 static esp_err_t draw_detail_page(void);
 static void wardrive_recent_open(void){++recent_opens;}
 static bool wardrive_recent_is_open(void){return recent_is_open;}
+static void wardrive_gps_view_open(void){}
+static bool wardrive_gps_view_is_open(void){return false;}
+static void wardrive_gps_view_release_if_hidden(uint32_t now_ms,bool asleep){(void)now_ms;(void)asleep;}
 static unsigned cerberus_storage_get_owner(void){return storage_owner;}
 cerberus_s3_ble_owner_t cerberus_s3_ble_host_owner(void){return host_owner;}
 static void return_to_launcher(void){++launcher_returns;current_page=0;}
@@ -112,7 +115,7 @@ static void save(const char *prefix,const char *name)
 }
 static void check_views(const char *prefix)
 {
-    reset();draw();CHECK(!strcmp(lines[80],"GPS OFF / UNLOC CSV"));
+    reset();draw();CHECK(!strcmp(lines[80],"GPS DATA > OFF / UNLOC CSV"));
     CHECK(!strcmp(lines[178],"PROBE WAIT / BLE HINTS 0")&&strstr(drawn,"START\n"));save(prefix,"idle-no-gps");
     runtime=(cerberus_wardrive_status_t){.state=CERBERUS_WARDRIVE_RUNNING,.c5_wifi_sweeps=12,.c5_wifi_observations=96,
         .s3_ble_sweeps=9,.s3_ble_observations=173,.s3_ble_flock_observations=23,
@@ -140,11 +143,11 @@ static void check_views(const char *prefix)
     runtime=(cerberus_wardrive_status_t){.state=CERBERUS_WARDRIVE_RUNNING,.gps_requested=true,
         .gps={.state=CERBERUS_WARDRIVE_GPS_FRESH,.utc_valid=true},.expansion_present_mask=0x3f};
     wardrive_gps_enabled=wardrive_include_expansions=true;draw();
-    CHECK(!strcmp(lines[80],"GPS FIX + UTC / WIGLE CSV"));
+    CHECK(!strcmp(lines[80],"GPS DATA > FIX + UTC / WIGLE CSV"));
     CHECK(!strcmp(lines[240],"EXPANSION R1-R6: 6 ONLINE"));save(prefix,"gps-format-preview");
-    runtime.gps.utc_valid=false;draw();CHECK(!strcmp(lines[80],"GPS FIX / UTC UNVERIFIED"));
-    runtime.gps.state=CERBERUS_WARDRIVE_GPS_STALE;draw();CHECK(!strcmp(lines[80],"GPS FIX STALE / UNLOC CSV"));
-    runtime.gps_error=ESP_FAIL;draw();CHECK(!strcmp(lines[80],"GPS UART ERROR / UNLOC CSV"));
+    runtime.gps.utc_valid=false;draw();CHECK(!strcmp(lines[80],"GPS DATA > FIX / UTC UNVERIFIED"));
+    runtime.gps.state=CERBERUS_WARDRIVE_GPS_STALE;draw();CHECK(!strcmp(lines[80],"GPS DATA > FIX STALE / UNLOC CSV"));
+    runtime.gps_error=ESP_FAIL;draw();CHECK(!strcmp(lines[80],"GPS DATA > UART ERROR / UNLOC CSV"));
 }
 static void check_routes(void)
 {

@@ -75,31 +75,43 @@ Pinned Marauder exposes GPS Data and NMEA Stream in `MenuFunctions.cpp` and
 The latter combines queued receiver sentences with generated GGA/RMC lines;
 it is not uniformly a raw UART stream.
 
-Cerberus already has the optional `wardrive_gps_uart.c` owner,
-`wardrive_gps_core.c` parser and GPS-aware main-firmware logging. It currently
-shows a compact summary and discards complete input lines after parsing.
-A future DATA/NMEA details page can share the existing Wardriving service
-without adding another UART owner or configuration route. Opening the page
-must not implicitly start GPS, radios or logging.
+Local rev122 implements GPS DATA and received-NMEA subviews through the existing
+optional `wardrive_gps_uart.c` owner. Its source work adds independent GGA
+metadata freshness, strict decimal parsing, bounded optional raw-line retention
+and retained cleanup after UART failures. Opening these views does not start
+GPS, radios or logging; the existing Wardriving GPS switch remains the single
+configuration route. Implementation, focused checks and independent reviews
+are complete. All 130 host suites, five native builds, the linked resource
+audit and matched package verification pass. The audit measures 128 additional
+S3 fixed data/BSS bytes and 2,624 optional PSRAM bytes for the trace/UI copy
+before allocator overhead; C5 fixed data/BSS is unchanged. These are not
+runtime heap, stack, latency or receiver-loss guarantees. See
+[the milestone](DUAL_RADIO_REV122.md) and
+[adapter semantics](WARDRIVE_GPS_ADAPTER.md).
 
-Before richer presentation, distinguish unknown and stale data:
+Receipt time is UART read completion, not GNSS fix time or synchronized radio
+capture time. Internal ABSENT means no recent checksum-valid input, not proof
+of missing hardware. Parser freshness and WiGLE row eligibility remain different
+limits. The trace reports parser overflow and history eviction, not loss before
+the UART reader. Full-byte retention does not establish valid NMEA. Location
+visibility defaults hidden and omits entire raw payloads, including unknown or
+malformed lines; it is separate from address-display preferences.
 
-- GGA satellites and HDOP need their own validity/age; empty fields currently
-  become zero, while a later RMC can refresh location without refreshing GGA.
-  HDOP must not be labelled accuracy in metres.
-- The uninitialized UART status path leaves UTC age at zero; other absent/OFF
-  paths use `UINT32_MAX`. A zero must not be displayed as fresh evidence.
-- No recent checksum-valid input does not establish physical hardware absence.
-- Parser fix freshness and WiGLE row eligibility use different age limits.
-  Receiver status is not proof that a particular observation may be geotagged.
+Paging preserves a stable copy and identifies receipt ages as ages at copy.
+Hiding a paused copy erases its raw bytes; LIVE must obtain a new copy before
+those bytes can be shown again. Sequence exhaustion stops trace publication
+without stopping the parser, and a new receiver epoch clears the ring. Exact
+observer End retains its token on timeout and retries at a 250 ms UI cadence;
+observer mutex attempts are bounded at 25 ms. These are wait/pacing policies,
+not measured response times or guaranteed cleanup deadlines. UART-driver
+cleanup remains with the existing Wardriving worker and holds STOPPING until
+released; no new UART owner is introduced.
 
-A bounded optional trace should preserve complete input bytes, sequence,
-receipt time and parser outcome without per-line allocations. Invalid/overflow
-and discarded-history counts should be explicit. Raw coordinate-bearing lines
-need whole-line masking under privacy settings. UART receipt time is neither
-GNSS fix time nor synchronized radio capture time. Standalone GPS acquisition,
-PPS, POI, geofencing and tracker controls require separate work. No GPS module
-or six-C5 backboard has been physically accepted.
+Standalone acquisition, upstream generated-sentence/serial behavior, richer
+receiver metadata, PPS, POI, geofencing and tracker controls remain open. No GPS
+module or six-C5 backboard has been physically accepted. Rev122 is a local
+candidate, not evidence of live receiver or geotagged-file acceptance. Rev113
+remains the last verified installed build, and GPS/NMEA parity remains partial.
 
 ## BLE persistence and external analysis
 

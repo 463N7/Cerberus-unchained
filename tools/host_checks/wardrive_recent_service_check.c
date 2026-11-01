@@ -42,6 +42,8 @@ static int xTaskCreate(void (*)(void *), const char *, unsigned, void *, unsigne
 static int64_t clock_us;
 static unsigned lock_depth, allocations, frees, task_creates, sd_calls, sd_appends;
 static unsigned rf_starts, status_polls, gps_calls, wifi_reads, ble_copies;
+static unsigned gps_stop_calls, gps_stop_failures, gps_cleanup_checks;
+static bool inspect_gps_cleanup;
 static unsigned fail_alloc_at, stop_after_append, fail_append_at;
 static unsigned wifi_start_calls;
 static esp_err_t wifi_first_start_error;
@@ -201,7 +203,21 @@ size_t field_survey_stream_read(expansion_record_t *out,size_t cap,uint32_t *ove
     uint32_t *invalid,uint16_t *pending,uint32_t by_slot[6])
 { size_t n=field_survey_stream_pop(&stream,out,cap); *overflow=*invalid=0; *pending=stream.count; memset(by_slot,0,6*sizeof(*by_slot)); return n; }
 esp_err_t cerberus_wardrive_gps_uart_start(void) { ++gps_calls; return ESP_OK; }
-esp_err_t cerberus_wardrive_gps_uart_stop(void) { ++gps_calls; return ESP_OK; }
+esp_err_t cerberus_wardrive_gps_uart_stop(void)
+{
+    ++gps_calls; ++gps_stop_calls;
+    if (inspect_gps_cleanup) {
+        CHECK(!lock_depth && worker_active && workspace);
+        CHECK(wardrive_status.state==CERBERUS_WARDRIVE_STOPPING);
+        CHECK(!storage_owned && !storage_open[0] && !storage_open[1]);
+        CHECK(!passive_source.attached);
+        CHECK(cerberus_wardrive_start(false,false)==ESP_ERR_INVALID_STATE);
+        if (gps_stop_calls>1U) CHECK(wardrive_status.gps_error!=ESP_OK);
+        ++gps_cleanup_checks;
+    }
+    if (gps_stop_failures) { --gps_stop_failures; return ESP_ERR_TIMEOUT; }
+    return ESP_OK;
+}
 void cerberus_wardrive_gps_uart_snapshot(cerberus_wardrive_gps_snapshot_t *out,esp_err_t *error)
 { ++gps_calls; *out=gps_source; if(error)*error=ESP_OK; }
 esp_err_t cerberus_storage_wardrive_session_begin(void)
@@ -249,6 +265,7 @@ static void reset(void)
     memset(wifi_source,0,sizeof(wifi_source)); memset(ble_source,0,sizeof(ble_source));
     memset(ble_evidence,0,sizeof(ble_evidence));
     allocations=frees=task_creates=sd_calls=sd_appends=rf_starts=status_polls=gps_calls=0;
+    gps_stop_calls=gps_stop_failures=gps_cleanup_checks=0;inspect_gps_cleanup=false;
     wifi_reads=ble_copies=fail_alloc_at=stop_after_append=fail_append_at=wifi_start_calls=0;
     fail_task=immediate_task=inspect_pending=inspect_free=storage_owned=auto_complete=enqueue_on_start=false;
     status_error=session_error=append_error=begin_error=copy_error=ESP_OK;
