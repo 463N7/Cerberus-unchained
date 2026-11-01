@@ -1,10 +1,14 @@
 # Recon live inventory and activity
 
-This guide describes the current source, including the rev124 field dashboard.
+This guide describes the current source, including the rev124 field dashboard
+and rev126 priority/navigation changes.
 The verified installed pair is rev124/C5 firmware69. Paired boot is confirmed;
-physical dashboard interaction and SD recording acceptance remain pending.
+the owner reports its dashboard works, but requested clearer Radar navigation
+and priorities. Rev126 controls, SD recording and detailed physical acceptance
+remain pending.
 Validation and installation evidence are recorded in
-[the rev124 checkpoint](DUAL_RADIO_REV124.md).
+[the rev124 checkpoint](DUAL_RADIO_REV124.md) and
+[rev126 follow-up](DUAL_RADIO_REV126.md).
 The earlier contribution's evidence remains in [CONTRIBUTION_REV93.md](CONTRIBUTION_REV93.md).
 
 Recon retains a generic live inventory from the existing C5 Wi-Fi and S3 BLE
@@ -16,25 +20,38 @@ the view.
 
 ## Field dashboard
 
-The dashboard replaces the live mascot. It displays the C5 Wi-Fi and S3 BLE
+The dashboard replaces the live mascot. Visible **DASHBOARD** and **RADAR**
+tabs select the view directly from the main Recon page. It displays the C5 Wi-Fi and S3 BLE
 states separately, SD recording state, recent list changes, and four retained
 observations per page. A repeated observation refreshes its typed-address row
 instead of appending another dashboard row. Category accents have text labels
 and classification confidence; color does not represent danger or authenticated
-identity. Unclassified observations remain visible.
+identity. Classified hints appear before ordinary observations, with higher
+confidence first and then the newest first accepted inventory copy in each tier
+(not an inferred physical arrival time).
+Repeated sweep refreshes do not reorder those identities. New observations,
+expiry or changed classification can change the order. Ordinary observations
+remain available on later pages and in Nearby Inventory. A row's first line
+shows its category/confidence; its context and details preserve source evidence.
 
 The compact activity display covers the latest 32 one-second inventory
-buckets, labelled **ADDED** and **EXPIRED**. These are retained-list changes,
+buckets, labelled **ALL LIST CHANGES**, **ADDED** and **EXPIRED**. These are retained-list changes,
 not packet rates or physical movement. The full Activity page still provides
 the existing 64-bucket view. The dashboard refreshes periodically every 500 ms
 and on changed data or touch input; the old animated-art loop is not used.
 
-**Options → VIEW** selects the dashboard or an optional radar-style signal
-overview. The alternate view uses numbered list slots and retained RSSI,
+The main **RADAR** tab opens a signal overview; **DASHBOARD** returns to the
+priority list. **Options → VIEW** also remains available. The alternate view uses numbered list slots and retained RSSI,
 with a dBm scale. It does not show compass bearings, distance, geographic
 position or fabricated detections. Its numbered observations open the same
 frozen details as the dashboard list. Back returns to the originating view.
 Back, Pause/Resume, Log and Options remain available in both views.
+
+Category preferences use **OFF**, **HISTORY ONLY** and **ALERT**. The old
+ANIMATED ALERT wording is removed. Current S3 Meta identifier evidence can now
+produce a low-confidence **META HINT** row and use these same preferences.
+It is not a confirmed glasses/model detection; see
+[the exact projection contract](WATCH_SIGNATURES.md#recon-meta-identifier-projection-rev126).
 
 SD recording still starts explicitly in Options and uses the same recorder;
 switching visual mode does not create another log or radio session. The

@@ -80,6 +80,8 @@ typedef enum {
     SENTINEL_WATCH_ACTION_ROW_1,
     SENTINEL_WATCH_ACTION_ROW_2,
     SENTINEL_WATCH_ACTION_ROW_3,
+    SENTINEL_WATCH_ACTION_DASHBOARD,
+    SENTINEL_WATCH_ACTION_RADAR,
 } sentinel_watch_action_t;
 
 /* Owns the complete 320x480 screen. Call draw on entry, update on UI ticks.
@@ -89,7 +91,9 @@ typedef enum {
  * periodic refresh to500ms, with immediate touch redraws. The caller freezes
  * row proofs first, publishes their tap map only after a successful paint, and
  * presents the composed frame on the same UI task. now_ms is API compatibility.
- * Dashboard rows: x8,y178,49px spacing,46px active height. Radar legend rows:
+ * Main view tabs: Dashboard x100,w124 and Radar x232,w80, y4,h38. Changing
+ * view never changes the source session or SD recording. Dashboard rows:
+ * x8,y178,49px spacing,46px active height. Radar legend rows:
  * x8,y304,18px spacing. Prev/Next: x8/244,y378,w68,h27.
  * Buttons y426,h44: Back x8,w68; Pause/Resume x84,w68; History x160,w68;
  * Options/Next x236,w76 (legacy ACTION_DEMO id). Demo disables Pause and

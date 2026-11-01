@@ -3,9 +3,29 @@
 static const char *watch_dashboard_category(uint8_t category)
 {
     static const char *const labels[]={"UNCLASSIFIED","AXON","FLOCK","WELLNESS",
-        "FIND MY","TRACKER","CAMERA","GLASSES DEMO","FLIPPER",
+        "FIND MY","TRACKER","CAMERA","META HINT","FLIPPER",
         "MESHTASTIC","SAMSUNG","BEACON","PWNAGOTCHI","DRONE ID","BLE ACTIVITY"};
     return category<sizeof(labels)/sizeof(labels[0])?labels[category]:"UNCLASSIFIED";
+}
+static bool watch_dashboard_recognized(const cerberus_recon_record_t *r)
+{
+    /* A presentation predicate over committed classifications, not a detector.
+     * Demo scenes never enter this model. Meta requires the separate bound
+     * existing-evidence adapter before it can become a committed record. */
+    return r->classified && r->category > SENTINEL_WATCH_NONE &&
+        r->category < SENTINEL_WATCH_CATEGORY_COUNT;
+}
+static bool watch_dashboard_before(const cerberus_recon_inventory_t *model, uint8_t a, uint8_t b)
+{
+    const cerberus_recon_inventory_entry_t *left=&model->entries[a], *right=&model->entries[b];
+    const bool left_hint=watch_dashboard_recognized(&left->record), right_hint=watch_dashboard_recognized(&right->record);
+    if(left_hint!=right_hint)return left_hint;
+    if(left_hint&&left->record.confidence!=right->record.confidence)
+        return left->record.confidence>right->record.confidence;
+    /* Refreshing an existing identity must not shuffle it between sources.
+     * New retained identities sort first within their priority/confidence tier. */
+    if(left->first_consumed_us!=right->first_consumed_us)return left->first_consumed_us>right->first_consumed_us;
+    return a<b;
 }
 static void watch_dashboard_prepare(uint64_t now_us)
 {
@@ -17,6 +37,13 @@ static void watch_dashboard_prepare(uint64_t now_us)
     memset(d,0,sizeof(*d));watch_view.dashboard=d;
     uint8_t indexes[CERBERUS_RECON_INVENTORY_CAPACITY];
     size_t total=cerberus_recon_inventory_indexes(&store->model,CERBERUS_RECON_INVENTORY_ALL,indexes,sizeof(indexes));
+    for(size_t i=1;i<total;++i){
+        uint8_t index=indexes[i];size_t at=i;
+        while(at&&watch_dashboard_before(&store->model,index,indexes[at-1])){
+            indexes[at]=indexes[at-1];--at;
+        }
+        indexes[at]=index;
+    }
     if((size_t)store->dashboard_page*4>=total)store->dashboard_page=0;
     d->total=(uint8_t)total;d->page=store->dashboard_page;d->pages=(uint8_t)(total?(total+3)/4:1);
     store->painted_total=total;
@@ -41,9 +68,10 @@ static void watch_dashboard_prepare(uint64_t now_us)
         else snprintf(row->identity,sizeof(row->identity),"%.17s CH? %.8s",address,signal);
         const char *confidence=r->confidence==SENTINEL_WATCH_CONFIDENCE_HIGH?"HIGH":
             r->confidence==SENTINEL_WATCH_CONFIDENCE_MEDIUM?"MED":"LOW";
-        if(r->classified)snprintf(row->hint,sizeof(row->hint),"%s / %s",watch_dashboard_category(r->category),confidence);
-        else snprintf(row->hint,sizeof(row->hint),"UNCLASSIFIED");
-        row->scene=r->classified?watch_scene((sentinel_watch_category_t)r->category):SENTINEL_WATCH_SCENE_GUARDIAN;
+        bool recognized=watch_dashboard_recognized(r);
+        if(recognized)snprintf(row->hint,sizeof(row->hint),"%s / %s",watch_dashboard_category(r->category),confidence);
+        else snprintf(row->hint,sizeof(row->hint),"OTHER OBSERVATION");
+        row->scene=recognized?watch_scene((sentinel_watch_category_t)r->category):SENTINEL_WATCH_SCENE_GUARDIAN;
         row->rssi=r->rssi;row->rssi_valid=r->rssi_valid;
         uint64_t age=0;
         if(!cerberus_recon_inventory_entry_age(e,now_us,&age))snprintf(row->age,sizeof(row->age),"AGE UNKNOWN");

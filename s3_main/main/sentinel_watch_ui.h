@@ -1,6 +1,7 @@
 /* Private integration on the existing UI task. C5 Wi-Fi and S3 BLE each own
  * one bounded passive sweep and can run at the same time. */
 #include "recon_recorder.h"
+#include "sentinel_watch_meta.h"
 typedef enum { WATCH_LIVE, WATCH_HISTORY, WATCH_DETAILS, WATCH_FILTERS, WATCH_WHY,
     WATCH_OPTIONS, WATCH_ACTIONS, WATCH_SIGNAL, WATCH_INVENTORY,
     WATCH_INVENTORY_DETAIL, WATCH_INVENTORY_ACTIVITY } watch_page_t;
@@ -85,7 +86,7 @@ static void watch_inventory_open(void)
 static const sentinel_watch_category_t watch_categories[] = {
     SENTINEL_WATCH_AXON, SENTINEL_WATCH_FLOCK, SENTINEL_WATCH_WELLNESS,
     SENTINEL_WATCH_FINDMY, SENTINEL_WATCH_TRACKER, SENTINEL_WATCH_CAMERA,
-    SENTINEL_WATCH_FLIPPER, SENTINEL_WATCH_MESHTASTIC, SENTINEL_WATCH_SAMSUNG,
+    SENTINEL_WATCH_SMART_GLASSES, SENTINEL_WATCH_FLIPPER, SENTINEL_WATCH_MESHTASTIC, SENTINEL_WATCH_SAMSUNG,
     SENTINEL_WATCH_BEACON, SENTINEL_WATCH_PWNAGOTCHI, SENTINEL_WATCH_DRONE,
     SENTINEL_WATCH_BLE_ACTIVITY,
 };
@@ -458,6 +459,14 @@ static bool watch_consume_radio(sentinel_scan_tool_t tool, uint32_t now)
                 observation.advertisement_flags = watch_advertisements[i].flags;
             }
             detected = sentinel_watch_classify_ble(&observation, &match);
+            if (!detected && watch_raw_supported() && live_ble_evidence) {
+                const cerberus_findmy_monitor_record_t *frozen = &live_ble_evidence[i];
+                if (frozen->generation == record->saved_generation && frozen->index == i &&
+                    frozen->peer.address_type == row->address_type && !memcmp(frozen->peer.address, row->address, 6U))
+                    detected = sentinel_watch_project_meta(&frozen->focus, &frozen->advertisement, row,
+                        record->saved_generation, frozen->observed_ms, live_ble_capture_epoch,
+                        live_ble_lease_epoch, &match);
+            }
             if (detected && match.category == SENTINEL_WATCH_DRONE && watch_extra_has_drone(row->address, row->address_type)) {
                 watch_record_observation(tool, i, &match, CERBERUS_RECON_ALERT_NOT_EVALUATED);
                 continue; /* The richer same-sweep record below owns this alert. */
@@ -609,7 +618,7 @@ static esp_err_t watch_draw_filters(void)
     ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(0, 0, 320, 480, UI_BACKGROUND), TAG, "watch filters clear");
     ESP_RETURN_ON_ERROR(draw_header("RECON CATEGORIES"), TAG, "watch filters header");
     ESP_RETURN_ON_ERROR(draw_centered(64, "TAP: ALERT > OFF > HISTORY > ALERT", UI_MUTED, 1), TAG, "watch filters help");
-    static const char *const modes[] = {"OFF", "HISTORY ONLY", "ANIMATED ALERT"};
+    static const char *const modes[] = {"OFF", "HISTORY ONLY", "ALERT"};
     for (size_t row = 0; row < 4; ++row) {
         size_t index = watch_filters_page * 4U + row;
         if (index >= WATCH_FILTER_COUNT) break;
@@ -653,8 +662,9 @@ static esp_err_t watch_draw_why(void)
         }
         lines[2] = "The exact camera model is unknown."; lines[3] = "This cannot reveal recording status."; lines[4] = "Other camera brands need their own rule."; break;
     case SENTINEL_WATCH_SMART_GLASSES:
-        lines[0] = "Smart glasses is an art preview."; lines[1] = "There is no live detection rule yet.";
-        lines[2] = "Shared vendor codes also appear on"; lines[3] = "other products, so they cannot confirm"; lines[4] = "that smart glasses are nearby."; break;
+        lines[0] = "A Meta-related identifier was seen."; lines[1] = "It appeared in this original BLE";
+        lines[2] = "advertisement, with its field context."; lines[3] = "Other products may share these IDs.";
+        lines[4] = "Glasses, model and recording unknown."; break;
     case SENTINEL_WATCH_FLIPPER:
         lines[0] = "Flipper's Bluetooth service and name"; lines[1] = "appeared together in an advertisement.";
         lines[2] = "Custom firmware can change these."; lines[3] = "Bluetooth must be advertising."; lines[4] = "Presence does not establish misuse."; break;
@@ -900,7 +910,10 @@ static void watch_handle_tap(uint16_t x, uint16_t y)
         }
     } else {
         sentinel_watch_action_t action = sentinel_watch_view_hit_test(&watch_view, x, y);
-        if (action>=SENTINEL_WATCH_ACTION_PREV&&action<=SENTINEL_WATCH_ACTION_ROW_3) {
+        if (action == SENTINEL_WATCH_ACTION_DASHBOARD || action == SENTINEL_WATCH_ACTION_RADAR) {
+            watch_radar = action == SENTINEL_WATCH_ACTION_RADAR;
+            if (recon_inventory_ui) recon_inventory_ui->paint_valid = false;
+        } else if (action>=SENTINEL_WATCH_ACTION_PREV&&action<=SENTINEL_WATCH_ACTION_ROW_3) {
             if(!watch_dashboard_tap(action))return;
         } else if (action == SENTINEL_WATCH_ACTION_BACK) {
             {

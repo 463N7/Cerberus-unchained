@@ -9,7 +9,7 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev125`, paired with onboard
+**Current source version: `0.1.0-dev.rev126`, paired with onboard
 C5 protocol firmware revision 69. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -41,6 +41,15 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 
 ## Development status
 
+Rev126 implements owner feedback on Recon: recognized hints appear first in a
+stable list, Dashboard/Radar are visible main tabs, and category controls say
+ALERT. Current accepted S3 Meta identifier hints now reach Recon at LOW
+confidence, with no glasses/model claim. All 136 host suites and five native
+targets pass on 1,120 unchanged inputs; independent review and the linked
+resource audit pass. The Recon model/view sizes remain unchanged. Matched
+packaging is next. See
+[rev126](docs/DUAL_RADIO_REV126.md). Installed firmware remains rev124.
+
 Rev125 implements offline Marauder AP JSON and SSID text import, details,
 copy saving and export from native combined S3/C5 Wi-Fi reports. It preserves
 optional-field presence, duplicates, station lists and name bytes, maps security
@@ -48,7 +57,8 @@ values explicitly and reports format information loss. All 136 host suites and
 five native targets pass on 1,118 unchanged inputs. The linked resource audit
 measures 32 additional fixed S3 bytes; existing Recon, scan and archive
 allocations are unchanged, with optional interchange costs tracked separately.
-Matched packaging is next; the installed pair remains rev124.
+The matched local rev125 package is finalized but was not installed while Recon
+feedback is addressed. The installed pair remains rev124.
 See [rev125](docs/DUAL_RADIO_REV125.md) and
 [the interchange contract](docs/WIFI_MARAUDER_INTERCHANGE.md).
 

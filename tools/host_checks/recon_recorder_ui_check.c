@@ -150,10 +150,7 @@ bool sentinel_watch_classify_ble(const sentinel_watch_ble_observation_t *row, se
     *match = (sentinel_watch_match_t){row->name[0] == 'D' ? SENTINEL_WATCH_DRONE : SENTINEL_WATCH_CAMERA,
         SENTINEL_WATCH_CONFIDENCE_HIGH, "fixture.ble", "Bluetooth hint", "Synthetic test hint"}; return true;
 }
-const char *sentinel_watch_category_name(sentinel_watch_category_t category)
-{ (void)category; return "CATEGORY"; }
-const char *sentinel_watch_confidence_name(sentinel_watch_confidence_t confidence)
-{ (void)confidence; return "HIGH"; }
+#include "recon_category_labels.h"
 
 esp_err_t cerberus_s3_ble_scanner_get_advertisement(uint8_t generation, uint8_t index,
     cerberus_c5_ble_advertisement_t *out)
@@ -715,7 +712,7 @@ static void test_dashboard(const char *directory)
     clear_dashboard_text();CHECK(watch_draw(6000,true)==ESP_OK);
     CHECK(watch_view.dashboard&&watch_view.dashboard->total==6&&watch_view.dashboard->pages==2&&watch_view.dashboard->count==4);
     CHECK(watch_view.dashboard->added[0]==32&&watch_view.dashboard->added[31]==63&&watch_view.dashboard->expired[31]==1);
-    CHECK(strstr(painted_text,"RECON / DASHBOARD")&&strstr(painted_text,"LIST CHANGES / LAST 32 SECONDS"));
+    CHECK(strstr(painted_text,"DASHBOARD")&&strstr(painted_text,"RADAR")&&strstr(painted_text,"ALL LIST CHANGES / LAST 32 SECONDS"));
     CHECK(strstr(painted_text,"SD: RECORDING / 128 ROWS")&&strstr(painted_text,"C5 / WI-FI")&&strstr(painted_text,"S3 / BLUETOOTH LE"));
     CHECK(!strstr(painted_text,"SCENE GALLERY")&&!strstr(painted_text,"DEMO ART"));
     CHECK(recon_inventory_ui->paint_valid&&status_calls==getters&&start_calls==starts&&stop_calls==stops&&offer_count==offers);
@@ -758,7 +755,7 @@ static void test_dashboard(const char *directory)
     recon_inventory_ui->model.entries[32].age_source_kind=CERBERUS_RECON_SOURCE_S3_CALLBACK_US;
     clear_dashboard_text();CHECK(watch_draw(5000,true)==ESP_OK);
     CHECK(strstr(painted_text,"CH?")&&strstr(painted_text,"CAMERA / HIGH")&&!strstr(painted_text,"GOPRO"));
-    static cerberus_recon_record_t displayed[64];unsigned used=0;
+    static cerberus_recon_record_t displayed[64];unsigned used=0;bool saw_callback_age=false;
     for(unsigned page=0;page<16;++page){
         CHECK(recon_inventory_ui->dashboard_page==page&&watch_view.dashboard->total==64&&watch_view.dashboard->pages==16);
         CHECK(recon_inventory_ui->paint_valid&&recon_inventory_ui->painted_count==4);
@@ -768,10 +765,11 @@ static void test_dashboard(const char *directory)
                 CHECK(r->radio!=displayed[previous].radio||r->address_type!=displayed[previous].address_type||memcmp(r->address,displayed[previous].address,6));
             displayed[used++]=*r;
         }
-        if(page==8)CHECK(strstr(recon_inventory_ui->dashboard.rows[0].age,"RX "));
+        for(unsigned row=0;row<recon_inventory_ui->painted_count;++row)
+            if(strstr(recon_inventory_ui->dashboard.rows[row].age,"RX "))saw_callback_age=true;
         clear_dashboard_text();watch_handle_tap(270,388);
     }
-    CHECK(used==64&&recon_inventory_ui->dashboard_page==15);
+    CHECK(used==64&&recon_inventory_ui->dashboard_page==15&&saw_callback_age);
     save_preview(directory,"dashboard-full64-final-page");
     watch_page=WATCH_OPTIONS;CHECK(recon_handle_control_tap(164,278,5000)&&watch_radar);watch_handle_tap(100,440);
     clear_dashboard_text();CHECK(watch_draw(5000,true)==ESP_OK);painted_calls=calls;
@@ -801,11 +799,144 @@ static void test_dashboard(const char *directory)
     watch_handle_tap(20,440);CHECK(current_page==UI_PAGE_MENU);
 }
 
+static void test_dashboard_priority(const char *directory)
+{
+    seed();watch_inventory_open();bank(SENTINEL_SCAN_WIFI,32);bank(SENTINEL_SCAN_BLE,32);CHECK(watch_consume(5000));
+    /* Existing committed classifier results are the only input to presentation.
+     * This fixture supplies controlled categories, not additional signatures. */
+    static const uint8_t slots[]={42,5,47,0,32,31};
+    static const uint8_t categories[]={SENTINEL_WATCH_FINDMY,SENTINEL_WATCH_FLOCK,SENTINEL_WATCH_AXON,
+        SENTINEL_WATCH_CAMERA,SENTINEL_WATCH_CAMERA,SENTINEL_WATCH_TRACKER};
+    for(unsigned i=0;i<6;++i){
+        cerberus_recon_inventory_entry_t *e=&recon_inventory_ui->model.entries[slots[i]];
+        e->record.classified=true;e->record.category=categories[i];
+        e->record.confidence=i<4?SENTINEL_WATCH_CONFIDENCE_HIGH:i==4?SENTINEL_WATCH_CONFIDENCE_MEDIUM:SENTINEL_WATCH_CONFIDENCE_LOW;
+        snprintf(e->record.rule,sizeof(e->record.rule),"fixture.category.%u",i);
+        e->first_consumed_us=UINT64_C(4800000)-i*100000U;
+    }
+    /* Ordinary rows are much more recently refreshed, but do not displace a
+     * recognized hint. Graph/counters retain every ordinary observation. */
+    for(unsigned i=0;i<64;++i)recon_inventory_ui->model.entries[i].last_consumed_us=UINT64_C(5000000)+i;
+    static cerberus_recon_inventory_t unchanged;
+    unchanged=recon_inventory_ui->model;
+    unsigned before_starts=start_calls,before_stops=stop_calls,before_getters=status_calls,before_offers=(unsigned)offer_count;
+    clear_dashboard_text();CHECK(watch_draw(6000,true)==ESP_OK);
+    CHECK(!memcmp(&unchanged,&recon_inventory_ui->model,sizeof(unchanged)));
+    CHECK(watch_view.dashboard->total==64&&watch_view.dashboard->pages==16);
+    for(unsigned i=0;i<4;++i)CHECK(!memcmp(&recon_inventory_ui->painted[i],&unchanged.entries[slots[i]],sizeof(recon_inventory_ui->painted[i])));
+    CHECK(strstr(painted_text,"FIND MY / HIGH")&&strstr(painted_text,"FLOCK / HIGH")&&strstr(painted_text,"AXON / HIGH")&&strstr(painted_text,"CAMERA / HIGH"));
+    CHECK(strstr(painted_text,"HINTS FIRST / TAP A ROW FOR DETAILS"));save_preview(directory,"dashboard-priority");
+    cerberus_recon_record_t order[4];for(unsigned i=0;i<4;++i)order[i]=recon_inventory_ui->painted[i].record;
+    for(unsigned i=0;i<64;++i)recon_inventory_ui->model.entries[i].last_consumed_us=UINT64_C(5999000)+(63U-i);
+    clear_dashboard_text();CHECK(watch_draw(6000,true)==ESP_OK);
+    for(unsigned i=0;i<4;++i)CHECK(!memcmp(&order[i],&recon_inventory_ui->painted[i].record,sizeof(order[i])));
+    CHECK(start_calls==before_starts&&stop_calls==before_stops&&status_calls==before_getters&&offer_count==before_offers);
+
+    /* View tabs are visible, idempotent, bounded and do not alter radio/SD
+     * ownership, page number, model, or the frozen selection destination. */
+    CHECK(sentinel_watch_view_hit_test(&watch_view,100,4)==SENTINEL_WATCH_ACTION_DASHBOARD);
+    CHECK(sentinel_watch_view_hit_test(&watch_view,223,41)==SENTINEL_WATCH_ACTION_DASHBOARD);
+    CHECK(sentinel_watch_view_hit_test(&watch_view,232,4)==SENTINEL_WATCH_ACTION_RADAR);
+    CHECK(sentinel_watch_view_hit_test(&watch_view,311,41)==SENTINEL_WATCH_ACTION_RADAR);
+    CHECK(sentinel_watch_view_hit_test(&watch_view,224,20)==SENTINEL_WATCH_ACTION_NONE);
+    CHECK(sentinel_watch_view_hit_test(&watch_view,231,20)==SENTINEL_WATCH_ACTION_NONE);
+    CHECK(sentinel_watch_view_hit_test(&watch_view,250,42)==SENTINEL_WATCH_ACTION_NONE);
+    unchanged=recon_inventory_ui->model;
+    watch_handle_tap(270,20);CHECK(watch_radar&&watch_page==WATCH_LIVE&&recon_inventory_ui->dashboard_page==0);
+    CHECK(!memcmp(&unchanged,&recon_inventory_ui->model,sizeof(unchanged)));
+    CHECK(strstr(painted_text,"RADAR")&&strstr(painted_text,"DASHBOARD")&&strstr(painted_text,"NO BEARING OR DISTANCE"));
+    save_preview(directory,"radar-priority");watch_handle_tap(270,20);CHECK(watch_radar);
+    watch_handle_tap(140,20);CHECK(!watch_radar);watch_handle_tap(140,20);CHECK(!watch_radar);
+    /* The compact title fallback keeps a long category, large age and full
+     * signed signal readable; no truncation is used to make the row fit. */
+    strcpy(recon_inventory_ui->dashboard.rows[0].hint,"BLE ACTIVITY / HIGH");
+    strcpy(recon_inventory_ui->dashboard.rows[0].age,"COPY 999999s");
+    clear_dashboard_text();CHECK(sentinel_watch_view_draw(&watch_view,6000)==ESP_OK);
+    CHECK(strstr(painted_text,"BLE ACTIVITY / HIGH")&&strstr(painted_text,"COPY 999999s"));
+    CHECK(watch_draw(6000,true)==ESP_OK);
+    watch_handle_tap(270,388);CHECK(recon_inventory_ui->dashboard_page==1);
+    CHECK(recon_inventory_ui->painted[0].record.category==SENTINEL_WATCH_CAMERA&&recon_inventory_ui->painted[0].record.confidence==SENTINEL_WATCH_CONFIDENCE_MEDIUM);
+    CHECK(recon_inventory_ui->painted[1].record.category==SENTINEL_WATCH_TRACKER&&!recon_inventory_ui->painted[2].record.classified);
+    watch_handle_tap(270,388);CHECK(recon_inventory_ui->dashboard_page==2);
+    for(unsigned i=0;i<4;++i)CHECK(!recon_inventory_ui->painted[i].record.classified);
+    CHECK(strstr(painted_text,"OTHER OBSERVATION"));save_preview(directory,"dashboard-ordinary-page");
+    watch_handle_tap(270,20);CHECK(watch_radar&&recon_inventory_ui->dashboard_page==2);
+    watch_handle_tap(140,20);CHECK(!watch_radar&&recon_inventory_ui->dashboard_page==2);
+    CHECK(start_calls==before_starts&&stop_calls==before_stops&&status_calls==before_getters&&offer_count==before_offers);
+    cerberus_recon_inventory_entry_t frozen=recon_inventory_ui->painted[0];
+    memset(&recon_inventory_ui->model.entries[1],0,sizeof(recon_inventory_ui->model.entries[1]));
+    watch_handle_tap(24,184);CHECK(watch_page==WATCH_INVENTORY_DETAIL&&!memcmp(&frozen,&recon_inventory_ui->selected,sizeof(frozen)));
+    watch_handle_tap(100,440);CHECK(watch_page==WATCH_LIVE&&recon_inventory_ui->dashboard_page==2);
+
+    /* Category preference names change only presentation; OFF/HISTORY/ALERT
+     * values and their existing cycle retain the same behavior. */
+    watch_page=WATCH_FILTERS;watch_filters_page=0;clear_dashboard_text();CHECK(watch_draw(6000,true)==ESP_OK);
+    CHECK(strstr(painted_text,"ALERT")&&!strstr(painted_text,"ANIMATED"));save_preview(directory,"categories-alert");
+    sentinel_watch_category_t category=watch_categories[0];
+    sentinel_watch_mode_t mode=sentinel_watch_get_mode(&watch_state,category);
+    watch_handle_tap(24,120);CHECK(sentinel_watch_get_mode(&watch_state,category)==(sentinel_watch_mode_t)((mode+1U)%3U));
+    watch_handle_tap(24,120);watch_handle_tap(24,120);CHECK(sentinel_watch_get_mode(&watch_state,category)==mode);
+    CHECK(start_calls==before_starts&&stop_calls==before_stops&&status_calls==before_getters&&offer_count==before_offers);
+}
+
+static void test_meta_projection_ui(const char *directory)
+{
+    /* Real pure projection over the exact frozen native boundary. Actual
+     * producer/parser combinations have their own snapshot/helper fixture. */
+    for(unsigned variant=0;variant<11;++variant){
+        seed();watch_inventory_open();bank(SENTINEL_SCAN_BLE,2);
+        strcpy(store.ble[0].name,"ordinary BLE");evidence[0].peer=store.ble[0];
+        cerberus_findmy_monitor_record_t *f=&evidence[0];
+        cerberus_s3_ble_discovery_evidence_t *source=&f->focus.discovery;
+        f->focus.category_bits=CERBERUS_S3_BLE_FOCUS_META_HINT;
+        source->flags|=CERBERUS_S3_BLE_EVIDENCE_RAW_COMPLETE;
+        source->raw_advertisement_sequence=source->advertisement_sequence;
+        CHECK(cerberus_ble_meta_evidence_add(&source->meta_advertisement,0xfd5f,CERBERUS_BLE_META_LIST16));
+        f->advertisement.length=4;memcpy(f->advertisement.data,(uint8_t[]){3,3,0x5f,0xfd},4);
+        if(variant==1)++source->raw_advertisement_sequence;
+        if(variant==2){source->meta_scan_response=source->meta_advertisement;memset(&source->meta_advertisement,0,sizeof(source->meta_advertisement));}
+        if(variant==3)f->focus.meta_suppressed=true;
+        if(variant==4)CHECK(cerberus_ble_meta_evidence_add(&source->meta_advertisement,0x004c,CERBERUS_BLE_META_MFG16));
+        if(variant==5)++f->index;
+        if(variant==6)live_ble_lease_epoch+=UINT64_C(0x100000000);
+        if(variant==7)strcpy(store.ble[0].name,"Hint BLE");
+        if(variant==8)++f->observed_ms;
+        if(variant==9)source->address_type^=1;
+        if(variant==10)extra_final_bad=true;
+        unsigned starts=start_calls,stops=stop_calls;
+        bool consumed=watch_consume_radio(SENTINEL_SCAN_BLE,5000);
+        bool fence_failure=variant==5||variant==6||variant==10;
+        CHECK(consumed!=fence_failure);
+        if(fence_failure){CHECK(offer_count==0&&recon_inventory_ui->model.count[1]==0);continue;}
+        CHECK(offer_count==2&&start_calls==starts&&stop_calls==stops);
+        if(variant==0){
+            CHECK(offered[0].classified&&offered[0].category==SENTINEL_WATCH_SMART_GLASSES);
+            CHECK(offered[0].confidence==SENTINEL_WATCH_CONFIDENCE_LOW&&!strcmp(offered[0].rule,"meta.original-id-hint"));
+            CHECK(offered[0].alert_state==CERBERUS_RECON_ALERT_NOT_QUEUED&&notifications==0);
+            clear_dashboard_text();CHECK(watch_draw(5000,true)==ESP_OK);
+            CHECK(strstr(painted_text,"META HINT / LOW")&&!strstr(painted_text,"DEMO"));save_preview(directory,"dashboard-meta-hint");
+            CHECK(recon_inventory_ui->painted[0].record.category==SENTINEL_WATCH_SMART_GLASSES);
+            memset(&evidence[0],0,sizeof(evidence[0]));watch_handle_tap(24,184);
+            CHECK(watch_page==WATCH_INVENTORY_DETAIL&&recon_inventory_ui->selected.record.category==SENTINEL_WATCH_SMART_GLASSES);
+            CHECK(!strcmp(recon_inventory_ui->selected.record.rule,"meta.original-id-hint"));
+            const sentinel_watch_entry_t *entry=sentinel_watch_history(&watch_state,0);CHECK(entry&&entry->match.category==SENTINEL_WATCH_SMART_GLASSES);
+            watch_select_detail(entry);watch_page=WATCH_WHY;clear_dashboard_text();CHECK(watch_draw(5000,true)==ESP_OK);
+            CHECK(strstr(painted_text,"Glasses, model and recording unknown.")&&!strstr(painted_text,"art preview"));save_preview(directory,"meta-hint-why");
+            watch_page=WATCH_FILTERS;watch_filters_page=1;clear_dashboard_text();CHECK(watch_draw(5000,true)==ESP_OK);
+            CHECK(strstr(painted_text,"Meta identifier hint")&&!strstr(painted_text,"demo"));save_preview(directory,"categories-meta-alert");
+            CHECK(watch_categories[6]==SENTINEL_WATCH_SMART_GLASSES);
+            sentinel_watch_mode_t mode=sentinel_watch_get_mode(&watch_state,SENTINEL_WATCH_SMART_GLASSES);
+            watch_handle_tap(24,245);CHECK(sentinel_watch_get_mode(&watch_state,SENTINEL_WATCH_SMART_GLASSES)==(sentinel_watch_mode_t)((mode+1U)%3U));
+        }else if(variant==7){CHECK(offered[0].category==SENTINEL_WATCH_CAMERA&&offered[0].confidence==SENTINEL_WATCH_CONFIDENCE_HIGH);}
+        else CHECK(!offered[0].classified);
+    }
+}
+
 int main(int argc, char **argv)
 {
     CHECK(argc == 2);
     test_accepted_banks(); test_rejected_banks(); test_unfiltered_feed(); test_source_fences();
-    test_controls(argv[1]); test_lifecycle(); test_inventory_integration(); test_dashboard(argv[1]);watch_inventory_release();
+    test_controls(argv[1]); test_lifecycle(); test_inventory_integration(); test_dashboard(argv[1]);test_dashboard_priority(argv[1]);test_meta_projection_ui(argv[1]);watch_inventory_release();
     printf("PASS: %u actual Recon UI/journal adapter assertions.\n", checks);
     return 0;
 }

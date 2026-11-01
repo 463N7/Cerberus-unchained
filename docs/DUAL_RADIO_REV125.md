@@ -3,9 +3,10 @@
 Source version is `0.1.0-dev.rev125`; onboard C5 capability revision remains
 69. Implementation and independent source reviews are complete. All 136 host
 suites and five native targets pass on the same 1,118 unchanged inputs; the
-linked native resource audit also passes. Matched packaging is the next gate.
-The last verified installed pair is [rev124](DUAL_RADIO_REV124.md); no rev125
-installation or physical feature acceptance is claimed at this source checkpoint.
+linked native resource audit also passes. The matched local package is finalized.
+The last verified installed pair is [rev124](DUAL_RADIO_REV124.md); rev125 was
+not installed. Owner feedback on Recon is being addressed in the next revision
+before the next device update.
 
 The milestone adds offline AP JSON and SSID text import, inspection, copy
 saving and export from the native combined S3/C5 saved Wi-Fi report. See
@@ -85,3 +86,14 @@ A read-only GitHub comparison at 2026-11-01 21:37:53 UTC found Marauder
 `develop` identical to `79cc6bcba1db6679baee1dab2b0c1ad5010e6363`.
 The response is retained in
 `artifacts/device-rev125/marauder-develop-check.json`.
+
+## Final local package
+
+Source commit: `df4a89f7a0e1c89f644629ca7d94bdc2d7cf6123`.
+Package: `dist/cerberus-unchained-0.1.0-dev.rev125-20261101T221400Z`.
+Manifest SHA-256:
+`e6ae7d16e53e5650466d3a8ca0afb4ca425e4fd68babb4d7e633b8931aa42013`.
+The immutable `artifacts/device-rev125/local-milestone.json` binds the source,
+all nine matched images, 136-suite host evidence, five-target native evidence
+and the resource audit. No rev125 image was written to the device. No push,
+release or pull request was made.

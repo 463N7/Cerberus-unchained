@@ -12,7 +12,10 @@ The source milestones described below are now included in installed
 [rev124/C5 firmware69](DUAL_RADIO_REV124.md). Rev124 adds native saved Wi-Fi
 observations and the Recon field dashboard. Rev125 implements separate offline
 AP JSON/SSID text interchange; its full validation and installation status are
-tracked in [the rev125 checkpoint](DUAL_RADIO_REV125.md). Verified image writes, paired
+tracked in [the rev125 checkpoint](DUAL_RADIO_REV125.md); that validated package
+was not installed. [Rev126](DUAL_RADIO_REV126.md) adds stable Recon priorities,
+visible Dashboard/Radar tabs and an existing-evidence Meta identifier projection.
+Its build and physical acceptance are tracked separately. Verified image writes, paired
 application boot, display buffering and SD mount establish the installed
 baseline; physical feature acceptance remains separate. The earlier milestone
 documents retain their original source and installation history.

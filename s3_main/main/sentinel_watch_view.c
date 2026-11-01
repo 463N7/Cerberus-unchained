@@ -113,14 +113,27 @@ static esp_err_t draw_signal_radar(const sentinel_watch_dashboard_t *d,unsigned 
     }
     return ESP_OK;
 }
+static esp_err_t draw_view_tabs(const snapshot_t *s)
+{
+    static const unsigned x[]={100,232},width[]={124,80};
+    static const char *const labels[]={"DASHBOARD","RADAR"};
+    for(unsigned i=0;i<2;++i){
+        const bool active=(i!=0)==s->radar;
+        TRY(cerberus_display_fill_rect(x[i],4,width[i],38,PANEL));
+        TRY(cerberus_display_fill_rect(x[i],40,width[i],2,active?CYAN:EDGE));
+        TRY(text(x[i]+(width[i]-strlen(labels[i])*12)/2,16,labels[i],active?WHITE:MUTED,PANEL,2));
+    }
+    return ESP_OK;
+}
 
 static esp_err_t draw_dashboard(const snapshot_t *s,const sentinel_watch_view_t *v)
 {
     const sentinel_watch_dashboard_t *d=v->dashboard;
     char buf[53];
     TRY(cerberus_display_fill_rect(0,0,320,480,BG));
-    TRY(text(12,12,s->radar?"RECON / RADAR":"RECON / DASHBOARD",WHITE,BG,2));
-    const char *badge=s->demo?"PREVIEW / NO LIVE OBSERVATIONS":s->releasing?"PAUSING":s->paused?"PAUSED":"RECEIVE MONITOR";
+    TRY(text(12,10,"RECON",WHITE,BG,2));
+    TRY(draw_view_tabs(s));
+    const char *badge=s->demo?"PREVIEW":s->releasing?"PAUSING":s->paused?"PAUSED":"MONITOR";
     TRY(text(12,33,badge,s->releasing?AMBER:MUTED,BG,1));
     for(unsigned source=0;source<2;++source){
         unsigned x=8+156*source;
@@ -134,7 +147,7 @@ static esp_err_t draw_dashboard(const snapshot_t *s,const sentinel_watch_view_t 
     copy_text(buf,49,v->sd_status?v->sd_status:"SD: SEE OPTIONS FOR RECORDING");
     TRY(text(12,94,buf,MUTED,BG,1));
     if(!s->radar){
-        TRY(text(12,110,"LIST CHANGES / LAST 32 SECONDS",WHITE,BG,1));
+        TRY(text(12,110,"ALL LIST CHANGES / LAST 32 SECONDS",WHITE,BG,1));
         TRY(cerberus_display_fill_rect(12,124,296,29,PANEL));
         uint32_t maximum=1;
         unsigned n=d && d->buckets<=32?d->buckets:0;
@@ -158,21 +171,25 @@ static esp_err_t draw_dashboard(const snapshot_t *s,const sentinel_watch_view_t 
             const sentinel_watch_dashboard_row_t *r=&d->rows[i];unsigned y=304+i*18;
             char signal[12];if(r->rssi_valid)snprintf(signal,sizeof(signal),"%d dBm",r->rssi);
             else snprintf(signal,sizeof(signal),"RSSI ?");
-            snprintf(buf,sizeof(buf),"%u %.29s / %s",i+1,r->name,signal);
-            TRY(text(12,y,buf,WHITE,BG,1));
-            snprintf(buf,sizeof(buf),"%.24s / %s",r->hint,r->age);
-            TRY(text(24,y+9,buf,accent(r->scene),BG,1));
+            snprintf(buf,sizeof(buf),"%u %.24s",i+1,r->hint);
+            TRY(text(12,y,buf,r->scene==SENTINEL_WATCH_SCENE_GUARDIAN?MUTED:accent(r->scene),BG,1));
+            TRY(text(302-(int)strlen(signal)*6,y,signal,WHITE,BG,1));
         }
     }
     for(unsigned i=0;!s->radar&&i<count;++i){
         const sentinel_watch_dashboard_row_t *r=&d->rows[i];unsigned y=178+i*49;
-        uint16_t color=accent(r->scene);
+        bool recognized=r->scene!=SENTINEL_WATCH_SCENE_GUARDIAN;
+        uint16_t color=recognized?accent(r->scene):MUTED;
         TRY(cerberus_display_fill_rect(8,y,304,46,PANEL));
         TRY(cerberus_display_fill_rect(8,y,3,46,color));
-        TRY(text(16,y+5,r->name,WHITE,PANEL,1));
-        TRY(text(16,y+18,r->identity,MUTED,PANEL,1));
-        TRY(text(16,y+33,r->hint,color,PANEL,1));
-        TRY(text(302-(int)strlen(r->age)*6,y+33,r->age,MUTED,PANEL,1));
+        /* Use the larger title where it fits beside the complete age. The
+         * bounded fallback preserves both long categories and large ages. */
+        unsigned age_width=(unsigned)strlen(r->age)*6;
+        uint8_t title_scale=recognized&&strlen(r->hint)*12U+age_width+8U<=286U?2U:1U;
+        TRY(text(16,y+3,r->hint,color,PANEL,title_scale));
+        TRY(text(302-(int)age_width,y+6,r->age,MUTED,PANEL,1));
+        TRY(text(16,y+20,r->name,WHITE,PANEL,1));
+        TRY(text(16,y+33,r->identity,MUTED,PANEL,1));
     }
     if(!count){
         TRY(text(26,s->radar?318:228,d?"NO RETAINED OBSERVATIONS":"INVENTORY UNAVAILABLE",WHITE,BG,1));
@@ -185,8 +202,7 @@ static esp_err_t draw_dashboard(const snapshot_t *s,const sentinel_watch_view_t 
     snprintf(buf,sizeof(buf),"%u OBS / %u OF %u",d?d->total:0,d?d->page+1:1,d&&d->pages?d->pages:1);
     TRY(centered(388,buf,MUTED,BG,1));
     TRY(cerberus_display_fill_rect(8,410,304,10,PANEL));
-    snprintf(buf,sizeof(buf),"LATEST HINT: %.34s",s->details?s->title:"NONE");
-    TRY(text(12,412,buf,s->details?accent(s->scene):MUTED,PANEL,1));
+    TRY(text(12,412,"HINTS FIRST / TAP A ROW FOR DETAILS",MUTED,PANEL,1));
     TRY(draw_controls(s));return ESP_OK;
 }
 
@@ -208,6 +224,10 @@ sentinel_watch_action_t sentinel_watch_view_hit_test(const sentinel_watch_view_t
 {
     if(!valid(v))return SENTINEL_WATCH_ACTION_NONE;
     if(!v->demo){
+        if(y>=4&&y<42){
+            if(x>=100&&x<224)return SENTINEL_WATCH_ACTION_DASHBOARD;
+            if(x>=232&&x<312)return SENTINEL_WATCH_ACTION_RADAR;
+        }
         if(y>=378&&y<405){
             if(x>=8&&x<76)return SENTINEL_WATCH_ACTION_PREV;
             if(x>=244&&x<312)return SENTINEL_WATCH_ACTION_NEXT;

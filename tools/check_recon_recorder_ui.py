@@ -19,6 +19,9 @@ display = (root / "s3_main/main/display.c").read_text(encoding="utf-8")
 start = display.index("static const uint8_t *font5x7(")
 end = display.index("\nesp_err_t ", start)
 (out / "display_font.h").write_text(display[start:end], encoding="utf-8")
+classifier = (root / "s3_main/main/sentinel_watch_detect.c").read_text(encoding="utf-8")
+labels_start = classifier.index("const char *sentinel_watch_category_name(")
+(out / "recon_category_labels.h").write_text(classifier[labels_start:], encoding="utf-8")
 framebuffer = (root / "tools/host_checks/recon_render.c").read_text(encoding="utf-8").split(
     "/* Exercise the real private controls", 1)[0]
 framebuffer = framebuffer.replace("static unsigned calls;",
