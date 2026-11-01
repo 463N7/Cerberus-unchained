@@ -59,10 +59,26 @@ esp_err_t cerberus_s3_ble_scanner_get_watch_detailed_result(uint8_t generation,
     cerberus_watch_receive_timing_t *motion_timing);
 esp_err_t cerberus_s3_ble_scanner_get_activity(uint8_t generation,
     cerberus_ble_activity_payload_t *status);
-/* Configure or clear an exact selected identity between bounded sweeps.
- * Measurements come directly from GAP reports, not strongest-RSSI inventory. */
+/* An exact selected identity is attached separately from its finite passive
+ * sweep. Full scan/host epochs authorize callbacks and Stop; generation8 does
+ * not. Measurements retain the existing GAP report semantics (ADV/RSP). */
+typedef struct {
+    cerberus_ble_scan_status_payload_t scan;
+    uint32_t scan_epoch;
+    unsigned host_epoch;
+    int32_t error;
+    bool attached, owned, receiving, stopping;
+} cerberus_s3_ble_track_state_t;
+
+/* Begin rejects an existing attachment. Absent get_state returns canonical
+ * zero/ESP_OK. Reset or replacement remains faulted until release + begin. */
 esp_err_t cerberus_s3_ble_scanner_track_begin(const uint8_t address[6],
     uint8_t address_type);
+esp_err_t cerberus_s3_ble_scanner_track_start(cerberus_s3_ble_track_state_t *state);
+esp_err_t cerberus_s3_ble_scanner_track_get_state(cerberus_s3_ble_track_state_t *state);
+esp_err_t cerberus_s3_ble_scanner_track_stop(cerberus_s3_ble_track_state_t *state);
+/* Release refuses an owned/queued sweep; end is the safe compatibility wrapper. */
+esp_err_t cerberus_s3_ble_scanner_track_release(void);
 void cerberus_s3_ble_scanner_track_end(void);
 esp_err_t cerberus_s3_ble_scanner_track_status(
     cerberus_s3_ble_track_status_t *status);

@@ -84,6 +84,7 @@ static void *companion_calloc(size_t n,size_t size,unsigned caps)
 #undef heap_caps_calloc
 #include "dual_ble_retry_impl.h"
 #include "s3_ble_tracker.h"
+#include "dual_ble_fox_state_type.h"
 static cerberus_c5_ble_result_t ble_fox_hunt_target;
 static bool ble_fox_hunt_start_pending,ble_fox_hunt_exit_pending;
 static bool ble_fox_hunt_s3_attached,ble_fox_hunt_s3_started,ble_fox_hunt_retry_requested;
@@ -92,8 +93,14 @@ static esp_err_t ble_fox_hunt_error,ble_fox_hunt_barrier_error;
 static cerberus_s3_ble_track_status_t fox_sample;
 static unsigned fox_status_reads;
 static esp_err_t fox_status_error;
+static cerberus_s3_ble_track_state_t fox_source;
+static esp_err_t fox_source_error;
+static unsigned fox_state_reads;
+esp_err_t cerberus_s3_ble_scanner_track_get_state(cerberus_s3_ble_track_state_t *out)
+{++fox_state_reads;*out=fox_source;return fox_source_error;}
 esp_err_t cerberus_s3_ble_scanner_track_status(cerberus_s3_ble_track_status_t *out)
 {++fox_status_reads;*out=fox_sample;return fox_status_error;}
+#include "dual_ble_fox_read_impl.h"
 /* Action/lifetime predicates have separate production-bound lifecycle tests.
  * These stand-ins expose only the two cached enabled states to the renderer. */
 static bool ble_fox_hunt_s3_retryable(void)
@@ -128,11 +135,13 @@ static void check_dual_fox(const char *prefix)
     dual_ble_ui_store->track=(cerberus_dual_ble_track_t){.epoch=101,.job_id=11,.age_ms=50,.rssi=-81,.flags=3,.reports=7};
     fox_sample=(cerberus_s3_ble_track_status_t){.enabled=true,.seen=true,.fresh=true,
         .address={99,88,77,66,55,44},.address_type=2,.rssi_dbm=-31,.age_ms=15,.reports=777};
+    fox_source=(cerberus_s3_ble_track_state_t){.attached=true,.owned=true,.receiving=true,
+        .scan_epoch=300U,.host_epoch=7U};fox_source_error=ESP_OK;fox_state_reads=0;
     ble_fox_hunt_start_pending=ble_fox_hunt_s3_attached=ble_fox_hunt_s3_started=true;
     ble_fox_hunt_exit_pending=ble_fox_hunt_retry_requested=ble_fox_hunt_cleanup_timed_out=false;
     ble_fox_hunt_error=ble_fox_hunt_barrier_error=fox_status_error=ESP_OK;
     fox_status_reads=0;paint_fox();
-    assert(!fox_status_reads&&strstr(drawn,"RELEASING PREVIOUS SCANNERS"));
+    assert(!fox_state_reads&&!fox_status_reads&&strstr(drawn,"RELEASING PREVIOUS SCANNERS"));
     assert(strstr(drawn,"S3 NO SIGNAL SAMPLE")&&strstr(drawn,"C5 NO SIGNAL SAMPLE"));
     assert(!strstr(drawn,"-31")&&!strstr(drawn,"777")&&!strstr(drawn,"-81"));
     for(unsigned y=180;y<192;++y)for(unsigned x=20;x<300;++x)assert(screen[y*320+x]==UI_PANEL);
@@ -164,10 +173,32 @@ static void check_dual_fox(const char *prefix)
     assert(screen[180*320+20]==UI_GOOD&&screen[180*320+160]==UI_PANEL);
     assert(screen[274*320+20]==UI_GOOD&&screen[274*320+100]==UI_PANEL);
     save(prefix,"fox-both-recent");
-    ble_fox_hunt_s3_started=false;paint_fox();
+    ble_fox_hunt_s3_started=false;fox_source.owned=fox_source.receiving=false;paint_fox();
     assert(strstr(drawn,"S3 / WAITING FOR SWEEP")&&!strstr(drawn,"S3 / LISTENING"));
     assert(strstr(drawn,"S3 LAST -65")&&screen[180*320+20]==UI_MUTED);
-    ble_fox_hunt_s3_started=true;
+    ble_fox_hunt_s3_started=true;fox_source.owned=true;paint_fox();
+    assert(strstr(drawn,"S3 / WAITING FOR RADIO")&&!strstr(drawn,"S3 / LISTENING"));
+    assert(strstr(drawn,"S3 LAST -65")&&screen[180*320+20]==UI_MUTED);
+    save(prefix,"fox-s3-queued");
+    fox_source.owned=false;paint_fox();
+    assert(strstr(drawn,"S3 / BETWEEN SWEEPS")&&!strstr(drawn,"S3 / LISTENING"));
+    fox_source.owned=fox_source.receiving=true;
+    /* Native lease errors invalidate data even before the next UI tick, and
+       failed getters/absent attachments never turn into measured zero. */
+    unsigned source_reads=fox_status_reads;fox_source.error=ESP_ERR_INVALID_STATE;paint_fox();
+    assert(fox_status_reads==source_reads&&strstr(drawn,"S3 / ERROR"));
+    assert(!strstr(drawn,"S3 LAST -65")&&strstr(drawn,"S3 REPORTS / NOT AVAILABLE"));
+    fox_source.error=ESP_OK;fox_source.attached=false;paint_fox();
+    assert(fox_status_reads==source_reads&&!strstr(drawn,"S3 LAST -65"));
+    fox_source.attached=true;fox_source_error=ESP_FAIL;paint_fox();
+    assert(fox_status_reads==source_reads&&!strstr(drawn,"S3 REPORTS 0"));
+    fox_source_error=ESP_OK;
+    fox_source.scan_epoch=0;fox_source.owned=fox_source.receiving=false;
+    ble_fox_hunt_error=ESP_ERR_NO_MEM;paint_fox();
+    assert(strstr(drawn,"S3 / ERROR")&&strstr(drawn,"S3 REPORTS / NOT AVAILABLE"));
+    assert(!strstr(drawn,"S3 LAST -65")&&!strstr(drawn,"S3 REPORTS 0"));
+    ble_fox_hunt_error=ESP_OK;fox_source.scan_epoch=300;
+    fox_source.owned=fox_source.receiving=true;
     /* An S3 attach failure must not hide a healthy C5 reading. */
     ble_fox_hunt_s3_attached=false;ble_fox_hunt_error=ESP_ERR_NO_MEM;unsigned reads=fox_status_reads;
     paint_fox();assert(fox_status_reads==reads&&strstr(drawn,"S3 / ERROR")&&strstr(drawn,"C5 LAST -81"));

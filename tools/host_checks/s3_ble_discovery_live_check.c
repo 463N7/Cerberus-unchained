@@ -376,7 +376,7 @@ static void companion_pane_and_fox_barrier(void)
     CHECK(!dual_ble_live_prepare_fox(2150,true)&&track_begins==0); /* Sleeping cannot arm a pending target. */
     CHECK(dual_ble_live_prepare_fox(2200,false)&&track_begins==1&&track_type==3);
     CHECK(!memcmp(track_address,target.address,6)&&!memcmp(&original,&ble_selected_result,sizeof(original)));
-    ble_fox_hunt_finish_exit(false,false);CHECK(ble_mode==UI_BLE_MODE_C5);
+    ble_fox_hunt_request_stop((uint32_t)clock_ms,false);ble_fox_hunt_tick((uint32_t)clock_ms,false);CHECK(ble_mode==UI_BLE_MODE_C5);
     ble_mode=UI_BLE_MODE_LIST;native_tick(2300,false);
     CHECK(!ble_discovery_live->session.enabled&&discovery_native.start==1);
     clean_live();
@@ -717,7 +717,7 @@ static void unified_frozen_c5_selection_save_fox(const char *prefix)
     stop_and_release(17200);CHECK(!dual_ble_live_prepare_fox(17500,false)&&track_begins==0);
     companion_released=true;CHECK(dual_ble_live_prepare_fox(17750,false)&&track_begins==1&&track_type==1);
     CHECK(!memcmp(track_address,selected.address,6));
-    ble_fox_hunt_finish_exit(false,false);CHECK(ble_mode==UI_BLE_MODE_C5);
+    ble_fox_hunt_request_stop((uint32_t)clock_ms,false);ble_fox_hunt_tick((uint32_t)clock_ms,false);CHECK(ble_mode==UI_BLE_MODE_C5);
     dual_ble_live_tap(60,335);CHECK(ble_mode==UI_BLE_MODE_LIST&&!ble_discovery_live->session.enabled);
     repaint_unified();drawn[0]=0;CHECK(live_paint(true)==ESP_OK);save(prefix,"unified-after-c5-detail");
     CHECK(ble_discovery_live->painted_source[0]!=0);
@@ -927,6 +927,8 @@ static void fox_seed(void)
     ble_mode=UI_BLE_MODE_DETAIL;
     ble_fox_hunt_exit_pending=ble_fox_hunt_start_pending=ble_fox_hunt_retry_requested=false;
     ble_fox_hunt_s3_started=ble_fox_hunt_s3_attached=false;
+    ble_fox_hunt_s3_owned=ble_fox_hunt_s3_receiving_cached=false;
+    ble_fox_hunt_s3_start_requested_ms=0U;
     ble_fox_hunt_s3_start_pending=ble_fox_hunt_cleanup_timed_out=false;
     ble_fox_hunt_error=ble_fox_hunt_barrier_error=ESP_OK;
     fox_status_error=fox_stop_error=fox_start_error=track_error=ESP_OK;
@@ -959,6 +961,14 @@ static void fox_finish(uint64_t now)
     clean_live();
 }
 
+static void fox_hold_companion(void)
+{
+    companion_released=false;
+    companion_store.start.mode=CERBERUS_DUAL_BLE_TRACK;
+    companion_store.start.address_type=ble_fox_hunt_target.address_type;
+    memcpy(companion_store.start.address,ble_fox_hunt_target.address,6U);
+}
+
 static void fox_independent_failure_and_retry(void)
 {
     fox_seed();cerberus_c5_ble_result_t target=fox_target();
@@ -983,7 +993,7 @@ static void fox_independent_failure_and_retry(void)
 
     fox_seed();fox_start_error=ESP_ERR_NO_MEM;ble_fox_hunt_open_peer(&target,false);
     fox_step(1100,false);fox_step(1400,false);
-    CHECK(ble_fox_hunt_s3_attached&&!ble_fox_hunt_s3_started&&passive_starts==1);
+    CHECK(!ble_fox_hunt_s3_attached&&!ble_fox_hunt_s3_started&&passive_starts==1&&track_ends==1);
     CHECK(companion_requested_mode==CERBERUS_DUAL_BLE_TRACK&&ble_fox_hunt_error==ESP_ERR_NO_MEM);
     fox_start_error=ESP_OK;handle_ble_tap(40,365);fox_step(1700,false);
     CHECK(track_begins==2&&track_ends==1&&passive_starts==2&&ble_fox_hunt_s3_started);
@@ -1025,9 +1035,10 @@ static void fox_barrier_reentry_and_foreign_owner(void)
     fox_seed();ble_fox_hunt_open_peer(&target,false);
     CHECK(dual_ble_live_prepare_fox(1100,false)&&ble_fox_hunt_s3_attached);
     owner=CERBERUS_S3_BLE_OWNER_CENTRAL;fox_step(1400,false);
-    CHECK(ble_fox_hunt_error==ESP_ERR_INVALID_STATE&&!passive_starts&&!stops);
+    CHECK(ble_fox_hunt_error==ESP_OK&&passive_starts==1&&!stops&&
+        ble_fox_hunt_s3_start_pending&&!ble_fox_hunt_s3_owned&&!ble_fox_hunt_s3_started);
     CHECK(companion_requested_mode==CERBERUS_DUAL_BLE_TRACK);
-    handle_ble_tap(40,365);fox_step(13700,false);
+    handle_ble_tap(40,365);CHECK(!ble_fox_hunt_retry_requested);fox_step(13700,false);
     CHECK(ble_fox_hunt_error==ESP_ERR_TIMEOUT&&!ble_fox_hunt_retry_requested&&!stops);
     handle_ble_tap(160,405);fox_step(14000,false);
     CHECK(ble_mode==UI_BLE_MODE_DETAIL&&owner==CERBERUS_S3_BLE_OWNER_CENTRAL&&!stops);
@@ -1048,12 +1059,14 @@ static void fox_stop_retains_cleanup_and_clock(void)
 {
     fox_seed();cerberus_c5_ble_result_t target=fox_target();
     ble_fox_hunt_open_peer(&target,true);fox_step(1100,false);fox_step(1400,false);
-    companion_released=false;fox_stop_error=ESP_FAIL;
+    fox_hold_companion();fox_stop_error=ESP_FAIL;
     const uint64_t wrap=(UINT64_C(1)<<32)+2000U;
+    unsigned syncs_before=companion_syncs;
     clock_ms=(int64_t)wrap;handle_ble_tap(160,405);
     CHECK(ble_fox_hunt_exit_pending&&!ble_fox_hunt_retry_requested&&companion_requested_mode==-1);
-    CHECK(companion_sync_clock==wrap);
+    CHECK(companion_syncs==syncs_before); /* Stop changes intent without a second SPI tick. */
     fox_step(wrap+250U,false);unsigned tries=stops;
+    CHECK(companion_sync_clock==wrap+250U); /* The normal coordinator keeps its full clock. */
     CHECK(tries&&ble_fox_hunt_s3_started);
     fox_step(wrap+12250U,false);
     CHECK(ble_fox_hunt_cleanup_timed_out&&ble_fox_hunt_exit_pending&&ble_mode==UI_BLE_MODE_FOX_HUNT);
@@ -1062,11 +1075,11 @@ static void fox_stop_retains_cleanup_and_clock(void)
     handle_ble_tap(40,365);handle_ble_tap(200,365);
     CHECK(track_begins==begun&&passive_starts==started&&companion_retries==c5retry);
     fox_status_error=ESP_ERR_TIMEOUT;tries=stops;fox_step(wrap+12500U,false);
-    CHECK(stops==tries&&ble_fox_hunt_exit_pending);
+    CHECK(stops>tries&&ble_fox_hunt_exit_pending); /* Exact Stop is safe even if its state query failed. */
     fox_status_error=fox_stop_error=ESP_OK;fox_hold_running=true;fox_step(wrap+12750U,false);
     CHECK(stops>tries&&ble_fox_hunt_exit_pending);
     fox_hold_running=false;owner=CERBERUS_S3_BLE_OWNER_NONE;scan.state=CERBERUS_BLE_SCAN_COMPLETE;
-    fox_step(wrap+13000U,false);CHECK(ble_fox_hunt_exit_pending&&track_ends==0);
+    fox_step(wrap+13000U,false);CHECK(ble_fox_hunt_exit_pending&&track_ends==1&&!ble_fox_hunt_s3_attached);
     companion_released=true;fox_step(wrap+13250U,false);
     CHECK(!ble_fox_hunt_exit_pending&&ble_mode==UI_BLE_MODE_C5&&track_ends==1&&passive_starts==started);
     clean_live();
@@ -1074,7 +1087,7 @@ static void fox_stop_retains_cleanup_and_clock(void)
     /* Retry cleanup also stays owned after timeout, without a late rearm. */
     fox_seed();ble_fox_hunt_open_peer(&target,false);fox_step(1100,false);
     ble_fox_hunt_error=ESP_FAIL;fox_stop_error=ESP_FAIL;handle_ble_tap(40,365);
-    fox_step(13500,false);CHECK(ble_fox_hunt_retry_requested&&ble_fox_hunt_error==ESP_ERR_TIMEOUT);
+    fox_step(13500,false);CHECK(!ble_fox_hunt_retry_requested&&ble_fox_hunt_error==ESP_FAIL);
     tries=stops;fox_step(13800,false);CHECK(stops>tries);
     fox_stop_error=ESP_OK;owner=CERBERUS_S3_BLE_OWNER_NONE;scan.state=CERBERUS_BLE_SCAN_COMPLETE;
     fox_step(14100,false);CHECK(!ble_fox_hunt_retry_requested&&passive_starts==1&&ble_fox_hunt_s3_retryable());
@@ -1087,7 +1100,7 @@ static void fox_back_sleep_and_pending_stop(void)
     cerberus_c5_ble_result_t target=fox_target(),other=target;other.address[0]=99;
     for(unsigned route=0;route<3;++route){
         fox_seed();ble_fox_hunt_open_peer(&target,false);fox_step(1100,false);
-        fox_hold_running=true;companion_released=false;
+        fox_hold_running=true;fox_hold_companion();
         if(route==0)ble_attack_selecting=true;
         if(route==1){learning_tool_active=true;tool_parent_page=UI_PAGE_OTHER;}
         actual_back(UI_BACK_Y-1U);CHECK(!ble_fox_hunt_exit_pending);

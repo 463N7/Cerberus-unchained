@@ -35,6 +35,13 @@ analyzer = (root / "s3_main/main/ble_analyzer_live_ui.h").read_text()
 (out / "dual_ble_diagnostics_analyzer.h").write_text(
     function(analyzer, "static bool ble_analyzer_s3_receiving(void)") +
     function(analyzer, "static esp_err_t ble_analyzer_s3_error(void)"))
+ui = (root / "s3_main/main/ui.c").read_text()
+(out / "dual_ble_diagnostics_fox.h").write_text(function(ui,
+    "static esp_err_t ble_fox_hunt_read_s3(cerberus_s3_ble_track_status_t *track,\n    cerberus_s3_ble_track_state_t *state)"))
+scanner = (root / "s3_main/main/s3_ble_scanner.h").read_text()
+end = scanner.index("} cerberus_s3_ble_track_state_t;") + len("} cerberus_s3_ble_track_state_t;")
+begin = scanner.rfind("typedef struct", 0, end)
+(out / "dual_ble_diagnostics_track_type.h").write_text(scanner[begin:end])
 exe = out / ("dual-ble-diagnostics.exe" if os.name == "nt" else "dual-ble-diagnostics")
 subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-UNDEBUG",
     "-Wall", "-Wextra", "-Werror", "-I", str(out / "stubs"), "-I", str(out),

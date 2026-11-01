@@ -2,6 +2,7 @@
 #include "dual_ble_scan.h"
 #include "s3_ble_discovery_session.h"
 #include "s3_ble_tracker.h"
+#include "dual_ble_diagnostics_track_type.h"
 #include "s3_ble_host.h"
 #include "c5_spi_link.h"
 #include <assert.h>
@@ -20,6 +21,10 @@ static uint8_t dual_ble_ui_family;
 static bool ble_scan_checked,ble_fox_hunt_start_pending,ble_fox_hunt_exit_pending;
 static esp_err_t ble_scan_error,ble_fox_hunt_error,ble_fox_hunt_barrier_error,sample_error;
 static bool ble_fox_hunt_cleanup_timed_out;
+static bool ble_fox_hunt_s3_attached,ble_fox_hunt_s3_owned,ble_fox_hunt_s3_receiving_cached;
+static cerberus_s3_ble_track_state_t source_state;
+static esp_err_t source_state_error;
+static unsigned track_state_reads;
 static cerberus_ble_scan_status_payload_t ble_scan_status;
 static cerberus_c5_ble_result_t ble_fox_hunt_target;
 static cerberus_s3_ble_track_status_t source_sample;
@@ -39,6 +44,9 @@ bool cerberus_s3_ble_host_synced(void){++host_reads;return true;}
 cerberus_s3_ble_owner_t cerberus_s3_ble_host_owner(void){++host_reads;return CERBERUS_S3_BLE_OWNER_SCANNER;}
 static esp_err_t cerberus_s3_ble_scanner_track_status(cerberus_s3_ble_track_status_t *out)
 {++scanner_reads;*out=source_sample;return sample_error;}
+static esp_err_t cerberus_s3_ble_scanner_track_get_state(cerberus_s3_ble_track_state_t *out)
+{++track_state_reads;*out=source_state;return source_state_error;}
+#include "dual_ble_diagnostics_fox.h"
 static void dual_ble_ui_get_view(cerberus_dual_ble_view_t *out){cerberus_dual_ble_view(dual_ble_ui_store,out);}
 static bool dual_ble_ui_released(void){return cerberus_dual_ble_released(dual_ble_ui_store);}
 #include "dual_ble_diagnostics_ui.h"
@@ -187,6 +195,57 @@ static void check_analyzer_error_scope(void)
     storage.error=ESP_OK;storage.start.job_id=0;storage.enabled=false;dual_ble_ui_mode=-1;
 }
 
+static void check_fox_exact_scope(void)
+{
+    cerberus_dual_ble_diagnostics_t out;
+    current_page=UI_PAGE_BLE;ble_mode=UI_BLE_MODE_FOX_HUNT;
+    ordinary_page=monitor_page=false;ble_discovery_live=NULL;
+    ble_fox_hunt_start_pending=ble_fox_hunt_exit_pending=false;
+    ble_fox_hunt_cleanup_timed_out=false;ble_fox_hunt_barrier_error=ESP_OK;
+    ble_scan_checked=true;ble_scan_status.state=CERBERUS_BLE_SCAN_RUNNING;
+    ble_scan_error=ESP_FAIL; /* Unrelated scanner observation must be ignored. */
+    ble_fox_hunt_s3_attached=false;ble_fox_hunt_error=ESP_ERR_NO_MEM;
+    unsigned reads=scanner_reads,states=track_state_reads;
+    dual_ble_publish_diagnostics(198,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(!out.s3_scan_cached&&!out.s3_state&&!out.s3.target_matches);
+    assert(out.s3_scan_error==ESP_ERR_NO_MEM&&out.s3_track_error==ESP_ERR_NO_MEM);
+    assert(scanner_reads==reads&&track_state_reads==states);
+    /* Attachment without any accepted sweep must not report measured zero. */
+    ble_fox_hunt_s3_attached=true;ble_fox_hunt_error=ESP_OK;
+    source_state=(cerberus_s3_ble_track_state_t){.attached=true};
+    source_sample=(cerberus_s3_ble_track_status_t){.enabled=true,.address_type=1};
+    memcpy(source_sample.address,ble_fox_hunt_target.address,6);
+    dual_ble_publish_diagnostics(198,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(!out.s3.target_matches&&!out.s3_scan_cached);
+    source_state.scan_epoch=700U;source_state.host_epoch=8U;source_state.owned=true;
+    dual_ble_publish_diagnostics(198,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(out.s3.target_matches&&!out.s3.reports&&!out.s3_scan_cached); /* Queued, not receiving. */
+    source_state.receiving=true;source_sample.seen=source_sample.fresh=true;
+    source_sample.reports=37;source_sample.rssi_dbm=-53;
+    dual_ble_publish_diagnostics(198,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(out.s3_scan_cached&&out.s3_state==CERBERUS_BLE_SCAN_RUNNING&&out.s3.reports==37);
+    source_state.owned=source_state.receiving=false;
+    dual_ble_publish_diagnostics(198,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(!out.s3_scan_cached&&out.s3.target_matches&&out.s3.reports==37); /* Retained between sweeps. */
+    /* Replacement is visible before the next UI lifecycle poll. Cached RX
+       and deliberately foreign history must not escape the actual guard. */
+    ble_fox_hunt_s3_owned=ble_fox_hunt_s3_receiving_cached=true;
+    source_state.error=ESP_ERR_INVALID_STATE;source_sample.reports=999;
+    reads=scanner_reads;
+    dual_ble_publish_diagnostics(198,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(!out.s3_scan_cached&&!out.s3.target_matches&&!out.s3.reports&&scanner_reads==reads);
+    assert(out.s3_track_error==ESP_ERR_INVALID_STATE&&out.s3_scan_error==ESP_ERR_INVALID_STATE);
+    source_state.error=ESP_OK;source_state_error=ESP_FAIL;
+    dual_ble_publish_diagnostics(198,false);cerberus_dual_ble_diagnostics_get(&out);
+    assert(out.s3_track_error==ESP_FAIL&&!out.s3.target_matches&&scanner_reads==reads);
+    printed[0]=0;states=track_state_reads;unsigned hosts=host_reads;print_dual_ble();
+    assert(scanner_reads==reads&&track_state_reads==states&&host_reads==hosts);
+    assert(strstr(printed,"dual_ble_s3_scan_cached=0"));
+    source_state_error=ESP_OK;ble_fox_hunt_s3_attached=false;
+    ble_fox_hunt_s3_owned=ble_fox_hunt_s3_receiving_cached=false;ble_fox_hunt_error=ESP_OK;
+    ble_mode=0;ble_scan_error=ESP_OK;
+}
+
 int main(void)
 {
     cerberus_dual_ble_diagnostics_t out,zero={0};
@@ -212,6 +271,9 @@ int main(void)
     memcpy(ble_fox_hunt_target.address,"ABCDEF",6);ble_fox_hunt_target.address_type=1;
     source_sample=(cerberus_s3_ble_track_status_t){.enabled=true,.seen=true,.fresh=true,
         .rssi_dbm=-44,.reports=77,.age_ms=10,.address_type=0};
+    source_state=(cerberus_s3_ble_track_state_t){.attached=true,.owned=true,.receiving=true,
+        .scan_epoch=300U,.host_epoch=7U};
+    ble_fox_hunt_s3_attached=ble_fox_hunt_s3_owned=ble_fox_hunt_s3_receiving_cached=true;
     memcpy(source_sample.address,"ABCDEF",6);
     ble_fox_hunt_start_pending=true;reads=scanner_reads;
     dual_ble_publish_diagnostics(110,false);cerberus_dual_ble_diagnostics_get(&out);
@@ -226,7 +288,7 @@ int main(void)
     assert(out.fox_error==ESP_ERR_NO_MEM);
     ble_fox_hunt_cleanup_timed_out=true;
     dual_ble_publish_diagnostics(113,false);cerberus_dual_ble_diagnostics_get(&out);
-    assert(out.fox_error==ESP_ERR_TIMEOUT&&out.s3_track_error==ESP_OK&&out.c5_error==ESP_OK);
+    assert(out.fox_error==ESP_ERR_TIMEOUT&&out.s3_track_error==ESP_ERR_NO_MEM&&out.c5_error==ESP_OK);
     ble_fox_hunt_error=ESP_OK;
     dual_ble_publish_diagnostics(114,false);cerberus_dual_ble_diagnostics_get(&out);
     assert(out.fox_error==ESP_ERR_TIMEOUT);
@@ -272,12 +334,13 @@ int main(void)
     discovery.session.observation.state=CERBERUS_BLE_SCAN_ERROR;
     ble_scan_checked=true;ble_scan_status.state=CERBERUS_BLE_SCAN_RUNNING;
     dual_ble_publish_diagnostics(190,false);cerberus_dual_ble_diagnostics_get(&out);
-    assert(out.s3_scan_cached&&out.s3_state==CERBERUS_BLE_SCAN_RUNNING);
+    assert(!out.s3_scan_cached&&!out.s3_state); /* Stop is not current reception. */
     printed[0]=0;reads=scanner_reads+host_reads;print_dual_ble();assert(scanner_reads+host_reads==reads);
     assert(strstr(printed,"dual_ble_s3_rssi=-44")&&strstr(printed,"independent_received_reports"));
     check_family_scopes();
     check_discovery_error_scope();
     check_analyzer_error_scope();
+    check_fox_exact_scope();
     cerberus_dual_ble_diagnostics_t input=out;input.c5_sweeps=123;
     input.c5_snapshots=UINT32_MAX;input.c5_first_result_ms=UINT32_MAX;input.c5_has_first_result=true;
     input.c5_inventory_known=input.c5_inventory_replacement_enabled=true;

@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "checkpoint": "rev113-source",
-  "scope": "Source/workflow status through rev113's optional compact C5 BLE response-result transfer and full-format compatibility. The matched rev113/C5 firmware68 update is installed with verified writes, paired boot and mounted SD; physical compact-transfer/fallback behavior, reception, transitions, recovery, storage and loaded-memory acceptance remain pending. Frozen build evidence and subsequent installation evidence are recorded separately. Optional response collection, source-separated live/saved analysis and v6 SD retention retain their rev110 scope, with independent dual-receiver Fox Hunt lifecycle and presentation from rev112. See DUAL_RADIO_REV113.md for the source checkpoint and current installation evidence. Full Marauder parity and physical reception, transitions, recovery, storage and loaded-memory acceptance remain incomplete. The rev107 GitHub develop check on 2026-11-01 resolved to 79cc6bcba1db6679baee1dab2b0c1ad5010e6363, matching the pinned source.",
+  "checkpoint": "rev117-source",
+  "scope": "Source/workflow status through the local rev114–117 candidates: shared dual-receiver Find My monitoring, independent ordinary BLE discovery and retries, exact S3 Analyzer ownership, and exact S3 Fox Hunt ownership. These candidates are not installed; rev113/C5 firmware68 remains the verified installed baseline (writes, paired boot and SD mount only). See DUAL_RADIO_REV114.md through DUAL_RADIO_REV117.md for separately retained source/build/package evidence and acceptance limits. All physical RF, touchscreen transitions, recovery, storage and loaded-memory acceptance remain distinct from host/native checks. Full Marauder parity is incomplete. A read-only GitHub comparison at 2026-11-01 16:21:17 UTC found develop identical to 79cc6bcba1db6679baee1dab2b0c1ad5010e6363. RECEIVE_REMAINING_GAPS.md records the current receiver, GPS, storage and device-info audit.",
   "status_definitions": {
     "partial": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open.",
     "pending": "The distinct upstream workflow has no verified implementation at this checkpoint.",
@@ -24,14 +24,19 @@
     {
       "symbol": "SHOW_INFO",
       "family": "device_and_updates",
-      "status": "needs_review",
-      "cerberus_evidence": "docs/FEATURE_PARITY.md",
-      "next_gap": "Inspect each upstream update/info service and its board prerequisites; decide whether Cerberus's own update and status workflows meet the same user outcome.",
+      "status": "partial",
+      "cerberus_evidence": "docs/RECEIVE_REMAINING_GAPS.md",
+      "next_gap": "Source review confirms existing Cerberus dashboard/System health, SD tools and read-only console cover portions of upstream device information. Consolidated navigation, running partition, complete option mapping and physical UI acceptance remain open. C5 capability revision is not proof of an exact matched firmware pair; no board/FCC identifier is invented.",
       "s3_role": "S3 owns UI, storage, update orchestration and status display.",
       "c5_role": "C5 reports its identity/status and accepts only coordinated updates.",
       "related_menu_entries": [],
       "related_cli_commands": [],
-      "status_detail": "Pinned handler semantics or board prerequisites require source analysis before a reliable implementation claim."
+      "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open.",
+      "cerberus_code": [
+        "s3_main/main/ui.c",
+        "s3_main/main/system_health.c",
+        "s3_main/main/usb_console.c"
+      ]
     },
     {
       "symbol": "ESP_UPDATE",
@@ -50,7 +55,7 @@
       "family": "navigation_and_connection",
       "status": "needs_review",
       "cerberus_evidence": "docs/MARAUDER_AP_MENU.md",
-      "next_gap": "Control state, not a distinct RF feature; verify stop/cancel coverage across every Cerberus scan and active job.",
+      "next_gap": "Control state, not a distinct RF feature. Rev114–117 improve specific BLE owner boundaries, but whole-device Stop parity is unproven. Recon's definite local Start rejection must not use remote-command ambiguity to adopt a foreign scan, and Wardriving still needs full S3 binding. See RECEIVE_REMAINING_GAPS.md; active jobs and all navigation paths require separate audit.",
       "s3_role": "S3 owns the picker, profile state and connection controls.",
       "c5_role": "C5 supplies AP inventory and the associated IP session.",
       "related_menu_entries": [],
@@ -218,8 +223,8 @@
       "symbol": "BT_SCAN_ALL",
       "family": "ble_general_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/BLE_SD_SNAPSHOTS.md",
-      "next_gap": "Rev110 adds explicit opt-in C5 response requests to ordinary discovery, independent original/response evidence, labelled response-name fallback and v6 save/reopen. Passive remains the default; coded PHY remains passive. Full-original and full-response decoded hints remain distinct from their retained 31-byte raw previews. Existing v1-v5 files remain readable with missing evidence explicit. Rev111 isolates callback dispatch without extending RF scope. Physical response acquisition, save/reopen, file-failure recovery, extended formats, dense retention, publication latency, repeated transitions and sustained headroom remain pending. Complete raw payload/history recording and full upstream suboptions remain open. See DUAL_RADIO_REV110.md and DUAL_RADIO_REV111.md.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV115.md",
+      "next_gap": "Local rev115 separates ordinary discovery intent from S3 allocation/session state, keeps C5 accessible during S3 failure, and adds source-specific retry and frozen selection/release barriers. Rev110/113 response and compact-transfer scope remains. Physical concurrent reception, dense retention, Stop/Back/sleep/retry, SD save/reopen and sustained headroom are pending. Complete raw payloads/history, Marauder JSON compatibility and full upstream options remain open. Installed baseline remains rev113.",
       "s3_role": "S3 owns its independent discovery and family evidence, source-labelled presentation and storage. It validates frozen C5 original/response rows before final-fence publication and freezes typed selections. V6 SD reports preserve separate C5 matched responses and historical age bounds beside original evidence and exact S3 matched-response times; offline viewing never activates saved targets or queries current radios/clocks.",
       "c5_role": "Firmware67 adds explicit response acquisition with bounded same-source correlation and a 310-byte frozen projection. Passive original-only discovery remains compatible with older reads; response acquisition does not silently fall back on unsupported peers. Original and response retain independent receive metadata, raw preview, RSSI and age. Full-original decoded proof is retained for focused family views; full-response decoded proof is retained in response modes. Generic discovery keeps its original family block absent. Mixed Recon/Wardriving retain C5 Wi-Fi plus S3 BLE.",
       "related_menu_entries": [],
@@ -584,7 +589,7 @@
       "family": "gps_inputs_and_poi",
       "status": "hardware_limited",
       "cerberus_evidence": "docs/WARDRIVING_SOURCE_INVENTORY.md",
-      "next_gap": "Rev52 installs optional UART2 NMEA status, fresh-fix/UTC-gated WiGLE and unlocated fallback logging with host checks. No GPS receiver is attached or live-accepted. Metadata records GPS at result receipt because radio observations lack synchronized RF timestamps. Separate GPS data/NMEA views, PPS, POI and tracker workflows remain open.",
+      "next_gap": "Rev52 installs optional UART2 NMEA status, fresh-fix/UTC-gated WiGLE and unlocated fallback logging with host checks. No GPS receiver is attached or live-accepted. Metadata records GPS at result receipt because radio observations lack synchronized RF timestamps. Separate GPS data/NMEA views, PPS, POI and tracker workflows remain open. RECEIVE_REMAINING_GAPS.md distinguishes missing DATA/NMEA presentation, raw-input retention and field freshness from physical GPS acceptance.",
       "s3_role": "S3 parses optional serial GPS, timestamps, stores and presents location status.",
       "c5_role": "C5 supplies radio observations; S3 attaches location at result receipt, without a synchronized RF timestamp claim.",
       "related_menu_entries": [],
@@ -638,7 +643,7 @@
       "family": "ble_wardriving",
       "status": "partial",
       "cerberus_evidence": "docs/WARDRIVING_SOURCE_INVENTORY.md",
-      "next_gap": "The unified worker logs completed S3 BLE sweeps alongside C5 Wi-Fi, with optional GPS and explicit unlocated records. Verify saved BLE fields, repeated sessions, physical GPS/expansion hardware and upstream per-callback behavior.",
+      "next_gap": "The unified worker logs completed S3 BLE sweeps alongside C5 Wi-Fi, with optional GPS and explicit unlocated records. Verify saved BLE fields, repeated sessions, physical GPS/expansion hardware and upstream per-callback behavior. The rev117 source audit also records generation-byte-only S3 capture/cleanup and terminal source-error coupling; exact binding and deliberate degraded recording/retry semantics remain open. See RECEIVE_REMAINING_GAPS.md.",
       "s3_role": "S3 receives BLE, correlates Wi-Fi findings and persists sessions.",
       "c5_role": "C5 acquires dual-band Wi-Fi observations at the same time.",
       "related_menu_entries": [],
@@ -660,7 +665,7 @@
       "family": "ble_wardriving",
       "status": "partial",
       "cerberus_evidence": "docs/WARDRIVING_SOURCE_INVENTORY.md",
-      "next_gap": "Completed BLE sweeps and repeats can be logged; Recon session recording also retains repeated generic BLE observations. This is not a continuous per-callback RF archive. Verify saved files, sustained operation and exact upstream continuous-mode semantics.",
+      "next_gap": "Completed BLE sweeps and repeats can be logged; Recon session recording also retains repeated generic BLE observations. This is not a continuous per-callback RF archive. Verify saved files, sustained operation and exact upstream continuous-mode semantics. The rev117 source audit also records generation-byte-only S3 capture/cleanup and terminal source-error coupling; exact binding and deliberate degraded recording/retry semantics remain open. See RECEIVE_REMAINING_GAPS.md.",
       "s3_role": "S3 receives BLE, correlates Wi-Fi findings and persists sessions.",
       "c5_role": "C5 acquires dual-band Wi-Fi observations at the same time.",
       "related_menu_entries": [],
@@ -746,7 +751,7 @@
       "family": "gps_inputs_and_poi",
       "status": "hardware_limited",
       "cerberus_evidence": "docs/WARDRIVING_SOURCE_INVENTORY.md",
-      "next_gap": "Rev52 installs optional UART2 NMEA status, fresh-fix/UTC-gated WiGLE and unlocated fallback logging with host checks. No GPS receiver is attached or live-accepted. Metadata records GPS at result receipt because radio observations lack synchronized RF timestamps. Separate GPS data/NMEA views, PPS, POI and tracker workflows remain open.",
+      "next_gap": "Rev52 installs optional UART2 NMEA status, fresh-fix/UTC-gated WiGLE and unlocated fallback logging with host checks. No GPS receiver is attached or live-accepted. Metadata records GPS at result receipt because radio observations lack synchronized RF timestamps. Separate GPS data/NMEA views, PPS, POI and tracker workflows remain open. RECEIVE_REMAINING_GAPS.md distinguishes missing DATA/NMEA presentation, raw-input retention and field freshness from physical GPS acceptance.",
       "s3_role": "S3 parses optional serial GPS, timestamps, stores and presents location status.",
       "c5_role": "C5 supplies radio observations; S3 attaches location at result receipt, without a synchronized RF timestamp claim.",
       "related_menu_entries": [],
@@ -895,8 +900,8 @@
       "symbol": "BT_SCAN_ANALYZER",
       "family": "ble_general_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/DUAL_RADIO_REV106.md",
-      "next_gap": "Rev106 adds a dedicated passive C5 Analyzer mode with compact atomic boot/job/epoch-bound callback-count and source-elapsed samples; S3 presents independent C5 interval rates beside its own 200 ms callback graph and existing family evidence. Inventory retention/download is bypassed for this mode. See DUAL_RADIO_REV106.md for verified local builds, paired installation and ownership limits. Controlled rate/RF measurements, concurrent physical reception, retry/Stop/Back/next-scan acceptance and sustained headroom remain open. Counts are receiver-specific callbacks, not unique devices or a combined over-air total; C5 excludes responses and includes partial originals. S3 native extended reception remains disabled. Full upstream option and RF-configuration equivalence remain unclaimed.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV116.md",
+      "next_gap": "Local rev116 gives Analyzer independent receiver intent and source-specific retry, plus exact S3 callback/host-epoch start, state, stop and release binding. S3 keeps completed 200ms callback buckets; C5 keeps separate source-clock intervals. Neither count is unique devices and they are not summed. Physical concurrent reception, retry/Stop/Back, loaded headroom and full upstream receive/options equivalence remain pending; installed baseline remains rev113.",
       "s3_role": "S3 receives and classifies its own BLE callbacks, renders both independent activity views, and coordinates owner cleanup.",
       "c5_role": "C5 performs dedicated passive BLE reception and bounded source-clock callback accounting without inventory downloads; Wi-Fi ownership remains separate.",
       "related_menu_entries": [],
@@ -923,7 +928,10 @@
         "s3_main/main/dual_ble_scan.c",
         "s3_main/main/dual_ble_analyzer_history.h",
         "s3_main/main/ble_analyzer_dual_ui.h",
-        "s3_main/main/ui.c"
+        "s3_main/main/ui.c",
+        "s3_main/main/ble_analyzer_live_ui.h",
+        "s3_main/main/s3_ble_scanner.h",
+        "s3_main/main/dual_ble_diagnostics_ui.h"
       ],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open."
     },
@@ -1056,7 +1064,7 @@
       "family": "gps_inputs_and_poi",
       "status": "hardware_limited",
       "cerberus_evidence": "docs/WARDRIVING_SOURCE_INVENTORY.md",
-      "next_gap": "Rev52 installs optional UART2 NMEA status, fresh-fix/UTC-gated WiGLE and unlocated fallback logging with host checks. No GPS receiver is attached or live-accepted. Metadata records GPS at result receipt because radio observations lack synchronized RF timestamps. Separate GPS data/NMEA views, PPS, POI and tracker workflows remain open.",
+      "next_gap": "Rev52 installs optional UART2 NMEA status, fresh-fix/UTC-gated WiGLE and unlocated fallback logging with host checks. No GPS receiver is attached or live-accepted. Metadata records GPS at result receipt because radio observations lack synchronized RF timestamps. Separate GPS data/NMEA views, PPS, POI and tracker workflows remain open. RECEIVE_REMAINING_GAPS.md distinguishes missing DATA/NMEA presentation, raw-input retention and field freshness from physical GPS acceptance.",
       "s3_role": "S3 parses optional serial GPS, timestamps, stores and presents location status.",
       "c5_role": "C5 supplies radio observations; S3 attaches location at result receipt, without a synchronized RF timestamp claim.",
       "related_menu_entries": [],
@@ -1187,7 +1195,7 @@
       "family": "gps_inputs_and_poi",
       "status": "hardware_limited",
       "cerberus_evidence": "docs/WARDRIVING_SOURCE_INVENTORY.md",
-      "next_gap": "Rev52 installs optional UART2 NMEA status, fresh-fix/UTC-gated WiGLE and unlocated fallback logging with host checks. No GPS receiver is attached or live-accepted. Metadata records GPS at result receipt because radio observations lack synchronized RF timestamps. Separate GPS data/NMEA views, PPS, POI and tracker workflows remain open.",
+      "next_gap": "Rev52 installs optional UART2 NMEA status, fresh-fix/UTC-gated WiGLE and unlocated fallback logging with host checks. No GPS receiver is attached or live-accepted. Metadata records GPS at result receipt because radio observations lack synchronized RF timestamps. Separate GPS data/NMEA views, PPS, POI and tracker workflows remain open. RECEIVE_REMAINING_GAPS.md distinguishes missing DATA/NMEA presentation, raw-input retention and field freshness from physical GPS acceptance.",
       "s3_role": "S3 parses optional serial GPS, timestamps, stores and presents location status.",
       "c5_role": "C5 supplies radio observations; S3 attaches location at result receipt, without a synchronized RF timestamp claim.",
       "related_menu_entries": [],
@@ -1271,10 +1279,10 @@
       "symbol": "BT_SCAN_AIRTAG_MON",
       "family": "ble_tag_and_device_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/WATCH_SIGNATURES.md",
-      "next_gap": "Rev59 implements discovery UUID widths, mixed hints and matched-response provenance. Rev59 owner confirms Find My hint display and Monitor STOP/Back on their own tag. Post-exit console shows generation3, idle scanner, released BLE host and no error/reset fault; stopped row evidence is cleared, so no specific packet/response-format or completion-count proof is inferred. Physical new-format/response-only cases, other tag families and repeated/concurrent sessions remain open. Active profile gaps remain outside this change.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV114.md",
+      "next_gap": "Local rev114 uses the shared S3 discovery owner and C5 companion for the dedicated Find My Monitor, with separate source filters, frozen painted proof, independent retries and retained SD evidence. It adds no private history bank or sound action. Actual one/both-receiver reception, hints/age behavior, transitions and SD acceptance remain pending; upstream option/RF parity is unclaimed.",
       "s3_role": "S3 receives BLE broadcasts and applies typed classifiers, evidence display and sessions.",
-      "c5_role": "C5 can survey Wi-Fi concurrently; it does not supply the current BLE inventory.",
+      "c5_role": "C5 independently receives Find My broadcasts and retains its own filtered, frozen observation evidence through the shared BLE companion.",
       "related_menu_entries": [],
       "related_cli_commands": [],
       "cerberus_code": [
@@ -1285,7 +1293,10 @@
         "s3_main/main/ble_findmy_hints.h",
         "s3_main/main/s3_ble_snapshot.c",
         "s3_main/main/s3_findmy_hint_view.h",
-        "s3_main/main/s3_ble_scanner.c"
+        "s3_main/main/s3_ble_scanner.c",
+        "s3_main/main/s3_ble_discovery_live_ui.h",
+        "s3_main/main/dual_ble_live_ui.h",
+        "s3_main/main/ble_archive_live_ui.h"
       ],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open."
     },
@@ -1562,8 +1573,8 @@
       "symbol": "BT_SCAN_FOX_HUNT",
       "family": "ble_general_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/DUAL_RADIO_REV112.md",
-      "next_gap": "Rev112 addresses independent S3/C5 startup and source-selective retry after discovery drains, separate exact-target signal/status/count presentation, and retained cleanup after Stop/Back/sleep. C5 conservative ages and prior-job samples remain explicit; reports are not aggregated across receivers or reset jobs. See DUAL_RADIO_REV112.md for validation status. Controlled movement, one-receiver-only reception, error recovery, repeated transitions and sustained loaded physical acceptance remain pending. Earlier single-S3 acceptance is not dual-receiver validation. No bearing, distance or triangulation claim.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV117.md",
+      "next_gap": "Local rev117 replaces the S3 tracker's generic-scan/generation-byte ownership with an exact passive tracking attachment and sweep binding. Independent C5 tracking and source-specific retries retain their rev112 scope. See the milestone for final candidate evidence. Controlled movement, one-receiver-only reception, reset/retry/Stop/Back behavior and sustained loaded acceptance remain pending. Earlier single-S3 acceptance does not validate this dual-receiver candidate; no distance, bearing or triangulation claim.",
       "s3_role": "S3 retains an immutable typed target, drains discovery, tracks its own reports and renders independently aged per-radio signals.",
       "c5_role": "C5 passively tracks the same exact address and type through a bound session, reporting its own callback RSSI/time rather than S3 evidence.",
       "related_menu_entries": [],
@@ -1576,7 +1587,8 @@
         "c5_firmware/main/ble_scanner.c",
         "s3_main/main/dual_ble_scan.c",
         "s3_main/main/dual_ble_live_ui.h",
-        "s3_main/main/dual_ble_ui.h"
+        "s3_main/main/dual_ble_ui.h",
+        "s3_main/main/s3_ble_scanner.h"
       ],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open."
     },
@@ -1830,7 +1842,7 @@
         56,
         57
       ],
-      "next_gap": "Loaded reports retain ALL/S3/C5/LEGACY filters and stable FILE/NAME/SIGNAL ordering with a 64-byte index, frozen selections and historical ages without IO/clock/radio calls. Live ordinary and all six family lists preserve separate S3/C5 observations, source filters and family recency; rev110 adds original-or-matched-response family admission and labelled response-name fallback under explicit response requests. V6 reports retain independent ADV/RSP bytes, receive metadata, decoded C5 hints and source-specific times/bounds; loaded rows never become live targets. Physical live/offline controls, Stop/Back/Fox/save/reopen acceptance, dense retention, broader history/session recording, complete raw payloads, Marauder AirTag JSON import, AP/SSID editing/persistence, MAC controls and profile parity remain open. See BLE_SD_SNAPSHOTS.md and DUAL_RADIO_REV113.md; verified installed baseline is rev113 (paired boot only; physical acceptance remains pending)."
+      "next_gap": "Loaded reports retain ALL/S3/C5/LEGACY filters and stable FILE/NAME/SIGNAL ordering with a 64-byte index, frozen selections and historical ages without IO/clock/radio calls. Live ordinary and all six family lists preserve separate S3/C5 observations, source filters and family recency; rev110 adds original-or-matched-response family admission and labelled response-name fallback under explicit response requests. V6 reports retain independent ADV/RSP bytes, receive metadata, decoded C5 hints and source-specific times/bounds; loaded rows never become live targets. Physical live/offline controls, Stop/Back/Fox/save/reopen acceptance, dense retention, broader history/session recording, complete raw payloads, Marauder AirTag JSON import, AP/SSID editing/persistence, MAC controls and profile parity remain open. See BLE_SD_SNAPSHOTS.md and DUAL_RADIO_REV113.md; verified installed baseline is rev113 (paired boot only; physical acceptance remains pending). Local rev114–117 source lifecycle improvements are documented separately and remain uninstalled. The current persistence audit distinguishes Marauder's incomplete-provenance AirTag JSON list from Cerberus's v6 retained snapshot; neither is a full callback timeline. See RECEIVE_REMAINING_GAPS.md."
     },
     {
       "name": "storage_and_transfer",
@@ -1864,7 +1876,7 @@
         11,
         14
       ],
-      "next_gap": "Rev110 extends immutable asynchronous BLE save/open to v6, at most 27,680 encoded bytes for 64 source-labelled rows, preserving reads of v1-v5 files and explicit missing evidence. Frozen C5 original and matched-response raw previews, independent receive metadata, decoded family hints and separate historical age bounds accompany S3 matched-response evidence. Offline ADV/RSP and RAW/RX/HINTS views do not query either radio or the current clock. The existing PSRAM worker, reader pins, owner drain and transactional file publication remain. Physical SD save/reopen, power-loss durability, runtime peak memory/stack headroom and prolonged-use acceptance remain open. Complete raw payloads, broader export/upload, AP/SSID persistence and backup/restore parity are incomplete. See DUAL_RADIO_REV110.md for behavior and DUAL_RADIO_REV113.md for current installed validation; verified installed baseline is rev113 (paired boot only; physical acceptance remains pending)."
+      "next_gap": "Rev110 extends immutable asynchronous BLE save/open to v6, at most 27,680 encoded bytes for 64 source-labelled rows, preserving reads of v1-v5 files and explicit missing evidence. Frozen C5 original and matched-response raw previews, independent receive metadata, decoded family hints and separate historical age bounds accompany S3 matched-response evidence. Offline ADV/RSP and RAW/RX/HINTS views do not query either radio or the current clock. The existing PSRAM worker, reader pins, owner drain and transactional file publication remain. Physical SD save/reopen, power-loss durability, runtime peak memory/stack headroom and prolonged-use acceptance remain open. Complete raw payloads, broader export/upload, AP/SSID persistence and backup/restore parity are incomplete. See DUAL_RADIO_REV110.md for behavior and DUAL_RADIO_REV113.md for current installed validation; verified installed baseline is rev113 (paired boot only; physical acceptance remains pending). Local rev114–117 source lifecycle improvements are documented separately and remain uninstalled. The current persistence audit distinguishes Marauder's incomplete-provenance AirTag JSON list from Cerberus's v6 retained snapshot; neither is a full callback timeline. See RECEIVE_REMAINING_GAPS.md."
     },
     {
       "name": "settings_and_device_control",
@@ -1895,7 +1907,7 @@
         16,
         43
       ],
-      "next_gap": "Audit board settings, channel controls, status, stop semantics and command parity against Cerberus's own interface. Rev103 moves read-only console formatting scratch to PSRAM with quiescent lifecycle cleanup and a native frame gate; this does not establish command/menu parity. See DUAL_RADIO_REV103.md for its validation limits."
+      "next_gap": "Audit board settings, channel controls, status, stop semantics and command parity against Cerberus's own interface. Rev103 moves read-only console formatting scratch to PSRAM with quiescent lifecycle cleanup and a native frame gate; this does not establish command/menu parity. See DUAL_RADIO_REV103.md for its validation limits. SHOW_INFO now has a source-reviewed partial implementation; consolidated device information and full stop/command parity remain open. See RECEIVE_REMAINING_GAPS.md."
     },
     {
       "name": "gps_geofence_and_poi",

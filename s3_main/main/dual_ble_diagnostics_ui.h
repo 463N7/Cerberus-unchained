@@ -79,11 +79,25 @@ static void dual_ble_publish_diagnostics(uint64_t now, bool asleep)
     out.fox_error = out.fox_open ? (ble_fox_hunt_barrier_error != ESP_OK ?
         ble_fox_hunt_barrier_error : ble_fox_hunt_cleanup_timed_out ?
         ESP_ERR_TIMEOUT : ble_fox_hunt_error) : ESP_OK;
+    if (out.fox_open) {
+        /* Generic scanner telemetry may already describe a different owner.
+         * This is the Fox UI's scoped observation, not a fresh RF sample. */
+        out.s3_scan_cached = ble_fox_hunt_s3_attached && ble_fox_hunt_s3_owned &&
+            ble_fox_hunt_s3_receiving_cached && !out.fox_pending && !out.fox_stopping;
+        out.s3_state = out.s3_scan_cached ? CERBERUS_BLE_SCAN_RUNNING : 0U;
+        out.s3_scan_error = out.fox_error;
+    }
     bool bound_target = out.fox_open && !out.fox_pending;
-    if (bound_target) {
+    out.s3_track_error = out.fox_open ? ble_fox_hunt_error : ESP_OK;
+    if (bound_target && ble_fox_hunt_s3_attached) {
         cerberus_s3_ble_track_status_t track = {0};
-        out.s3_track_error = cerberus_s3_ble_scanner_track_status(&track);
-        out.s3.target_matches = out.s3_track_error == ESP_OK && track.enabled &&
+        cerberus_s3_ble_track_state_t state = {0};
+        out.s3_track_error = ble_fox_hunt_read_s3(&track, &state);
+        out.s3_scan_cached = out.s3_track_error == ESP_OK && state.owned &&
+            state.receiving && !state.stopping && !out.fox_stopping;
+        out.s3_state = out.s3_scan_cached ? CERBERUS_BLE_SCAN_RUNNING : 0U;
+        if (out.s3_track_error) out.s3_scan_error = out.s3_track_error;
+        out.s3.target_matches = out.s3_track_error == ESP_OK && state.scan_epoch != 0U && track.enabled &&
             track.address_type == ble_fox_hunt_target.address_type &&
             !memcmp(track.address, ble_fox_hunt_target.address, 6U);
         if (out.s3.target_matches) {

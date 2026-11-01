@@ -393,6 +393,8 @@ static void ble_fox_hunt_request_stop(uint32_t now, bool asleep);
 static void ble_fox_hunt_request_s3_retry(uint32_t now);
 static void ble_fox_hunt_request_c5_retry(void);
 static void ble_fox_hunt_attach_s3(void);
+static esp_err_t ble_fox_hunt_read_s3(cerberus_s3_ble_track_status_t *track,
+    cerberus_s3_ble_track_state_t *state);
 static bool ble_analyzer_requested(void);
 static bool ble_analyzer_ready(void);
 static bool ble_analyzer_s3_receiving(void);
@@ -757,8 +759,8 @@ static cerberus_c5_ble_result_t ble_fox_hunt_target;
 static bool ble_fox_hunt_retry_requested;
 static bool ble_fox_hunt_s3_attached, ble_fox_hunt_s3_started;
 static bool ble_fox_hunt_s3_start_pending, ble_fox_hunt_cleanup_timed_out;
-static uint8_t ble_fox_hunt_s3_generation;
-static unsigned ble_fox_hunt_s3_host_epoch;
+static bool ble_fox_hunt_s3_owned, ble_fox_hunt_s3_receiving_cached;
+static uint32_t ble_fox_hunt_s3_start_requested_ms;
 static esp_err_t ble_fox_hunt_error = ESP_OK;
 static esp_err_t ble_fox_hunt_barrier_error = ESP_OK;
 static uint32_t ble_fox_hunt_last_tick_ms, ble_fox_hunt_last_draw_ms;
@@ -4811,17 +4813,20 @@ static esp_err_t draw_ble_fox_hunt(void)
 {
     char line[64], identifier[24];
     cerberus_s3_ble_track_status_t track = {0};
+    cerberus_s3_ble_track_state_t source = {0};
     bool allowed = !ble_fox_hunt_start_pending && !ble_fox_hunt_exit_pending;
     /* Attachment and exact typed identity are independent of the C5 owner.
      * Pending selection/release must not expose either previous target. */
     esp_err_t tracking_error = allowed && ble_fox_hunt_s3_attached ?
-        cerberus_s3_ble_scanner_track_status(&track) : ESP_OK;
-    bool bound = allowed && ble_fox_hunt_s3_attached && tracking_error == ESP_OK && track.enabled &&
+        ble_fox_hunt_read_s3(&track, &source) : ESP_OK;
+    bool bound = allowed && ble_fox_hunt_s3_attached && tracking_error == ESP_OK &&
+        source.scan_epoch != 0U && track.enabled &&
         track.address_type == ble_fox_hunt_target.address_type &&
         !memcmp(track.address, ble_fox_hunt_target.address, 6U);
     if (!bound) memset(&track, 0, sizeof(track));
     bool seen = track.seen && track.rssi_dbm >= -127 && track.rssi_dbm <= 20;
-    bool recent = seen && track.fresh && ble_fox_hunt_s3_started && ble_fox_hunt_error == ESP_OK;
+    bool receiving = bound && source.owned && source.receiving && !source.stopping;
+    bool recent = seen && track.fresh && receiving && ble_fox_hunt_error == ESP_OK;
     cerberus_privacy_format_ble_identifier(ble_fox_hunt_target.address,
         privacy_addresses_masked(), identifier, sizeof(identifier));
     ESP_RETURN_ON_ERROR(draw_centered(68, "FOX HUNT / TWO RECEIVERS", UI_TEXT, 2),
@@ -4844,7 +4849,9 @@ static esp_err_t draw_ble_fox_hunt(void)
         ble_fox_hunt_start_pending ? "S3 / WAITING FOR RELEASE" :
         ble_fox_hunt_retry_requested ? "S3 / RETRY PENDING" :
         ble_fox_hunt_error || tracking_error ? "S3 / ERROR" :
-        bound && ble_fox_hunt_s3_started ? (recent ? "S3 / LISTENING / RECENT" : "S3 / LISTENING") :
+        receiving ? (recent ? "S3 / LISTENING / RECENT" : "S3 / LISTENING") :
+        bound && source.owned ? "S3 / WAITING FOR RADIO" :
+        bound && ble_fox_hunt_s3_started ? "S3 / BETWEEN SWEEPS" :
         bound ? "S3 / WAITING FOR SWEEP" : "S3 / WAITING";
     ESP_RETURN_ON_ERROR(draw_centered(144, state,
         ble_fox_hunt_error || tracking_error ? UI_BAD : recent ? UI_GOOD : UI_MUTED, 1), TAG, "S3 Fox state failed");
@@ -9748,16 +9755,19 @@ static void handle_ble_tap(uint16_t x, uint16_t y)
 static void ble_fox_hunt_finish_exit(bool asleep, bool host_held)
 {
     if (host_held) return; /* A deadline is not evidence of owner release. */
-    if (ble_fox_hunt_s3_attached) cerberus_s3_ble_scanner_track_end();
+    if (ble_fox_hunt_s3_attached) return;
     ble_fox_hunt_s3_attached = ble_fox_hunt_s3_started = false;
+    ble_fox_hunt_s3_owned = ble_fox_hunt_s3_receiving_cached = false;
     ble_fox_hunt_s3_start_pending = ble_fox_hunt_cleanup_timed_out = false;
     ble_fox_hunt_exit_pending = false;
     ble_fox_hunt_retry_requested = false;
     ble_fox_hunt_exit_started_ms = 0U;
     ble_fox_hunt_error = ESP_OK;
     ble_fox_hunt_barrier_error = ESP_OK;
-    ble_mode = ble_fox_hunt_from_c5 ? UI_BLE_MODE_C5 : UI_BLE_MODE_DETAIL;
     ble_fox_hunt_start_pending = false;
+    /* Hidden cleanup must not navigate away from a newer page. */
+    if (current_page != UI_PAGE_BLE || ble_mode != UI_BLE_MODE_FOX_HUNT) return;
+    ble_mode = ble_fox_hunt_from_c5 ? UI_BLE_MODE_C5 : UI_BLE_MODE_DETAIL;
     set_ble_action_message("TRACKING STOPPED", UI_MUTED);
     ui_page_t exit_page = ble_session_exit_page;
     ble_session_exit_page = UI_PAGE_BLE;
@@ -9775,13 +9785,15 @@ static void ble_fox_hunt_finish_exit(bool asleep, bool host_held)
 
 static bool ble_fox_hunt_s3_retryable(void)
 {
-    return !ble_fox_hunt_exit_pending && !ble_fox_hunt_retry_requested &&
+    return current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FOX_HUNT &&
+        !ble_fox_hunt_exit_pending && !ble_fox_hunt_retry_requested &&
         (ble_fox_hunt_barrier_error != ESP_OK || ble_fox_hunt_error != ESP_OK);
 }
 
 static bool ble_fox_hunt_c5_retryable(void)
 {
-    if (ble_fox_hunt_exit_pending || ble_fox_hunt_start_pending ||
+    if (current_page != UI_PAGE_BLE || ble_mode != UI_BLE_MODE_FOX_HUNT ||
+        ble_fox_hunt_exit_pending || ble_fox_hunt_start_pending ||
         dual_ble_ui_mode != CERBERUS_DUAL_BLE_TRACK ||
         dual_ble_ui_type != ble_fox_hunt_target.address_type ||
         memcmp(dual_ble_ui_target, ble_fox_hunt_target.address, 6U)) return false;
@@ -9801,10 +9813,12 @@ static void ble_fox_hunt_request_stop(uint32_t now, bool asleep)
     ble_fox_hunt_retry_requested = false;
     ble_fox_hunt_s3_start_pending = false;
     ble_fox_hunt_last_tick_ms = 0U;
-    ble_discovery_leave();
     /* Cancel a pre-INFO request as well as an attached C5 lease. A zero job
-     * alone is not proof that an enabled request cannot acquire a new owner. */
-    dual_ble_ui_sync(-1, NULL, 0U, (uint64_t)esp_timer_get_time() / 1000U);
+     * alone is not proof that an enabled request cannot acquire a new owner.
+     * A hidden old Fox page must not cancel a newer companion workflow. */
+    if (dual_ble_ui_mode == CERBERUS_DUAL_BLE_TRACK &&
+        dual_ble_ui_type == ble_fox_hunt_target.address_type &&
+        !memcmp(dual_ble_ui_target, ble_fox_hunt_target.address, 6U)) dual_ble_ui_cancel();
 }
 
 static void ble_fox_hunt_request_s3_retry(uint32_t now)
@@ -9814,7 +9828,11 @@ static void ble_fox_hunt_request_s3_retry(uint32_t now)
     ble_fox_hunt_last_tick_ms = 0U;
     ble_fox_hunt_last_draw_ms = 0U;
     if (ble_fox_hunt_start_pending) ble_fox_hunt_barrier_error = ESP_OK;
-    else ble_fox_hunt_retry_requested = true;
+    else {
+        ble_fox_hunt_retry_requested = true;
+        ble_fox_hunt_s3_start_pending = true;
+        ble_fox_hunt_s3_start_requested_ms = now;
+    }
     ble_fox_hunt_error = ESP_OK;
 }
 
@@ -9831,83 +9849,135 @@ static void ble_fox_hunt_attach_s3(void)
     ble_fox_hunt_error = cerberus_s3_ble_scanner_track_begin(
         ble_fox_hunt_target.address, ble_fox_hunt_target.address_type);
     ble_fox_hunt_s3_attached = ble_fox_hunt_error == ESP_OK;
+    ble_fox_hunt_s3_started = ble_fox_hunt_s3_owned = ble_fox_hunt_s3_receiving_cached = false;
     ble_fox_hunt_s3_start_pending = ble_fox_hunt_s3_attached;
+    ble_fox_hunt_s3_start_requested_ms = (uint32_t)(esp_timer_get_time() / 1000LL);
     ble_fox_hunt_retry_requested = false;
+}
+
+/* These native getters validate the scanner's complete epoch/host binding.
+ * A display refresh may run before the next UI tick after a host replacement;
+ * never use the UI's last receiving flag as permission to show its history. */
+static esp_err_t ble_fox_hunt_read_s3(cerberus_s3_ble_track_status_t *track,
+    cerberus_s3_ble_track_state_t *state)
+{
+    memset(track, 0, sizeof(*track));
+    memset(state, 0, sizeof(*state));
+    esp_err_t error = cerberus_s3_ble_scanner_track_get_state(state);
+    if (error == ESP_OK && (!state->attached || state->error))
+        error = state->error ? (esp_err_t)state->error : ESP_ERR_INVALID_STATE;
+    if (error == ESP_OK) error = cerberus_s3_ble_scanner_track_status(track);
+    if (error == ESP_OK && (!track->enabled ||
+        track->address_type != ble_fox_hunt_target.address_type ||
+        memcmp(track->address, ble_fox_hunt_target.address, 6U))) error = ESP_ERR_INVALID_STATE;
+    if (error != ESP_OK) memset(track, 0, sizeof(*track));
+    return error;
+}
+
+static void ble_fox_hunt_observe_s3(const cerberus_s3_ble_track_state_t *state)
+{
+    ble_fox_hunt_s3_attached = state->attached;
+    ble_fox_hunt_s3_owned = state->owned;
+    ble_fox_hunt_s3_receiving_cached = state->owned && state->receiving && !state->stopping;
+    if (!state->attached) ble_fox_hunt_s3_started = false;
+}
+
+static bool ble_fox_hunt_c5_released(void)
+{
+    const cerberus_dual_ble_scan_t *store = dual_ble_ui_store;
+    bool requested = dual_ble_ui_mode == CERBERUS_DUAL_BLE_TRACK &&
+        dual_ble_ui_type == ble_fox_hunt_target.address_type &&
+        !memcmp(dual_ble_ui_target, ble_fox_hunt_target.address, 6U);
+    bool attached = store && store->start.mode == CERBERUS_DUAL_BLE_TRACK &&
+        store->start.address_type == ble_fox_hunt_target.address_type &&
+        !memcmp(store->start.address, ble_fox_hunt_target.address, 6U);
+    return dual_ble_ui_released() || (!requested && !attached);
 }
 
 static void ble_fox_hunt_tick(uint32_t now_ms, bool asleep)
 {
-    if (current_page != UI_PAGE_BLE || ble_mode != UI_BLE_MODE_FOX_HUNT) return;
-    if (asleep && !ble_fox_hunt_exit_pending) ble_fox_hunt_request_stop(now_ms, true);
+    bool visible = current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FOX_HUNT;
+    if (!visible && !ble_fox_hunt_s3_attached && !ble_fox_hunt_start_pending &&
+        !ble_fox_hunt_exit_pending) return;
+    if ((asleep || !visible) && !ble_fox_hunt_exit_pending)
+        ble_fox_hunt_request_stop(now_ms, asleep);
     if (!dual_ble_live_prepare_fox(now_ms, asleep)) return;
     if (ble_fox_hunt_last_tick_ms != 0U &&
         (uint32_t)(now_ms - ble_fox_hunt_last_tick_ms) < 250U) return;
     ble_fox_hunt_last_tick_ms = now_ms;
-    cerberus_ble_scan_status_payload_t status = {0};
-    esp_err_t error = cerberus_s3_ble_scanner_get_status(&status);
-    cerberus_s3_ble_owner_t owner = cerberus_s3_ble_host_owner();
-    if (ble_fox_hunt_s3_started && owner != CERBERUS_S3_BLE_OWNER_SCANNER)
-        ble_fox_hunt_s3_started = false;
-    if (ble_fox_hunt_s3_started &&
-        (cerberus_s3_ble_host_epoch() != ble_fox_hunt_s3_host_epoch ||
-         (error == ESP_OK && status.generation != ble_fox_hunt_s3_generation))) {
-        /* The old local lease is gone. Do not cancel a replacement scanner. */
-        ble_fox_hunt_s3_started = false;
-        ble_fox_hunt_error = ESP_ERR_INVALID_STATE;
+    cerberus_s3_ble_track_state_t state = {0};
+    esp_err_t error = ESP_OK;
+    /* A failed begin owns no attachment. Do not adopt another tracker merely
+     * because a global getter can observe it. */
+    if (ble_fox_hunt_s3_attached) {
+        error = cerberus_s3_ble_scanner_track_get_state(&state);
+        if (error == ESP_OK) {
+            ble_fox_hunt_observe_s3(&state);
+            if (!state.attached) ble_fox_hunt_error = ESP_ERR_INVALID_STATE;
+            else if (state.error && !ble_fox_hunt_retry_requested) ble_fox_hunt_error = state.error;
+        } else {
+            ble_fox_hunt_error = error;
+            ble_fox_hunt_s3_receiving_cached = false;
+        }
     }
-    if (error != ESP_OK) ble_fox_hunt_error = error;
-    else {
-        ble_scan_status = status;
-        ble_scan_checked = true;
+    if (ble_fox_hunt_s3_start_pending &&
+        (uint32_t)(now_ms - ble_fox_hunt_s3_start_requested_ms) >= 12000U) {
+        ble_fox_hunt_error = ESP_ERR_TIMEOUT;
+        ble_fox_hunt_s3_start_pending = false;
+        ble_fox_hunt_retry_requested = false;
     }
-    if ((ble_fox_hunt_exit_pending || ble_fox_hunt_retry_requested) &&
-        ble_fox_hunt_s3_started && error == ESP_OK && status.state == CERBERUS_BLE_SCAN_RUNNING) {
-        esp_err_t stop_error = cerberus_s3_ble_scanner_stop(&status);
-        if (stop_error != ESP_OK && stop_error != ESP_ERR_INVALID_STATE) ble_fox_hunt_error = stop_error;
-        if (cerberus_s3_ble_host_owner() != CERBERUS_S3_BLE_OWNER_SCANNER)
-            ble_fox_hunt_s3_started = false;
+    bool cleanup = ble_fox_hunt_exit_pending || ble_fox_hunt_retry_requested || ble_fox_hunt_error != ESP_OK;
+    if (cleanup && ble_fox_hunt_s3_attached) {
+        if (error != ESP_OK || state.owned) {
+            error = cerberus_s3_ble_scanner_track_stop(&state);
+            if (error == ESP_OK) ble_fox_hunt_observe_s3(&state);
+            else if (error != ESP_ERR_INVALID_STATE) ble_fox_hunt_error = error;
+        }
+        if (error == ESP_OK && !state.owned) {
+            error = cerberus_s3_ble_scanner_track_release();
+            if (error == ESP_OK) {
+                ble_fox_hunt_s3_attached = ble_fox_hunt_s3_started = false;
+                ble_fox_hunt_s3_owned = ble_fox_hunt_s3_receiving_cached = false;
+                memset(&state, 0, sizeof(state));
+            } else ble_fox_hunt_error = error;
+        }
     }
     if (ble_fox_hunt_exit_pending) {
-        bool held = ble_fox_hunt_s3_started || !dual_ble_live_discovery_released() || !dual_ble_ui_released();
+        bool held = ble_fox_hunt_s3_attached ||
+            (ble_fox_hunt_start_pending && !dual_ble_live_discovery_released()) || !ble_fox_hunt_c5_released();
         if (!held) {
             ble_fox_hunt_finish_exit(asleep, false);
             return;
         }
         if ((uint32_t)(now_ms - ble_fox_hunt_exit_started_ms) >= 12000U)
             ble_fox_hunt_cleanup_timed_out = true;
-    } else {
-        if (ble_fox_hunt_retry_requested) {
-            if ((uint32_t)(now_ms - ble_fox_hunt_start_requested_ms) >= 12000U) {
-                /* Keep draining our own failed sweep, but never turn a late
-                 * release into an automatic restart after the retry deadline. */
-                ble_fox_hunt_error = ESP_ERR_TIMEOUT;
-                if (!ble_fox_hunt_s3_started) ble_fox_hunt_retry_requested = false;
-            } else if (!ble_fox_hunt_s3_started && owner == CERBERUS_S3_BLE_OWNER_NONE) {
-                if (ble_fox_hunt_s3_attached) cerberus_s3_ble_scanner_track_end();
-                ble_fox_hunt_s3_attached = false;
-                ble_fox_hunt_attach_s3();
-            }
-        }
-        if (!ble_fox_hunt_retry_requested && ble_fox_hunt_s3_attached && ble_fox_hunt_error == ESP_OK) {
-            if (status.state == CERBERUS_BLE_SCAN_ERROR && !ble_fox_hunt_s3_start_pending) {
-                ble_fox_hunt_error = status.error_code ? (esp_err_t)status.error_code : ESP_FAIL;
-            } else if (!ble_fox_hunt_s3_started) {
-                if (owner != CERBERUS_S3_BLE_OWNER_NONE || (error == ESP_OK && status.state == CERBERUS_BLE_SCAN_RUNNING))
-                    ble_fox_hunt_error = ESP_ERR_INVALID_STATE;
-                else if (error == ESP_OK) {
-                    ble_fox_hunt_error = cerberus_s3_ble_scanner_start(&status);
-                    ble_fox_hunt_s3_start_pending = false;
-                    if (ble_fox_hunt_error == ESP_OK) {
-                        ble_fox_hunt_s3_started = true;
-                        ble_fox_hunt_s3_generation = status.generation;
-                        ble_fox_hunt_s3_host_epoch = cerberus_s3_ble_host_epoch();
-                        ble_scan_status = status;
-                    }
+    } else if (visible && !asleep && error == ESP_OK) {
+        if (ble_fox_hunt_retry_requested && !ble_fox_hunt_s3_attached)
+            ble_fox_hunt_attach_s3();
+        if (!ble_fox_hunt_retry_requested && ble_fox_hunt_s3_attached &&
+            ble_fox_hunt_error == ESP_OK && !state.owned) {
+            error = cerberus_s3_ble_scanner_track_start(&state);
+            if (error == ESP_OK) {
+                ble_fox_hunt_observe_s3(&state);
+                ble_fox_hunt_s3_started = true;
+                ble_fox_hunt_s3_start_pending = false;
+            } else if (state.error) {
+                ble_fox_hunt_error = state.error;
+                ble_fox_hunt_s3_start_pending = false;
+            } else if (error == ESP_ERR_INVALID_STATE) {
+                /* A radio acquired between sweeps may be busy. The exact
+                 * scanner API refuses it; bounded waiting never stops it. */
+                if (!ble_fox_hunt_s3_start_pending) {
+                    ble_fox_hunt_s3_start_pending = true;
+                    ble_fox_hunt_s3_start_requested_ms = now_ms;
                 }
+            } else {
+                ble_fox_hunt_error = error;
+                ble_fox_hunt_s3_start_pending = false;
             }
         }
     }
-    if (!asleep && (ble_fox_hunt_last_draw_ms == 0U ||
+    if (visible && !asleep && (ble_fox_hunt_last_draw_ms == 0U ||
         (uint32_t)(now_ms - ble_fox_hunt_last_draw_ms) >= UI_BLE_REFRESH_MS)) {
         ble_fox_hunt_last_draw_ms = now_ms;
         ESP_ERROR_CHECK(draw_detail_page());

@@ -23,14 +23,6 @@ static esp_err_t draw_detail_page(void)
 static esp_err_t fox_status_error, fox_stop_error, fox_start_error;
 static bool fox_hold_running;
 static unsigned fox_host_epoch;
-static unsigned cerberus_s3_ble_host_epoch(void){return fox_host_epoch;}
-static esp_err_t cerberus_s3_ble_scanner_get_status(cerberus_ble_scan_status_payload_t *s)
-{if(fox_status_error)return fox_status_error;return fixture_base_get_status(s);}
-static esp_err_t cerberus_s3_ble_scanner_stop(cerberus_ble_scan_status_payload_t *s)
-{
-    if(fox_stop_error||fox_hold_running){++stops;*s=scan;return fox_stop_error;}
-    return fixture_base_stop(s);
-}
 /* Exercise the production scan renderer's failed-write/cache recovery path.
  * The inherited monitor keeps its own framebuffer calls unchanged. */
 static unsigned wifi_ui_fill_calls, wifi_ui_fail_fill_after, wifi_ui_full_repairs;
@@ -49,6 +41,7 @@ esp_err_t cerberus_display_fill_rect(uint16_t x,uint16_t y,uint16_t w,uint16_t h
 #include "wifi_readout_diagnostics.h"
 #include "sentinel_scan_view.h"
 #include "ble_analyzer.h"
+#include "s3_ble_tracker.h"
 #include "ble_flock_oui.h"
 #include "discovery_back_geometry.h"
 #include "discovery_live_types.h"
@@ -182,8 +175,8 @@ static bool ble_fox_hunt_exit_pending,ble_fox_hunt_retry_requested;
 static bool ble_fox_hunt_from_c5,ble_fox_hunt_start_pending;
 static bool ble_fox_hunt_s3_attached,ble_fox_hunt_s3_started;
 static bool ble_fox_hunt_s3_start_pending,ble_fox_hunt_cleanup_timed_out;
-static uint8_t ble_fox_hunt_s3_generation;
-static unsigned ble_fox_hunt_s3_host_epoch;
+static bool ble_fox_hunt_s3_owned,ble_fox_hunt_s3_receiving_cached;
+static uint32_t ble_fox_hunt_s3_start_requested_ms;
 static esp_err_t ble_fox_hunt_barrier_error;
 static uint32_t ble_fox_hunt_start_requested_ms;
 static cerberus_c5_ble_result_t ble_fox_hunt_target;
@@ -204,6 +197,7 @@ static bool dual_ble_live_discovery_released(void);
 static bool dual_ble_live_c5_retryable(void);
 static bool ble_discovery_s3_retryable(void);
 static bool dual_ble_ui_released(void);
+static esp_err_t draw_button(uint16_t,uint16_t,uint16_t,uint16_t,const char *);
 #include "discovery_companion_impl.h"
 /* Small bound peer for actual C5 coordinator lifecycle, not a second UI
  * scheduler. Version 1 deliberately avoids inventory transfers in these
@@ -214,7 +208,7 @@ static struct {
     uint32_t job,delay_sample_job;
     unsigned starts,stops,releases,frames,samples;
     esp_err_t start_error,sample_error,stop_error;
-    uint8_t mode,version;
+    uint8_t mode,version,address[6],address_type;
     bool attached,owned,unsupported,hold_stop;
 } composite_peer;
 esp_err_t c5_spi_link_dual_ble_exchange(uint8_t command,const void *request,
@@ -232,6 +226,15 @@ esp_err_t c5_spi_link_dual_ble_exchange(uint8_t command,const void *request,
     assert(request&&request_size>=sizeof(cerberus_dual_ble_binding_t)&&response_size==sizeof(cerberus_dual_ble_status_t));
     const cerberus_dual_ble_binding_t *binding=request;
     assert(binding->boot_id==composite_peer.boot);
+    if(command==CERBERUS_SPI_COMMAND_DUAL_BLE_TRACK_STATUS){
+        assert(binding->job_id==composite_peer.job&&composite_peer.attached&&composite_peer.mode==CERBERUS_DUAL_BLE_TRACK);
+        ++composite_peer.samples;
+        if(composite_peer.sample_error)return composite_peer.sample_error;
+        cerberus_dual_ble_track_t out={.epoch=composite_peer.epoch,.job_id=composite_peer.job,
+            .reports=composite_peer.samples,.age_ms=17U,.rssi=-61,
+            .flags=CERBERUS_DUAL_BLE_SEEN|CERBERUS_DUAL_BLE_RSSI_VALID};
+        memcpy(response,&out,sizeof(out));return ESP_OK;
+    }
     if(command==CERBERUS_SPI_COMMAND_DUAL_BLE_ANALYZER_SAMPLE){
         assert(binding->job_id==composite_peer.job&&composite_peer.attached&&
             composite_peer.mode==CERBERUS_DUAL_BLE_ANALYZER&&response_size==sizeof(cerberus_dual_ble_analyzer_sample_t));
@@ -246,8 +249,10 @@ esp_err_t c5_spi_link_dual_ble_exchange(uint8_t command,const void *request,
     if(command==CERBERUS_SPI_COMMAND_DUAL_BLE_START){
         const cerberus_dual_ble_start_t *start=request;
         assert(request_size==sizeof(*start)&&cerberus_dual_ble_start_valid(start));
-        assert((start->mode==CERBERUS_DUAL_BLE_DISCOVERY||start->mode==CERBERUS_DUAL_BLE_ANALYZER)&&!composite_peer.attached);
+        assert((start->mode==CERBERUS_DUAL_BLE_DISCOVERY||start->mode==CERBERUS_DUAL_BLE_ANALYZER||
+            start->mode==CERBERUS_DUAL_BLE_TRACK)&&!composite_peer.attached);
         composite_peer.mode=start->mode;composite_peer.samples=0U;
+        memcpy(composite_peer.address,start->address,6U);composite_peer.address_type=start->address_type;
         composite_peer.job=start->job_id;++composite_peer.starts;++composite_peer.epoch;
         composite_peer.attached=true;composite_peer.owned=composite_peer.start_error==ESP_OK;
     }else{
@@ -330,11 +335,8 @@ static esp_err_t draw_button(uint16_t x,uint16_t y,uint16_t w,uint16_t h,const c
     }
     return draw_small_button(x,y,w,h,s);
 }
-static esp_err_t cerberus_s3_ble_scanner_track_begin(const uint8_t *address,uint8_t type)
-{++track_begins;if(track_error)return track_error;memcpy(track_address,address,6);track_type=type;return ESP_OK;}
-static void cerberus_s3_ble_scanner_track_end(void){++track_ends;}
-static esp_err_t cerberus_s3_ble_scanner_start(cerberus_ble_scan_status_payload_t *status)
-{++passive_starts;assert(owner==CERBERUS_S3_BLE_OWNER_NONE);if(fox_start_error)return fox_start_error;owner=CERBERUS_S3_BLE_OWNER_SCANNER;scan.state=CERBERUS_BLE_SCAN_RUNNING;++scan.generation;*status=scan;return ESP_OK;}
+#include "track_native_state.h"
+#include "ble_fox_ui_boundary.h"
 esp_err_t cerberus_display_draw_mono_bitmap(uint16_t x,uint16_t y,uint16_t w,uint16_t h,const uint8_t *data,uint16_t fg,uint16_t bg)
 {
     bounds(x,y,w,h);
@@ -411,6 +413,8 @@ static const char *view_error_name(esp_err_t error)
 
 static void seed_list(void)
 {
+    memset(&track_native,0,sizeof(track_native));
+    (void)cerberus_s3_ble_scanner_track_end;(void)track_native_callback;
     (void)cerberus_s3_ble_scanner_analyzer_end;
     (void)actual_discovery_entry;(void)actual_discovery_menu_scan;(void)actual_discovery_missing_selection;
     (void)ble_discovery_cancel_navigation;
@@ -512,7 +516,7 @@ static void check_meta_ui(const char *prefix)
     assert(!memcmp(track_address,expected.peer.address,6)&&track_type==expected.peer.address_type);
     ble_fox_hunt_tick(8500,false);clock_ms=8600;actual_back(440);hold_stop=true;
     ble_fox_hunt_tick(8800,false);assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&ble_fox_hunt_exit_pending);
-    owner=CERBERUS_S3_BLE_OWNER_NONE;ble_fox_hunt_tick(9100,false);
+    owner=CERBERUS_S3_BLE_OWNER_NONE;scan.state=CERBERUS_BLE_SCAN_COMPLETE;ble_fox_hunt_tick(9100,false);
     assert(ble_mode==UI_BLE_MODE_DETAIL&&track_ends==1&&!memcmp(&ble_findmy_selected,&expected,sizeof(expected)));
     actual_back(440);assert(ble_mode==UI_BLE_MODE_LIST&&ble_filter==CERBERUS_S3_BLE_FILTER_META_HINT);
 
@@ -601,7 +605,7 @@ static void check_ibeacon_ui(const char *prefix)
     assert(!memcmp(track_address,expected.peer.address,6)&&track_type==expected.peer.address_type);
     ble_fox_hunt_tick(8500,false);clock_ms=8600;actual_back(440);hold_stop=true;
     ble_fox_hunt_tick(8800,false);assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&ble_fox_hunt_exit_pending);
-    owner=CERBERUS_S3_BLE_OWNER_NONE;ble_fox_hunt_tick(9100,false);
+    owner=CERBERUS_S3_BLE_OWNER_NONE;scan.state=CERBERUS_BLE_SCAN_COMPLETE;ble_fox_hunt_tick(9100,false);
     assert(ble_mode==UI_BLE_MODE_DETAIL&&track_ends==1&&!memcmp(&ble_findmy_selected,&expected,sizeof(expected)));
     clock_ms=12100;drawn[0]='\0';assert(actual_hint_detail()==ESP_OK);assert(strstr(drawn,"RSP / CURRENT / 11s"));
     actual_back(440);assert(ble_mode==UI_BLE_MODE_LIST&&ble_filter==CERBERUS_S3_BLE_FILTER_IBEACON);
@@ -680,7 +684,7 @@ static void check_flock_ui(const char *prefix)
     handle_ble_tap(30,300);assert(dual_ble_live_prepare_fox((uint32_t)clock_ms,false));assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&track_begins==1);
     assert(!memcmp(track_address,expected.peer.address,6)&&track_type==expected.peer.address_type);
     ble_fox_hunt_tick(8500,false);clock_ms=8600;actual_back(440);hold_stop=true;ble_fox_hunt_tick(8800,false);
-    assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&ble_fox_hunt_exit_pending);owner=CERBERUS_S3_BLE_OWNER_NONE;ble_fox_hunt_tick(9100,false);
+    assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&ble_fox_hunt_exit_pending);owner=CERBERUS_S3_BLE_OWNER_NONE;scan.state=CERBERUS_BLE_SCAN_COMPLETE;ble_fox_hunt_tick(9100,false);
     assert(ble_mode==UI_BLE_MODE_DETAIL&&track_ends==1&&!memcmp(&ble_findmy_selected,&expected,sizeof(expected)));
     actual_back(440);assert(ble_mode==UI_BLE_MODE_LIST&&ble_filter==CERBERUS_S3_BLE_FILTER_FLOCK);
 
@@ -786,7 +790,7 @@ static void check_hc_ui(const char *prefix)
     assert(!memcmp(track_address,expected.peer.address,6)&&track_type==1);
     ble_fox_hunt_tick(8500,false);clock_ms=8600;actual_back(440);hold_stop=true;ble_fox_hunt_tick(8800,false);
     assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&ble_fox_hunt_exit_pending);
-    owner=CERBERUS_S3_BLE_OWNER_NONE;ble_fox_hunt_tick(9100,false);
+    owner=CERBERUS_S3_BLE_OWNER_NONE;scan.state=CERBERUS_BLE_SCAN_COMPLETE;ble_fox_hunt_tick(9100,false);
     assert(ble_mode==UI_BLE_MODE_DETAIL&&track_ends==1&&!memcmp(&ble_findmy_selected,&expected,sizeof(expected)));
     clock_ms=10100;drawn[0]='\0';assert(actual_hint_detail()==ESP_OK);assert(strstr(drawn,"RSP NAME HC-06 / 9s"));
     actual_back(440);assert(ble_mode==UI_BLE_MODE_LIST&&ble_filter==CERBERUS_S3_BLE_FILTER_HC_NAME_HINT);
@@ -930,7 +934,7 @@ static void check_recent_ui(const char *prefix)
     assert(ble_mode==UI_BLE_MODE_FOX_HUNT&&track_begins==1&&track_type==1&&track_type==expected.peer.address_type&&!memcmp(track_address,expected.peer.address,6));
     ble_fox_hunt_tick(40500,false);clock_ms=40600;actual_back(440);hold_stop=true;ble_fox_hunt_tick(40800,false);
     assert(ble_fox_hunt_exit_pending&&ble_mode==UI_BLE_MODE_FOX_HUNT);
-    owner=CERBERUS_S3_BLE_OWNER_NONE;ble_fox_hunt_tick(41100,false);
+    owner=CERBERUS_S3_BLE_OWNER_NONE;scan.state=CERBERUS_BLE_SCAN_COMPLETE;ble_fox_hunt_tick(41100,false);
     assert(ble_mode==UI_BLE_MODE_DETAIL&&track_ends==1&&!memcmp(&ble_findmy_selected,&expected,sizeof(expected)));
     actual_back(440);assert(ble_mode==UI_BLE_MODE_LIST&&ble_filter==CERBERUS_S3_BLE_FILTER_FIND_MY);
 
@@ -1581,6 +1585,7 @@ static void check_analyzer_family_ui(const char *prefix)
 }
 
 #include "ble_analyzer_ui_cases.h"
+#include "ble_fox_ui_cases.h"
 
 int main(int argc,char **argv)
 {
@@ -1613,7 +1618,7 @@ int main(int argc,char **argv)
     assert(!memcmp(&ble_findmy_selected,&expected,sizeof(expected)));
     clock_ms=8600;actual_back(440);hold_stop=true;ble_fox_hunt_tick(8800,false);
     assert(ble_fox_hunt_exit_pending&&ble_mode==UI_BLE_MODE_FOX_HUNT&&track_ends==0);
-    owner=CERBERUS_S3_BLE_OWNER_NONE;ble_fox_hunt_tick(9100,false);
+    owner=CERBERUS_S3_BLE_OWNER_NONE;scan.state=CERBERUS_BLE_SCAN_COMPLETE;ble_fox_hunt_tick(9100,false);
     assert(ble_mode==UI_BLE_MODE_DETAIL&&track_ends==1);
     assert(!memcmp(&ble_findmy_selected,&expected,sizeof(expected)));
     clock_ms=10100;drawn[0]='\0';assert(actual_hint_detail()==ESP_OK);assert(strstr(drawn,"ADV HINT 3082 WHITE CODE / 10s"));
@@ -1646,6 +1651,7 @@ int main(int argc,char **argv)
     check_analyzer_family_ui(argv[1]);
     check_analyzer_controls(argv[1]);
     check_analyzer_dual_ui(argv[1]);
+    check_fox_composite_ui(argv[1]);
     current_page=UI_PAGE_BLE;ble_mode=UI_BLE_MODE_FOX_HUNT;ble_fox_hunt_exit_pending=false;
     drawn[0]=0;assert(actual_fox_footer()==ESP_OK&&strstr(drawn,"STOP AND BACK"));
     ble_fox_hunt_exit_pending=true;drawn[0]=0;assert(actual_fox_footer()==ESP_OK&&strstr(drawn,"STOPPING"));

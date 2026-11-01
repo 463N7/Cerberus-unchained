@@ -45,6 +45,8 @@ static void ble_fox_hunt_open_peer(const cerberus_c5_ble_result_t *peer, bool fr
     ble_fox_hunt_exit_started_ms = 0U;
     ble_fox_hunt_retry_requested = false;
     ble_fox_hunt_s3_attached = ble_fox_hunt_s3_started = false;
+    ble_fox_hunt_s3_owned = ble_fox_hunt_s3_receiving_cached = false;
+    ble_fox_hunt_s3_start_requested_ms = 0U;
     ble_fox_hunt_s3_start_pending = ble_fox_hunt_cleanup_timed_out = false;
     ble_fox_hunt_error = ESP_OK;
     ble_fox_hunt_barrier_error = ESP_OK;

@@ -2,6 +2,12 @@
 
 ## Current local checkpoint
 
+[Rev117](DUAL_RADIO_REV117.md) adds exact S3 Fox Hunt scan ownership while
+preserving independent C5 tracking. The coverage ledger has been reconciled
+through these local candidates; [the remaining-work audit](RECEIVE_REMAINING_GAPS.md)
+records unresolved receiver, GPS, storage and device-info scope. Installed
+rev113 and pending physical acceptance remain separate.
+
 [Rev116](DUAL_RADIO_REV116.md) separates Analyzer receiver intent and retries,
 with exact S3 scan ownership for callback accounting and cleanup. It is a local
 candidate; the installed baseline remains rev113 and physical acceptance is

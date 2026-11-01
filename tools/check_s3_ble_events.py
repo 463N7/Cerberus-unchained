@@ -161,6 +161,20 @@ int main(void)
         cerberus_s3_ble_scanner_analyzer_get_state(NULL)!=ESP_ERR_INVALID_ARG ||
         cerberus_s3_ble_scanner_analyzer_stop(NULL)!=ESP_ERR_INVALID_ARG ||
         cerberus_s3_ble_scanner_analyzer_release()!=ESP_ERR_NOT_SUPPORTED) return 15;
+    cerberus_s3_ble_track_state_t track, empty_track={0};
+    memset(&track,0xa5,sizeof(track));
+    if(cerberus_s3_ble_scanner_track_start(&track)!=ESP_ERR_NOT_SUPPORTED ||
+        memcmp(&track,&empty_track,sizeof(track))) return 16;
+    memset(&track,0xa5,sizeof(track));
+    if(cerberus_s3_ble_scanner_track_get_state(&track)!=ESP_ERR_NOT_SUPPORTED ||
+        memcmp(&track,&empty_track,sizeof(track))) return 17;
+    memset(&track,0xa5,sizeof(track));
+    if(cerberus_s3_ble_scanner_track_stop(&track)!=ESP_ERR_NOT_SUPPORTED ||
+        memcmp(&track,&empty_track,sizeof(track))) return 18;
+    if(cerberus_s3_ble_scanner_track_start(NULL)!=ESP_ERR_INVALID_ARG ||
+        cerberus_s3_ble_scanner_track_get_state(NULL)!=ESP_ERR_INVALID_ARG ||
+        cerberus_s3_ble_scanner_track_stop(NULL)!=ESP_ERR_INVALID_ARG ||
+        cerberus_s3_ble_scanner_track_release()!=ESP_ERR_NOT_SUPPORTED) return 19;
     puts("Disabled inventory diagnostics: canonical empty output, explicit unsupported, no host dependencies passed.");
     return 0;
 }

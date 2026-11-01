@@ -19,6 +19,8 @@ companion = (root / "s3_main/main/dual_ble_ui.h").read_text()
 scanner = (root / "s3_main/main/s3_ble_scanner.h").read_text()
 state_end = scanner.index("} cerberus_s3_ble_analyzer_state_t;") + len("} cerberus_s3_ble_analyzer_state_t;")
 (out / "analyzer_native_state.h").write_text(scanner[scanner.rfind("typedef struct {", 0, state_end):state_end] + "\n")
+track_end = scanner.index("} cerberus_s3_ble_track_state_t;") + len("} cerberus_s3_ble_track_state_t;")
+(out / "track_native_state.h").write_text(scanner[scanner.rfind("typedef struct {", 0, track_end):track_end] + "\n")
 (out / "discovery_back_geometry.h").write_text("\n".join(
     re.search(r"^#define " + name + r"\s+\d+", ui, re.M).group(0)
     for name in ("UI_BACK_Y", "UI_BACK_HEIGHT")) + "\n")
@@ -48,6 +50,10 @@ companion_parts = between(companion, "enum {", "static uint64_t dual_ble_ui_cloc
 companion_parts += "\n".join(function(companion, name) for name in (
     "dual_ble_ui_get_view", "dual_ble_ui_apply_selection", "dual_ble_ui_get_analyzer_view", "dual_ble_ui_open", "dual_ble_ui_select_frozen_from", "dual_ble_ui_select_frozen",
     "dual_ble_ui_selected_peer", "dual_ble_ui_tap"))
+fox_type_end = companion.index("} dual_ble_ui_fox_view_t;") + len("} dual_ble_ui_fox_view_t;")
+companion_parts += companion[companion.rfind("typedef struct {", 0, fox_type_end):fox_type_end]
+companion_parts += "\n".join(function(companion, name) for name in (
+    "dual_ble_ui_fox_view", "dual_ble_ui_fox_meter", "dual_ble_ui_fox_retry", "dual_ble_ui_draw_fox"))
 (out / "discovery_companion_impl.h").write_text(companion_parts)
 
 # Runtime-selectable actual C5 owner facade for composite source-failure tests.
@@ -89,6 +95,7 @@ parts += "static void actual_discovery_menu_scan(void) " + block(ui, ui.index("{
 entry_fallback = ui.index("            if (!ble_selection_valid) {", entry_menu)
 parts += "static void actual_discovery_missing_selection(void) " + block(ui, ui.index("{", entry_fallback)) + "\n"
 parts += between(ui, "static void ble_fox_hunt_finish_exit(", "static bool ble_sound_terminal(")
+parts += between(ui, "static esp_err_t draw_ble_fox_hunt(", "static esp_err_t draw_ble_analyzer(")
 parts += between(ui, "static esp_err_t draw_ble_analyzer(", "static esp_err_t draw_ble_feature_menu(")
 metadata_start = ui.index("    if (cerberus_ble_rssi_valid(", ui.index("    format_ble_service(&ble_selected_result, service, sizeof(service));"))
 metadata_end = ui.index('\n', ui.index('TAG, "BLE detail metadata failed");', metadata_start))
