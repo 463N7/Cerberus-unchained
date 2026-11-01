@@ -380,6 +380,12 @@ static bool dual_ble_live_discovery_released(void);
 static void dual_ble_live_tap(uint16_t x, uint16_t y);
 static void ble_fox_hunt_open_peer(const cerberus_c5_ble_result_t *peer, bool from_c5);
 static bool dual_ble_live_prepare_fox(uint32_t now, bool asleep);
+static bool ble_fox_hunt_s3_retryable(void);
+static bool ble_fox_hunt_c5_retryable(void);
+static void ble_fox_hunt_request_stop(uint32_t now, bool asleep);
+static void ble_fox_hunt_request_s3_retry(uint32_t now);
+static void ble_fox_hunt_request_c5_retry(void);
+static void ble_fox_hunt_attach_s3(void);
 static esp_err_t live_analyze_selected_wifi_ssid(void);
 static esp_err_t live_compare_wifi_baseline(void);
 static bool live_wifi_baseline_current(void);
@@ -728,7 +734,12 @@ static bool ble_fox_hunt_from_c5, ble_fox_hunt_start_pending;
 static uint32_t ble_fox_hunt_start_requested_ms;
 static cerberus_c5_ble_result_t ble_fox_hunt_target;
 static bool ble_fox_hunt_retry_requested;
+static bool ble_fox_hunt_s3_attached, ble_fox_hunt_s3_started;
+static bool ble_fox_hunt_s3_start_pending, ble_fox_hunt_cleanup_timed_out;
+static uint8_t ble_fox_hunt_s3_generation;
+static unsigned ble_fox_hunt_s3_host_epoch;
 static esp_err_t ble_fox_hunt_error = ESP_OK;
+static esp_err_t ble_fox_hunt_barrier_error = ESP_OK;
 static uint32_t ble_fox_hunt_last_tick_ms, ble_fox_hunt_last_draw_ms;
 static uint32_t ble_fox_hunt_exit_started_ms;
 static ui_page_t ble_session_exit_page = UI_PAGE_BLE;
@@ -4775,74 +4786,67 @@ static esp_err_t draw_ble_fox_hunt(void)
 {
     char line[64], identifier[24];
     cerberus_s3_ble_track_status_t track = {0};
-    /* The displayed target changes before both scanners finish draining.
-     * Until track_begin binds it, the S3 tracker may still describe the prior
-     * target; neither its sample, meter nor report count belongs on this page. */
-    esp_err_t tracking_error = ble_fox_hunt_start_pending ? ESP_OK :
-        cerberus_s3_ble_scanner_track_status(&track);
+    bool allowed = !ble_fox_hunt_start_pending && !ble_fox_hunt_exit_pending;
+    /* Attachment and exact typed identity are independent of the C5 owner.
+     * Pending selection/release must not expose either previous target. */
+    esp_err_t tracking_error = allowed && ble_fox_hunt_s3_attached ?
+        cerberus_s3_ble_scanner_track_status(&track) : ESP_OK;
+    bool bound = allowed && ble_fox_hunt_s3_attached && tracking_error == ESP_OK && track.enabled &&
+        track.address_type == ble_fox_hunt_target.address_type &&
+        !memcmp(track.address, ble_fox_hunt_target.address, 6U);
+    if (!bound) memset(&track, 0, sizeof(track));
+    bool seen = track.seen && track.rssi_dbm >= -127 && track.rssi_dbm <= 20;
+    bool recent = seen && track.fresh && ble_fox_hunt_s3_started && ble_fox_hunt_error == ESP_OK;
     cerberus_privacy_format_ble_identifier(ble_fox_hunt_target.address,
         privacy_addresses_masked(), identifier, sizeof(identifier));
-    ESP_RETURN_ON_ERROR(draw_centered(68, "FOX HUNT / LIVE BLE RSSI", UI_TEXT, 2),
+    ESP_RETURN_ON_ERROR(draw_centered(68, "FOX HUNT / TWO RECEIVERS", UI_TEXT, 2),
         TAG, "BLE Fox Hunt title failed");
     snprintf(line, sizeof(line), "%.30s", ble_fox_hunt_target.name[0] ?
         ble_fox_hunt_target.name : "<UNNAMED DEVICE>");
     ESP_RETURN_ON_ERROR(draw_centered(92, line, UI_TEXT, 1),
         TAG, "BLE Fox Hunt name failed");
-    ESP_RETURN_ON_ERROR(draw_centered(110, identifier, UI_MUTED, 1),
+    snprintf(line, sizeof(line), "%s / TYPE %u", identifier, ble_fox_hunt_target.address_type);
+    ESP_RETURN_ON_ERROR(draw_centered(110, line, UI_MUTED, 1),
         TAG, "BLE Fox Hunt identity failed");
-    const char *state = "SEARCHING";
-    uint16_t state_color = UI_MUTED;
-    if (ble_fox_hunt_exit_pending) state = "STOPPING";
-    else if (ble_fox_hunt_start_pending && ble_fox_hunt_error == ESP_OK) state = "RELEASING SCANNERS";
-    else if (ble_fox_hunt_error != ESP_OK || tracking_error != ESP_OK) {
-        state = "SCAN ERROR";
-        state_color = UI_BAD;
-    } else if (track.fresh) {
-        state = "LIVE";
-        state_color = UI_GOOD;
-    } else if (track.seen) {
-        state = "STALE / TARGET NOT SEEN";
-    }
-    ESP_RETURN_ON_ERROR(draw_centered(140, state, state_color, 2),
-        TAG, "BLE Fox Hunt state failed");
-    if (track.seen) {
-        snprintf(line, sizeof(line), "S3 %d dBm / AGE %lu.%lus",
-            (int)track.rssi_dbm, (unsigned long)(track.age_ms / 1000U),
-            (unsigned long)((track.age_ms % 1000U) / 100U));
-        ESP_RETURN_ON_ERROR(draw_centered(176, line, track.fresh ? UI_GOOD : UI_MUTED, 1),
-            TAG, "BLE Fox Hunt RSSI failed");
-    } else {
-        ESP_RETURN_ON_ERROR(draw_centered(176, "WAITING FOR THIS EXACT ADDRESS", UI_MUTED, 1),
-            TAG, "BLE Fox Hunt search failed");
-    }
-    ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(20, 204, 280, 26, UI_PANEL),
-        TAG, "BLE Fox Hunt meter background failed");
-    if (track.fresh) {
-        int bounded = track.rssi_dbm;
-        if (bounded < -100) bounded = -100;
-        if (bounded > -30) bounded = -30;
-        uint16_t width = (uint16_t)(((bounded + 100) * 280) / 70);
-        if (width > 0U)
-            ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(20, 204, width, 26, UI_GOOD),
-                TAG, "BLE Fox Hunt meter failed");
-    }
-    snprintf(line, sizeof(line), "S3 MATCHED REPORTS %lu", (unsigned long)track.reports);
-    ESP_RETURN_ON_ERROR(draw_centered(250, line, UI_TEXT, 1),
-        TAG, "BLE Fox Hunt reports failed");
-    ESP_RETURN_ON_ERROR(dual_ble_ui_draw_fox(280, (uint64_t)esp_timer_get_time() / 1000U),
-        TAG, "C5 BLE Fox Hunt status failed");
-    if (ble_fox_hunt_error != ESP_OK) {
-        snprintf(line, sizeof(line), "S3 SCAN ERROR %ld", (long)ble_fox_hunt_error);
-        ESP_RETURN_ON_ERROR(draw_centered(308, line, UI_BAD, 1),
-            TAG, "BLE Fox Hunt error failed");
-    } else {
-        ESP_RETURN_ON_ERROR(draw_centered(308,
-            "ADDRESS CHANGES END THIS TRACK", UI_MUTED, 1),
-            TAG, "BLE Fox Hunt roles failed");
-    }
-    return draw_button(40, 350, 240, 50,
-        ble_fox_hunt_exit_pending ? "STOPPING" :
-        (ble_fox_hunt_error == ESP_OK ? "STOP TRACKING" : "RETRY SCAN"));
+    const char *shared = ble_fox_hunt_exit_pending ?
+        (ble_fox_hunt_cleanup_timed_out ? "RELEASE DELAYED / STILL STOPPING" : "STOPPING BOTH RECEIVERS") :
+        ble_fox_hunt_start_pending ?
+        (ble_fox_hunt_barrier_error ? "START DELAYED / RETRY START" : "RELEASING PREVIOUS SCANNERS") :
+        "EXACT ADDRESS + TYPE / EACH SOURCE SEPARATE";
+    ESP_RETURN_ON_ERROR(draw_centered(126, shared,
+        ble_fox_hunt_cleanup_timed_out || ble_fox_hunt_barrier_error ? UI_BAD : UI_MUTED, 1), TAG, "Fox shared state failed");
+    const char *state = ble_fox_hunt_exit_pending ? "S3 / STOPPING" :
+        ble_fox_hunt_start_pending ? "S3 / WAITING FOR RELEASE" :
+        ble_fox_hunt_retry_requested ? "S3 / RETRY PENDING" :
+        ble_fox_hunt_error || tracking_error ? "S3 / ERROR" :
+        bound && ble_fox_hunt_s3_started ? (recent ? "S3 / LISTENING / RECENT" : "S3 / LISTENING") :
+        bound ? "S3 / WAITING FOR SWEEP" : "S3 / WAITING";
+    ESP_RETURN_ON_ERROR(draw_centered(144, state,
+        ble_fox_hunt_error || tracking_error ? UI_BAD : recent ? UI_GOOD : UI_MUTED, 1), TAG, "S3 Fox state failed");
+    if (seen) snprintf(line, sizeof(line), "S3 LAST %d dBm / EXACT AGE %lu ms",
+        track.rssi_dbm, (unsigned long)track.age_ms);
+    else snprintf(line, sizeof(line), "S3 NO SIGNAL SAMPLE FOR THIS TARGET");
+    ESP_RETURN_ON_ERROR(draw_centered(162, line, recent ? UI_GOOD : UI_MUTED, 1), TAG, "S3 Fox sample failed");
+    ESP_RETURN_ON_ERROR(dual_ble_ui_fox_meter(180, seen, track.rssi_dbm,
+        recent ? UI_GOOD : UI_MUTED), TAG, "S3 Fox meter failed");
+    if (bound) snprintf(line, sizeof(line), "S3 REPORTS %s%lu / ADV + RESPONSES",
+        track.reports == UINT32_MAX ? ">=" : "", (unsigned long)track.reports);
+    else snprintf(line, sizeof(line), "S3 REPORTS / NOT AVAILABLE");
+    ESP_RETURN_ON_ERROR(draw_centered(200, line, UI_TEXT, 1), TAG, "S3 Fox reports failed");
+    if (ble_fox_hunt_error || tracking_error) snprintf(line, sizeof(line), "S3 ERROR %ld",
+        (long)(ble_fox_hunt_error ? ble_fox_hunt_error : tracking_error));
+    else snprintf(line, sizeof(line), "%s", seen && !track.fresh ?
+        "TRACKER / LAST SAMPLE NOT RECENT" : "TRACKER COUNT / RESETS WITH HOST");
+    ESP_RETURN_ON_ERROR(draw_centered(216, line,
+        ble_fox_hunt_error || tracking_error ? UI_BAD : UI_MUTED, 1), TAG, "S3 Fox meaning failed");
+    ESP_RETURN_ON_ERROR(dual_ble_ui_draw_fox(238, (uint64_t)esp_timer_get_time() / 1000U,
+        ble_fox_hunt_target.address, ble_fox_hunt_target.address_type, allowed,
+        ble_fox_hunt_exit_pending ? "C5 / STOPPING" : ble_fox_hunt_start_pending ? "C5 / WAITING FOR RELEASE" : NULL),
+        TAG, "C5 Fox panel failed");
+    ESP_RETURN_ON_ERROR(dual_ble_ui_fox_retry(8,
+        ble_fox_hunt_start_pending ? "RETRY START" : "RETRY S3", ble_fox_hunt_s3_retryable()), TAG, "S3 Fox retry failed");
+    ESP_RETURN_ON_ERROR(dual_ble_ui_fox_retry(164, "RETRY C5", ble_fox_hunt_c5_retryable()), TAG, "C5 Fox retry failed");
+    return draw_button(40, 390, 240, 32, ble_fox_hunt_exit_pending ? "STOPPING BOTH" : "STOP BOTH RECEIVERS");
 }
 
 static esp_err_t draw_ble_analyzer(void)
@@ -8084,7 +8088,7 @@ static esp_err_t draw_detail_page(void)
     } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_DETAIL) {
         back_label = ble_selected_from_monitor && ble_findmy_monitor ? "FIND MY MONITOR" : "BLE LIST";
     } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FOX_HUNT) {
-        back_label = ble_fox_hunt_exit_pending ? "STOPPING" : "STOP TRACKING";
+        back_label = ble_fox_hunt_exit_pending ? "STOPPING" : "STOP AND BACK";
     } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_ANALYZER) {
         back_label = ble_analyzer_exit_pending ? "STOPPING" : "STOP ANALYZER";
     } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FINDMY_MONITOR) {
@@ -9299,20 +9303,16 @@ static void handle_ble_tap(uint16_t x, uint16_t y)
         return;
     }
     if (ble_mode == UI_BLE_MODE_FOX_HUNT) {
-        if (y >= 350U && y < 400U && x >= 40U && x < 280U &&
-            !ble_fox_hunt_exit_pending) {
-            if (ble_fox_hunt_error != ESP_OK) {
-                ble_fox_hunt_error = ESP_OK;
-                ble_fox_hunt_retry_requested = true;
-                ble_fox_hunt_start_requested_ms = (uint32_t)(esp_timer_get_time() / 1000LL);
-                dual_ble_ui_retry();
-            }
-            else {
-                ble_fox_hunt_exit_pending = true;
-                ble_fox_hunt_exit_started_ms =
-                    (uint32_t)(esp_timer_get_time() / 1000LL);
-            }
-            ble_fox_hunt_last_tick_ms = 0U;
+        if (ble_fox_hunt_exit_pending) return;
+        uint32_t now = (uint32_t)(esp_timer_get_time() / 1000LL);
+        if (y >= 350U && y < 382U && x >= 8U && x < 156U && ble_fox_hunt_s3_retryable()) {
+            ble_fox_hunt_request_s3_retry(now);
+            ESP_ERROR_CHECK(draw_detail_page());
+        } else if (y >= 350U && y < 382U && x >= 164U && x < 312U && ble_fox_hunt_c5_retryable()) {
+            ble_fox_hunt_request_c5_retry();
+            ESP_ERROR_CHECK(draw_detail_page());
+        } else if (y >= 390U && y < 422U && x >= 40U && x < 280U) {
+            ble_fox_hunt_request_stop(now, false);
             ESP_ERROR_CHECK(draw_detail_page());
         }
         return;
@@ -9731,20 +9731,20 @@ static void handle_ble_tap(uint16_t x, uint16_t y)
 
 static void ble_fox_hunt_finish_exit(bool asleep, bool host_held)
 {
-    cerberus_s3_ble_scanner_track_end();
+    if (host_held) return; /* A deadline is not evidence of owner release. */
+    if (ble_fox_hunt_s3_attached) cerberus_s3_ble_scanner_track_end();
+    ble_fox_hunt_s3_attached = ble_fox_hunt_s3_started = false;
+    ble_fox_hunt_s3_start_pending = ble_fox_hunt_cleanup_timed_out = false;
     ble_fox_hunt_exit_pending = false;
     ble_fox_hunt_retry_requested = false;
     ble_fox_hunt_exit_started_ms = 0U;
     ble_fox_hunt_error = ESP_OK;
+    ble_fox_hunt_barrier_error = ESP_OK;
     ble_mode = ble_fox_hunt_from_c5 ? UI_BLE_MODE_C5 : UI_BLE_MODE_DETAIL;
     ble_fox_hunt_start_pending = false;
-    if (host_held)
-        set_ble_action_message("RADIO CLEANUP HELD / RESET REQUIRED", UI_BAD);
-    else
-        set_ble_action_message("TRACKING STOPPED", UI_MUTED);
+    set_ble_action_message("TRACKING STOPPED", UI_MUTED);
     ui_page_t exit_page = ble_session_exit_page;
     ble_session_exit_page = UI_PAGE_BLE;
-    if (host_held) exit_page = UI_PAGE_BLE;
     if (exit_page == UI_PAGE_BLE_ATTACK) {
         ble_attack_selecting = false;
         open_tool_page(UI_PAGE_BLE_ATTACK);
@@ -9757,58 +9757,138 @@ static void ble_fox_hunt_finish_exit(bool asleep, bool host_held)
     if (!asleep) ESP_ERROR_CHECK(draw_detail_page());
 }
 
+static bool ble_fox_hunt_s3_retryable(void)
+{
+    return !ble_fox_hunt_exit_pending && !ble_fox_hunt_retry_requested &&
+        (ble_fox_hunt_barrier_error != ESP_OK || ble_fox_hunt_error != ESP_OK);
+}
+
+static bool ble_fox_hunt_c5_retryable(void)
+{
+    if (ble_fox_hunt_exit_pending || ble_fox_hunt_start_pending ||
+        dual_ble_ui_mode != CERBERUS_DUAL_BLE_TRACK ||
+        dual_ble_ui_type != ble_fox_hunt_target.address_type ||
+        memcmp(dual_ble_ui_target, ble_fox_hunt_target.address, 6U)) return false;
+    cerberus_dual_ble_view_t view;
+    dual_ble_ui_get_view(&view);
+    return view.error != ESP_OK && !view.stopping;
+}
+
+static void ble_fox_hunt_request_stop(uint32_t now, bool asleep)
+{
+    if (!ble_fox_hunt_exit_pending) {
+        ble_fox_hunt_exit_pending = true;
+        ble_fox_hunt_exit_started_ms = now;
+        ble_fox_hunt_cleanup_timed_out = false;
+    }
+    if (asleep) ble_session_exit_page = UI_PAGE_BLE;
+    ble_fox_hunt_retry_requested = false;
+    ble_fox_hunt_s3_start_pending = false;
+    ble_fox_hunt_last_tick_ms = 0U;
+    ble_discovery_leave();
+    /* Cancel a pre-INFO request as well as an attached C5 lease. A zero job
+     * alone is not proof that an enabled request cannot acquire a new owner. */
+    dual_ble_ui_sync(-1, NULL, 0U, (uint64_t)esp_timer_get_time() / 1000U);
+}
+
+static void ble_fox_hunt_request_s3_retry(uint32_t now)
+{
+    if (!ble_fox_hunt_s3_retryable()) return;
+    ble_fox_hunt_start_requested_ms = now;
+    ble_fox_hunt_last_tick_ms = 0U;
+    ble_fox_hunt_last_draw_ms = 0U;
+    if (ble_fox_hunt_start_pending) ble_fox_hunt_barrier_error = ESP_OK;
+    else ble_fox_hunt_retry_requested = true;
+    ble_fox_hunt_error = ESP_OK;
+}
+
+static void ble_fox_hunt_request_c5_retry(void)
+{
+    if (!ble_fox_hunt_c5_retryable()) return;
+    /* Same desired target; the C5 coordinator drains before its retry. */
+    dual_ble_ui_retry();
+    ble_fox_hunt_last_draw_ms = 0U;
+}
+
+static void ble_fox_hunt_attach_s3(void)
+{
+    ble_fox_hunt_error = cerberus_s3_ble_scanner_track_begin(
+        ble_fox_hunt_target.address, ble_fox_hunt_target.address_type);
+    ble_fox_hunt_s3_attached = ble_fox_hunt_error == ESP_OK;
+    ble_fox_hunt_s3_start_pending = ble_fox_hunt_s3_attached;
+    ble_fox_hunt_retry_requested = false;
+}
+
 static void ble_fox_hunt_tick(uint32_t now_ms, bool asleep)
 {
     if (current_page != UI_PAGE_BLE || ble_mode != UI_BLE_MODE_FOX_HUNT) return;
+    if (asleep && !ble_fox_hunt_exit_pending) ble_fox_hunt_request_stop(now_ms, true);
     if (!dual_ble_live_prepare_fox(now_ms, asleep)) return;
     if (ble_fox_hunt_last_tick_ms != 0U &&
         (uint32_t)(now_ms - ble_fox_hunt_last_tick_ms) < 250U) return;
     ble_fox_hunt_last_tick_ms = now_ms;
     cerberus_ble_scan_status_payload_t status = {0};
     esp_err_t error = cerberus_s3_ble_scanner_get_status(&status);
-    if (error != ESP_OK) {
-        ble_fox_hunt_error = error;
-        if (ble_fox_hunt_exit_pending &&
-            cerberus_s3_ble_host_owner() == CERBERUS_S3_BLE_OWNER_SCANNER)
-            (void)cerberus_s3_ble_scanner_stop(&status);
-    } else {
+    cerberus_s3_ble_owner_t owner = cerberus_s3_ble_host_owner();
+    if (ble_fox_hunt_s3_started && owner != CERBERUS_S3_BLE_OWNER_SCANNER)
+        ble_fox_hunt_s3_started = false;
+    if (ble_fox_hunt_s3_started &&
+        (cerberus_s3_ble_host_epoch() != ble_fox_hunt_s3_host_epoch ||
+         (error == ESP_OK && status.generation != ble_fox_hunt_s3_generation))) {
+        /* The old local lease is gone. Do not cancel a replacement scanner. */
+        ble_fox_hunt_s3_started = false;
+        ble_fox_hunt_error = ESP_ERR_INVALID_STATE;
+    }
+    if (error != ESP_OK) ble_fox_hunt_error = error;
+    else {
         ble_scan_status = status;
         ble_scan_checked = true;
-        if (ble_fox_hunt_exit_pending) {
-            if (status.state == CERBERUS_BLE_SCAN_RUNNING) {
-                error = cerberus_s3_ble_scanner_stop(&status);
-                if (error != ESP_OK && error != ESP_ERR_INVALID_STATE)
-                    ble_fox_hunt_error = error;
-            }
-        } else if (ble_fox_hunt_error == ESP_OK) {
-            if (status.state == CERBERUS_BLE_SCAN_ERROR &&
-                !ble_fox_hunt_retry_requested) {
-                ble_fox_hunt_error = status.error_code != 0 ?
-                    (esp_err_t)status.error_code : ESP_FAIL;
-            } else if ((status.state == CERBERUS_BLE_SCAN_COMPLETE ||
-                status.state == CERBERUS_BLE_SCAN_IDLE ||
-                (status.state == CERBERUS_BLE_SCAN_ERROR &&
-                    ble_fox_hunt_retry_requested)) &&
-                cerberus_s3_ble_host_owner() == CERBERUS_S3_BLE_OWNER_NONE) {
-                error = cerberus_s3_ble_scanner_start(&status);
-                if (error == ESP_OK) {
-                    ble_scan_status = status;
-                    ble_fox_hunt_retry_requested = false;
-                } else if (error != ESP_ERR_INVALID_STATE) {
-                    ble_fox_hunt_error = error;
-                    ble_fox_hunt_retry_requested = false;
-                }
-            }
-        }
+    }
+    if ((ble_fox_hunt_exit_pending || ble_fox_hunt_retry_requested) &&
+        ble_fox_hunt_s3_started && error == ESP_OK && status.state == CERBERUS_BLE_SCAN_RUNNING) {
+        esp_err_t stop_error = cerberus_s3_ble_scanner_stop(&status);
+        if (stop_error != ESP_OK && stop_error != ESP_ERR_INVALID_STATE) ble_fox_hunt_error = stop_error;
+        if (cerberus_s3_ble_host_owner() != CERBERUS_S3_BLE_OWNER_SCANNER)
+            ble_fox_hunt_s3_started = false;
     }
     if (ble_fox_hunt_exit_pending) {
-        bool host_held = cerberus_s3_ble_host_owner() ==
-            CERBERUS_S3_BLE_OWNER_SCANNER;
-        bool deadline_reached = (uint32_t)(now_ms -
-            ble_fox_hunt_exit_started_ms) >= 12000U;
-        if ((!host_held && dual_ble_ui_released()) || deadline_reached) {
-            ble_fox_hunt_finish_exit(asleep, host_held || !dual_ble_ui_released());
+        bool held = ble_fox_hunt_s3_started || !dual_ble_live_discovery_released() || !dual_ble_ui_released();
+        if (!held) {
+            ble_fox_hunt_finish_exit(asleep, false);
             return;
+        }
+        if ((uint32_t)(now_ms - ble_fox_hunt_exit_started_ms) >= 12000U)
+            ble_fox_hunt_cleanup_timed_out = true;
+    } else {
+        if (ble_fox_hunt_retry_requested) {
+            if ((uint32_t)(now_ms - ble_fox_hunt_start_requested_ms) >= 12000U) {
+                /* Keep draining our own failed sweep, but never turn a late
+                 * release into an automatic restart after the retry deadline. */
+                ble_fox_hunt_error = ESP_ERR_TIMEOUT;
+                if (!ble_fox_hunt_s3_started) ble_fox_hunt_retry_requested = false;
+            } else if (!ble_fox_hunt_s3_started && owner == CERBERUS_S3_BLE_OWNER_NONE) {
+                if (ble_fox_hunt_s3_attached) cerberus_s3_ble_scanner_track_end();
+                ble_fox_hunt_s3_attached = false;
+                ble_fox_hunt_attach_s3();
+            }
+        }
+        if (!ble_fox_hunt_retry_requested && ble_fox_hunt_s3_attached && ble_fox_hunt_error == ESP_OK) {
+            if (status.state == CERBERUS_BLE_SCAN_ERROR && !ble_fox_hunt_s3_start_pending) {
+                ble_fox_hunt_error = status.error_code ? (esp_err_t)status.error_code : ESP_FAIL;
+            } else if (!ble_fox_hunt_s3_started) {
+                if (owner != CERBERUS_S3_BLE_OWNER_NONE || (error == ESP_OK && status.state == CERBERUS_BLE_SCAN_RUNNING))
+                    ble_fox_hunt_error = ESP_ERR_INVALID_STATE;
+                else if (error == ESP_OK) {
+                    ble_fox_hunt_error = cerberus_s3_ble_scanner_start(&status);
+                    ble_fox_hunt_s3_start_pending = false;
+                    if (ble_fox_hunt_error == ESP_OK) {
+                        ble_fox_hunt_s3_started = true;
+                        ble_fox_hunt_s3_generation = status.generation;
+                        ble_fox_hunt_s3_host_epoch = cerberus_s3_ble_host_epoch();
+                        ble_scan_status = status;
+                    }
+                }
+            }
         }
     }
     if (!asleep && (ble_fox_hunt_last_draw_ms == 0U ||
@@ -11798,12 +11878,7 @@ static void handle_tap(uint16_t x, uint16_t y)
             } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FOX_HUNT) {
                 ble_session_exit_page = ble_attack_selecting ? UI_PAGE_BLE_ATTACK :
                     (learning_tool_active ? tool_parent_page : UI_PAGE_BLE);
-                if (!ble_fox_hunt_exit_pending) {
-                    ble_fox_hunt_exit_pending = true;
-                    ble_fox_hunt_exit_started_ms =
-                        (uint32_t)(esp_timer_get_time() / 1000LL);
-                }
-                ble_fox_hunt_last_tick_ms = 0U;
+                ble_fox_hunt_request_stop((uint32_t)(esp_timer_get_time() / 1000LL), false);
                 ESP_ERROR_CHECK(draw_detail_page());
             } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_ANALYZER) {
                 ble_session_exit_page = ble_attack_selecting ? UI_PAGE_BLE_ATTACK :

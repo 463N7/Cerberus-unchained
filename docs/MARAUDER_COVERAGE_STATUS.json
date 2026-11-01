@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "checkpoint": "rev111-source",
-  "scope": "Editorial source/workflow status through rev111's bounded C5 callback-dispatch cleanup and the rev110 opt-in C5 scan-response collection, source-separated live evidence and v6 SD retention. The matched rev111/C5 firmware67 update is installed with verified writes, paired boot and mounted SD; physical response acquisition, scan/Stop transitions and saved-report acceptance remain pending. Frozen build evidence and subsequent installation evidence are recorded separately. See DUAL_RADIO_REV111.md for current validation and DUAL_RADIO_REV110.md for response scope and limits. Full Marauder parity remains incomplete. The rev107 GitHub develop check on 2026-11-01 resolved to 79cc6bcba1db6679baee1dab2b0c1ad5010e6363, matching the pinned source.",
+  "checkpoint": "rev112-source",
+  "scope": "Source/workflow status through rev112's independent dual-receiver BLE Fox Hunt controller and presentation. Rev111/C5 firmware67 remains the verified installed baseline with paired boot and mounted SD; rev112 local validation and physical acceptance are separate. Optional response collection, source-separated live/saved analysis and v6 SD retention retain their rev110 scope. See DUAL_RADIO_REV112.md for the current checkpoint and DUAL_RADIO_REV111.md for installed evidence. Full Marauder parity remains incomplete. The rev107 GitHub develop check on 2026-11-01 resolved to 79cc6bcba1db6679baee1dab2b0c1ad5010e6363, matching the pinned source.",
   "status_definitions": {
     "partial": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open.",
     "pending": "The distinct upstream workflow has no verified implementation at this checkpoint.",
@@ -1562,8 +1562,8 @@
       "symbol": "BT_SCAN_FOX_HUNT",
       "family": "ble_general_scanning",
       "status": "partial",
-      "cerberus_evidence": "docs/DUAL_RADIO_SCANNING.md",
-      "next_gap": "Exact-address-and-type dual-receiver tracking and independent S3/C5 signal/age display are implemented, with ownership barriers and previous-target sample suppression covered by host fixtures. Rev97 improves the C5 discovery target picker. Earlier single-S3 Fox acceptance does not validate dual Fox; controlled movement, one-receiver-only reception, Stop/Back and sustained physical acceptance remain pending. No bearing, distance or triangulation claim.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV112.md",
+      "next_gap": "Rev112 addresses independent S3/C5 startup and source-selective retry after discovery drains, separate exact-target signal/status/count presentation, and retained cleanup after Stop/Back/sleep. C5 conservative ages and prior-job samples remain explicit; reports are not aggregated across receivers or reset jobs. See DUAL_RADIO_REV112.md for validation status. Controlled movement, one-receiver-only reception, error recovery, repeated transitions and sustained loaded physical acceptance remain pending. Earlier single-S3 acceptance is not dual-receiver validation. No bearing, distance or triangulation claim.",
       "s3_role": "S3 retains an immutable typed target, drains discovery, tracks its own reports and renders independently aged per-radio signals.",
       "c5_role": "C5 passively tracks the same exact address and type through a bound session, reporting its own callback RSSI/time rather than S3 evidence.",
       "related_menu_entries": [],

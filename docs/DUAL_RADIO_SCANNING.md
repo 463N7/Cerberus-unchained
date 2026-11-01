@@ -2,6 +2,11 @@
 
 ## Current local checkpoint
 
+[Rev112](DUAL_RADIO_REV112.md) addresses independent dual-receiver Fox Hunt
+startup, retry, signal/status display and retained cleanup. Its local
+validation and remaining physical checks are recorded separately from the
+installed rev111 baseline below.
+
 [Rev111](DUAL_RADIO_REV111.md) is installed with paired boot and SD mount verified. It includes [rev110's](DUAL_RADIO_REV110.md) optional C5 BLE response collection and source-separated live/saved analysis, plus the callback cleanup. Passive remains the default, and S3 operates independently. Physical response and UI acceptance remain pending. The rev97 description below is historical; its physical results do not establish rev111 acceptance.
 
 The rev97 source milestone extends the two-radio scanning introduced in rev94

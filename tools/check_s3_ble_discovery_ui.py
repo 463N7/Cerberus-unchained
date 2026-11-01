@@ -90,6 +90,10 @@ footer_start = ui.index("    } else if (current_page == UI_PAGE_BLE && ble_mode 
 footer_end = ui.index("    } else if", footer_start + 20)
 parts += "static esp_err_t actual_analyzer_footer(void) { const char *back_label = \"BACK\";\n" + ui[footer_start:footer_end].replace("} else if", "if", 1) + "}\n"
 parts += re.search(r"    return draw_button\(64, UI_BACK_Y, 192, UI_BACK_HEIGHT, back_label\);", ui).group(0) + "\n}\n"
+footer_start = ui.index("    } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FOX_HUNT)", ui.index("static esp_err_t draw_detail_page("))
+footer_end = ui.index("    } else if", footer_start + 20)
+parts += "static esp_err_t actual_fox_footer(void) { const char *back_label = \"BACK\";\n" + ui[footer_start:footer_end].replace("} else if", "if", 1) + "}\n"
+parts += re.search(r"    return draw_button\(64, UI_BACK_Y, 192, UI_BACK_HEIGHT, back_label\);", ui).group(0) + "\n}\n"
 dual_live = (root / "s3_main/main/dual_ble_live_ui.h").read_text()
 parts += between(dual_live, "static bool dual_ble_live_discovery_released(", "static void dual_ble_live_tick(")
 parts += function(dual_live, "dual_ble_live_tick")

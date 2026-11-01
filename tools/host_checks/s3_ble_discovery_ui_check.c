@@ -3,10 +3,32 @@
 #undef main
 #define main existing_monitor_suite
 #define cerberus_display_fill_rect fixture_display_fill_rect
+#define cerberus_s3_ble_scanner_get_status fixture_base_get_status
+#define cerberus_s3_ble_scanner_stop fixture_base_stop
+#define draw_detail_page fixture_base_draw_detail_page
 #include "s3_findmy_monitor_ui_check.c"
+#undef draw_detail_page
+#undef cerberus_s3_ble_scanner_get_status
+#undef cerberus_s3_ble_scanner_stop
 #undef cerberus_display_fill_rect
 #undef main
 #pragma pop_macro("main")
+static unsigned fixture_detail_draws;
+static esp_err_t draw_detail_page(void)
+{++fixture_detail_draws;return fixture_base_draw_detail_page();}
+/* Injectable scanner boundaries for the actual Fox lifecycle. The inherited
+ * Find My fixture retains its original counted boundary functions. */
+static esp_err_t fox_status_error, fox_stop_error, fox_start_error;
+static bool fox_hold_running;
+static unsigned fox_host_epoch;
+static unsigned cerberus_s3_ble_host_epoch(void){return fox_host_epoch;}
+static esp_err_t cerberus_s3_ble_scanner_get_status(cerberus_ble_scan_status_payload_t *s)
+{if(fox_status_error)return fox_status_error;return fixture_base_get_status(s);}
+static esp_err_t cerberus_s3_ble_scanner_stop(cerberus_ble_scan_status_payload_t *s)
+{
+    if(fox_stop_error||fox_hold_running){++stops;*s=scan;return fox_stop_error;}
+    return fixture_base_stop(s);
+}
 /* Exercise the production scan renderer's failed-write/cache recovery path.
  * The inherited monitor keeps its own framebuffer calls unchanged. */
 static unsigned wifi_ui_fill_calls, wifi_ui_fail_fill_after, wifi_ui_full_repairs;
@@ -141,6 +163,11 @@ static esp_err_t ble_analyzer_error;
 static uint32_t ble_analyzer_start_requested_ms,ble_analyzer_exit_started_ms,ble_analyzer_last_tick_ms,ble_analyzer_last_draw_ms;
 static bool ble_fox_hunt_exit_pending,ble_fox_hunt_retry_requested;
 static bool ble_fox_hunt_from_c5,ble_fox_hunt_start_pending;
+static bool ble_fox_hunt_s3_attached,ble_fox_hunt_s3_started;
+static bool ble_fox_hunt_s3_start_pending,ble_fox_hunt_cleanup_timed_out;
+static uint8_t ble_fox_hunt_s3_generation;
+static unsigned ble_fox_hunt_s3_host_epoch;
+static esp_err_t ble_fox_hunt_barrier_error;
 static uint32_t ble_fox_hunt_start_requested_ms;
 static cerberus_c5_ble_result_t ble_fox_hunt_target;
 static bool companion_released=true;
@@ -148,12 +175,14 @@ static cerberus_dual_ble_scan_t companion_store;
 static unsigned companion_syncs,companion_retries,companion_exchanges;
 static int companion_requested_mode;
 static uint8_t companion_requested_family;
+static uint64_t companion_sync_clock;
 #include "discovery_companion_impl.h"
 static void dual_ble_ui_retry(void){++companion_retries;}
 static bool dual_ble_ui_released(void){return companion_released;}
 static void dual_ble_ui_sync(int mode,const uint8_t *address,uint8_t type,uint64_t now)
-{assert(mode>=-1&&mode<=CERBERUS_DUAL_BLE_ANALYZER);companion_requested_mode=mode;(void)address;(void)type;(void)now;++companion_syncs;
- (void)dual_ble_ui_target;(void)dual_ble_ui_type;(void)dual_ble_ui_mode;(void)dual_ble_ui_attempted;(void)dual_ble_ui_family;}
+{assert(mode>=-1&&mode<=CERBERUS_DUAL_BLE_ANALYZER);companion_requested_mode=dual_ble_ui_mode=mode;companion_sync_clock=now;++companion_syncs;
+ if(mode==CERBERUS_DUAL_BLE_TRACK){assert(address);memcpy(dual_ble_ui_target,address,6);dual_ble_ui_type=type;}
+ (void)dual_ble_ui_attempted;(void)dual_ble_ui_family;}
 static void dual_ble_ui_sync_family(uint8_t family,uint64_t now)
 {assert(family<CERBERUS_S3_BLE_FILTER_COUNT);companion_requested_family=family;
  companion_requested_mode=family?CERBERUS_DUAL_BLE_FAMILY:CERBERUS_DUAL_BLE_DISCOVERY;(void)now;++companion_syncs;}
@@ -177,6 +206,12 @@ static esp_err_t draw_ble(void){return ESP_OK;}
 static void ble_fox_hunt_open_peer(const cerberus_c5_ble_result_t *,bool);
 static bool dual_ble_live_prepare_fox(uint32_t,bool);
 static void ble_fox_hunt_finish_exit(bool,bool);
+static bool ble_fox_hunt_s3_retryable(void);
+static bool ble_fox_hunt_c5_retryable(void);
+static void ble_fox_hunt_request_stop(uint32_t,bool);
+static void ble_fox_hunt_request_s3_retry(uint32_t);
+static void ble_fox_hunt_request_c5_retry(void);
+static void ble_fox_hunt_attach_s3(void);
 static esp_err_t ble_fox_hunt_error;
 static uint32_t ble_fox_hunt_exit_started_ms,ble_fox_hunt_last_tick_ms,ble_fox_hunt_last_draw_ms;
 static ui_page_t ble_session_exit_page,tool_parent_page;
@@ -215,7 +250,7 @@ static esp_err_t cerberus_s3_ble_scanner_track_begin(const uint8_t *address,uint
 {++track_begins;if(track_error)return track_error;memcpy(track_address,address,6);track_type=type;return ESP_OK;}
 static void cerberus_s3_ble_scanner_track_end(void){++track_ends;}
 static esp_err_t cerberus_s3_ble_scanner_start(cerberus_ble_scan_status_payload_t *status)
-{++passive_starts;assert(owner==CERBERUS_S3_BLE_OWNER_NONE);owner=CERBERUS_S3_BLE_OWNER_SCANNER;scan.state=CERBERUS_BLE_SCAN_RUNNING;++scan.generation;*status=scan;return ESP_OK;}
+{++passive_starts;assert(owner==CERBERUS_S3_BLE_OWNER_NONE);if(fox_start_error)return fox_start_error;owner=CERBERUS_S3_BLE_OWNER_SCANNER;scan.state=CERBERUS_BLE_SCAN_RUNNING;++scan.generation;*status=scan;return ESP_OK;}
 esp_err_t cerberus_display_draw_mono_bitmap(uint16_t x,uint16_t y,uint16_t w,uint16_t h,const uint8_t *data,uint16_t fg,uint16_t bg)
 {
     bounds(x,y,w,h);
@@ -1700,6 +1735,9 @@ int main(int argc,char **argv)
     check_analyzer_family_ui(argv[1]);
     check_analyzer_controls(argv[1]);
     check_analyzer_dual_ui(argv[1]);
+    current_page=UI_PAGE_BLE;ble_mode=UI_BLE_MODE_FOX_HUNT;ble_fox_hunt_exit_pending=false;
+    drawn[0]=0;assert(actual_fox_footer()==ESP_OK&&strstr(drawn,"STOP AND BACK"));
+    ble_fox_hunt_exit_pending=true;drawn[0]=0;assert(actual_fox_footer()==ESP_OK&&strstr(drawn,"STOPPING"));
     puts("BLE discovery UI: production filter/sort/age/cards/hit-test, timed completed/paused expiry without RF start, publication ceiling/wrap, frozen typed selection through Fox Hunt/Back, source ages, priorities, privacy, RSSI and unchanged Sound gate passed");
     return 0;
 }

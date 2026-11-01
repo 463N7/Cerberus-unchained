@@ -56,7 +56,11 @@ static void dual_ble_publish_diagnostics(uint64_t now, bool asleep)
     out.fox_open = current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FOX_HUNT;
     out.fox_pending = out.fox_open && ble_fox_hunt_start_pending;
     out.fox_stopping = out.fox_open && ble_fox_hunt_exit_pending;
-    out.fox_error = out.fox_open ? ble_fox_hunt_error : 0;
+    /* Keep shared startup/cleanup failures visible in the existing Fox
+     * aggregate; per-receiver errors retain their separate fields. */
+    out.fox_error = out.fox_open ? (ble_fox_hunt_barrier_error != ESP_OK ?
+        ble_fox_hunt_barrier_error : ble_fox_hunt_cleanup_timed_out ?
+        ESP_ERR_TIMEOUT : ble_fox_hunt_error) : ESP_OK;
     bool bound_target = out.fox_open && !out.fox_pending;
     if (bound_target) {
         cerberus_s3_ble_track_status_t track = {0};

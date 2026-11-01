@@ -15,6 +15,10 @@ static bool dual_ble_live_discovery_released(void)
 
 static void ble_fox_hunt_open_peer(const cerberus_c5_ble_result_t *peer, bool from_c5)
 {
+    /* Navigation cannot choose a second target while this page owns a sweep
+     * or is draining one. Preserve the original target and stop permission. */
+    if (!peer || ble_mode == UI_BLE_MODE_FOX_HUNT || ble_fox_hunt_exit_pending ||
+        ble_fox_hunt_s3_attached || ble_fox_hunt_s3_started) return;
     /* A tracking target is only an immutable typed address, never permission
      * to use another receiver's raw packet for a GATT or sound operation. */
     ble_fox_hunt_target = *peer;
@@ -25,7 +29,10 @@ static void ble_fox_hunt_open_peer(const cerberus_c5_ble_result_t *peer, bool fr
     ble_fox_hunt_exit_pending = false;
     ble_fox_hunt_exit_started_ms = 0U;
     ble_fox_hunt_retry_requested = false;
+    ble_fox_hunt_s3_attached = ble_fox_hunt_s3_started = false;
+    ble_fox_hunt_s3_start_pending = ble_fox_hunt_cleanup_timed_out = false;
     ble_fox_hunt_error = ESP_OK;
+    ble_fox_hunt_barrier_error = ESP_OK;
     ble_fox_hunt_last_tick_ms = ble_fox_hunt_last_draw_ms = 0U;
     ble_discovery_leave();
     dual_ble_ui_sync(-1, NULL, 0U, (uint64_t)esp_timer_get_time() / 1000U);
@@ -35,17 +42,13 @@ static void ble_fox_hunt_open_peer(const cerberus_c5_ble_result_t *peer, bool fr
 static bool dual_ble_live_prepare_fox(uint32_t now, bool asleep)
 {
     if (!ble_fox_hunt_start_pending) return true;
-    if (ble_fox_hunt_exit_pending) {
-        if (dual_ble_live_discovery_released() && dual_ble_ui_released()) {
-            ble_fox_hunt_start_pending = false;
-            ble_fox_hunt_finish_exit(asleep, false);
-        }
-        return false;
-    }
+    /* Stop keeps ticking the shared barrier and any acquired source until
+     * release; it never enters the attachment path below. */
+    if (ble_fox_hunt_exit_pending) return true;
     if (!dual_ble_live_discovery_released() || !dual_ble_ui_released() ||
         cerberus_s3_ble_host_owner() != CERBERUS_S3_BLE_OWNER_NONE) {
         if ((uint32_t)(now - ble_fox_hunt_start_requested_ms) >= 12000U) {
-            ble_fox_hunt_error = ESP_ERR_TIMEOUT;
+            ble_fox_hunt_barrier_error = ESP_ERR_TIMEOUT;
             /* Preserve the pending ownership barrier; explicit Back remains
              * available and cannot start or stop a different owner's scan. */
             if (!asleep && !ble_fox_hunt_last_draw_ms) {
@@ -55,10 +58,11 @@ static bool dual_ble_live_prepare_fox(uint32_t now, bool asleep)
         }
         return false;
     }
-    if (asleep || ble_fox_hunt_error != ESP_OK) return false;
-    ble_fox_hunt_error = cerberus_s3_ble_scanner_track_begin(
-        ble_fox_hunt_target.address, ble_fox_hunt_target.address_type);
-    if (ble_fox_hunt_error == ESP_OK) ble_fox_hunt_start_pending = false;
+    if (asleep || ble_fox_hunt_barrier_error != ESP_OK) return false;
+    /* The common drain is complete. A local attach failure must not suppress
+     * the independent C5 TRACK request on the next global coordinator tick. */
+    ble_fox_hunt_start_pending = false;
+    ble_fox_hunt_attach_s3();
     if (!asleep) ESP_ERROR_CHECK(draw_detail_page());
     return !ble_fox_hunt_start_pending;
 }

@@ -417,21 +417,89 @@ static int dual_ble_ui_tap(uint16_t x, uint16_t y)
     return DUAL_BLE_UI_NONE;
 }
 
-static esp_err_t dual_ble_ui_draw_fox(uint16_t y, uint64_t now)
+typedef struct {
+    cerberus_dual_ble_view_t state;
+    cerberus_dual_ble_track_view_t track;
+    bool requested, bound, sample_current_job;
+} dual_ble_ui_fox_view_t;
+
+/* The page's copied typed address is authoritative, even while the previous
+ * requested TRACK is draining. This getter performs no owner/transport work.
+ * A sample can survive automatic job rollover; its count still belongs to the
+ * captured job, never to a new job that has not seen the target. */
+static void dual_ble_ui_fox_view(const uint8_t address[6], uint8_t type,
+    uint64_t now, bool allow_samples, dual_ble_ui_fox_view_t *out)
 {
-    char line[64]; cerberus_dual_ble_track_view_t track;
-    cerberus_dual_ble_view_t view; dual_ble_ui_get_view(&view);
-    memset(&track, 0, sizeof(track));
-    bool current = dual_ble_ui_mode == CERBERUS_DUAL_BLE_TRACK && dual_ble_ui_store &&
-        dual_ble_ui_store->start.mode == CERBERUS_DUAL_BLE_TRACK &&
-        dual_ble_ui_store->start.address_type == dual_ble_ui_type &&
-        !memcmp(dual_ble_ui_store->start.address, dual_ble_ui_target, 6U);
-    if (current) cerberus_dual_ble_track_view(dual_ble_ui_store, now, &track);
-    if (view.error) snprintf(line, sizeof(line), "C5 TRACK ERROR %ld", (long)view.error);
-    else if (track.seen) snprintf(line, sizeof(line), "C5 %d dBm / AGE <= %lu ms%s", track.rssi,
-        (unsigned long)track.age_upper_ms,
-        track.fresh ? "" : " / STALE");
-    else snprintf(line, sizeof(line), "C5 %s / EXACT ADDRESS + TYPE", view.stopping ? "STOPPING" :
-        current ? "SEARCHING" : "WAITING");
-    return draw_centered(y, line, view.error ? UI_BAD : track.fresh ? UI_GOOD : UI_MUTED, 1);
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    if (!allow_samples || !address || type > 3U) return;
+    out->requested = dual_ble_ui_mode == CERBERUS_DUAL_BLE_TRACK &&
+        dual_ble_ui_type == type && !memcmp(dual_ble_ui_target, address, 6U);
+    if (!out->requested) return;
+    out->state.error = dual_ble_ui_error;
+    out->bound = dual_ble_ui_store && dual_ble_ui_store->start.mode == CERBERUS_DUAL_BLE_TRACK &&
+        dual_ble_ui_store->start.address_type == type &&
+        !memcmp(dual_ble_ui_store->start.address, address, 6U);
+    if (!out->bound) return;
+    dual_ble_ui_get_view(&out->state);
+    if (!dual_ble_ui_store->has_track || !dual_ble_ui_store->track.epoch ||
+        !dual_ble_ui_store->track.job_id) return;
+    cerberus_dual_ble_track_view(dual_ble_ui_store, now, &out->track);
+    if (out->track.rssi < -127 || out->track.rssi > 20) {
+        out->track.seen = out->track.fresh = false;
+    }
+    out->sample_current_job = dual_ble_ui_store->track.epoch == dual_ble_ui_store->remote.epoch &&
+        dual_ble_ui_store->track.job_id == dual_ble_ui_store->start.job_id &&
+        dual_ble_ui_store->track.job_id == dual_ble_ui_store->remote.job_id;
+}
+
+static esp_err_t dual_ble_ui_fox_meter(uint16_t y, bool seen, int rssi, uint16_t color)
+{
+    ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(20, y, 280, 12, UI_PANEL), TAG, "Fox meter background failed");
+    if (!seen) return ESP_OK;
+    if (rssi < -100) rssi = -100;
+    if (rssi > -30) rssi = -30;
+    uint16_t width = (uint16_t)(((rssi + 100) * 280) / 70);
+    return width ? cerberus_display_fill_rect(20, y, width, 12, color) : ESP_OK;
+}
+
+static esp_err_t dual_ble_ui_fox_retry(uint16_t x, const char *label, bool enabled)
+{
+    ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(x, 350, 148, 32, UI_PANEL), TAG, "Fox retry background failed");
+    return cerberus_display_draw_text((uint16_t)(x + (148U - strlen(label) * 6U) / 2U), 362,
+        label, enabled ? UI_TEXT : UI_MUTED, UI_PANEL, 1);
+}
+
+static esp_err_t dual_ble_ui_draw_fox(uint16_t y, uint64_t now,
+    const uint8_t address[6], uint8_t type, bool allow_samples, const char *blocked_state)
+{
+    char line[64]; dual_ble_ui_fox_view_t view;
+    dual_ble_ui_fox_view(address, type, now, allow_samples, &view);
+    bool receiving = view.bound && view.state.receiving && !view.state.stopping && !view.state.error;
+    bool recent = receiving && view.sample_current_job && view.track.fresh;
+    const char *state = blocked_state ? blocked_state :
+        view.state.error ? "C5 / ERROR" : view.state.stopping ? "C5 / RELEASING" :
+        receiving ? "C5 / LISTENING" : view.requested ? "C5 / BETWEEN JOBS OR ATTACHING" : "C5 / WAITING";
+    ESP_RETURN_ON_ERROR(draw_centered(y, state, view.state.error ? UI_BAD : recent ? UI_GOOD : UI_MUTED, 1), TAG, "C5 Fox state failed");
+    if (view.track.seen) {
+        if (view.track.age_upper_ms == UINT32_MAX)
+            snprintf(line, sizeof(line), "C5 LAST %d dBm / AGE UNKNOWN", view.track.rssi);
+        else snprintf(line, sizeof(line), "C5 LAST %d dBm / AGE <= %lu ms", view.track.rssi,
+            (unsigned long)view.track.age_upper_ms);
+    } else snprintf(line, sizeof(line), "C5 NO SIGNAL SAMPLE FOR THIS TARGET");
+    ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(y + 18U), line, recent ? UI_GOOD : UI_MUTED, 1), TAG, "C5 Fox sample failed");
+    ESP_RETURN_ON_ERROR(dual_ble_ui_fox_meter((uint16_t)(y + 36U), view.track.seen, view.track.rssi,
+        recent ? UI_GOOD : UI_MUTED), TAG, "C5 Fox meter failed");
+    if (view.track.seen) snprintf(line, sizeof(line), "C5 ORIGINAL CALLBACKS %s%lu",
+        view.track.reports == UINT32_MAX ? ">=" : "", (unsigned long)view.track.reports);
+    else snprintf(line, sizeof(line), "C5 ORIGINAL CALLBACKS / NO SAMPLE");
+    ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(y + 56U), line, UI_TEXT, 1), TAG, "C5 Fox count failed");
+    const char *meaning = !view.track.seen ? "PER JOB / SCAN RESPONSES EXCLUDED" :
+        !view.sample_current_job ? "LAST JOB / RETAINED READING" :
+        !receiving ? "LAST READING / RECEIVER NOT LISTENING" :
+        view.track.fresh ? "CURRENT JOB / RECENT UPPER BOUND" : "CURRENT JOB / RECENCY UNCONFIRMED";
+    ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(y + 72U), meaning, UI_MUTED, 1), TAG, "C5 Fox meaning failed");
+    if (view.state.error) snprintf(line, sizeof(line), "C5 ERROR %ld", (long)view.state.error);
+    else snprintf(line, sizeof(line), "C5 COUNTS EXCLUDE SCAN RESPONSES");
+    return draw_centered((uint16_t)(y + 88U), line, view.state.error ? UI_BAD : UI_MUTED, 1);
 }

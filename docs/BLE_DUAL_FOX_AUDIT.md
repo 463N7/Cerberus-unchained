@@ -1,8 +1,11 @@
 # Dual-receiver BLE Fox Hunt: next receive-side milestone
 
-This is a source audit and proposed follow-up to [rev111](DUAL_RADIO_REV111.md),
-not an implementation or physical-acceptance claim. Rev111 changes C5 callback
-dispatch only; it does not change Fox Hunt. The wider port remains partial.
+This is the source audit that defined the follow-up to
+[rev111](DUAL_RADIO_REV111.md). [Rev112](DUAL_RADIO_REV112.md) records the
+implementation and validation status separately. The gaps and source line
+references below describe rev111; this audit is not physical acceptance.
+Rev111 changes C5 callback dispatch only and does not change Fox Hunt. The
+wider port remains partial.
 
 The useful next scope is to make the existing two-receiver Fox Hunt behave as
 two independent, clearly labelled observers through start, retry and cleanup.

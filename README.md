@@ -1,6 +1,6 @@
 # Cerberus Unchained
 
-Experimental Cerberus firmware for the expanded rev111 feature set: integrated
+Experimental Cerberus firmware for the expanded rev112 feature set: integrated
 wardriving, C5 Wi-Fi capture and analysis, S3 BLE discovery and tools, Remote ID
 receive workflows, AP/client navigation, and optional expansion radios.
 
@@ -9,7 +9,7 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev111`, paired with onboard
+**Current source version: `0.1.0-dev.rev112`, paired with onboard
 C5 protocol firmware revision 67. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -40,6 +40,12 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev112 addresses independent S3/C5 Bluetooth Fox Hunt startup, source-specific
+retry, separate signal/status presentation and retained Stop/Back cleanup.
+See [rev112](docs/DUAL_RADIO_REV112.md) for its local validation and remaining
+physical acceptance. Rev111 remains the verified installed baseline; local
+builds do not establish device acceptance or full Marauder parity.
 
 Rev111 removes a redundant response-mode dispatch from the passive C5 EXT
 receive path while preserving response invalidation and owner cleanup. It

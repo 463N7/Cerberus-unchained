@@ -71,12 +71,147 @@ static void *companion_calloc(size_t n,size_t size,unsigned caps)
 #include "s3_ble_tracker.h"
 static cerberus_c5_ble_result_t ble_fox_hunt_target;
 static bool ble_fox_hunt_start_pending,ble_fox_hunt_exit_pending;
-static esp_err_t ble_fox_hunt_error;
+static bool ble_fox_hunt_s3_attached,ble_fox_hunt_s3_started,ble_fox_hunt_retry_requested;
+static bool ble_fox_hunt_cleanup_timed_out;
+static esp_err_t ble_fox_hunt_error,ble_fox_hunt_barrier_error;
 static cerberus_s3_ble_track_status_t fox_sample;
 static unsigned fox_status_reads;
+static esp_err_t fox_status_error;
 esp_err_t cerberus_s3_ble_scanner_track_status(cerberus_s3_ble_track_status_t *out)
-{++fox_status_reads;*out=fox_sample;return ESP_OK;}
+{++fox_status_reads;*out=fox_sample;return fox_status_error;}
+/* Action/lifetime predicates have separate production-bound lifecycle tests.
+ * These stand-ins expose only the two cached enabled states to the renderer. */
+static bool ble_fox_hunt_s3_retryable(void)
+{return !ble_fox_hunt_exit_pending&&(ble_fox_hunt_error||ble_fox_hunt_barrier_error);}
+static bool ble_fox_hunt_c5_retryable(void)
+{dual_ble_ui_fox_view_t v;dual_ble_ui_fox_view(ble_fox_hunt_target.address,
+ ble_fox_hunt_target.address_type,(uint64_t)clock_ms,!ble_fox_hunt_start_pending&&!ble_fox_hunt_exit_pending,&v);
+ return v.state.error&&!v.state.stopping;}
 #include "dual_ble_fox_draw_impl.h"
+
+static void paint_fox(void)
+{
+    drawn[0]=0;
+    assert(cerberus_display_fill_rect(0,0,320,480,UI_BACKGROUND)==ESP_OK);
+    assert(draw_ble_fox_hunt()==ESP_OK);
+}
+
+static void check_dual_fox(const char *prefix)
+{
+    unsigned calls=companion_exchanges,allocations=companion_allocations,rf_starts=starts,rf_stops=stops;
+    ble_fox_hunt_target=(cerberus_c5_ble_result_t){.address={1,2,3,4,5,6},.address_type=2};
+    strcpy(ble_fox_hunt_target.name,"FROZEN TYPED TARGET");clock_ms=200;
+    dual_ble_ui_mode=CERBERUS_DUAL_BLE_TRACK;dual_ble_ui_type=2;
+    memcpy(dual_ble_ui_target,ble_fox_hunt_target.address,6);
+    dual_ble_ui_store->start=(cerberus_dual_ble_start_t){.boot_id=9,.job_id=11,.mode=CERBERUS_DUAL_BLE_TRACK,.address_type=2};
+    memcpy(dual_ble_ui_store->start.address,ble_fox_hunt_target.address,6);
+    dual_ble_ui_store->remote=(cerberus_dual_ble_status_t){.epoch=101,.job_id=11,
+        .flags=CERBERUS_DUAL_BLE_ATTACHED|CERBERUS_DUAL_BLE_OWNED};
+    dual_ble_ui_store->phase=3;dual_ble_ui_store->enabled=true;
+    dual_ble_ui_store->error=dual_ble_ui_error=ESP_OK;
+    dual_ble_ui_store->has_track=true;dual_ble_ui_store->track_request_ms=100;
+    dual_ble_ui_store->track=(cerberus_dual_ble_track_t){.epoch=101,.job_id=11,.age_ms=50,.rssi=-81,.flags=3,.reports=7};
+    fox_sample=(cerberus_s3_ble_track_status_t){.enabled=true,.seen=true,.fresh=true,
+        .address={99,88,77,66,55,44},.address_type=2,.rssi_dbm=-31,.age_ms=15,.reports=777};
+    ble_fox_hunt_start_pending=ble_fox_hunt_s3_attached=ble_fox_hunt_s3_started=true;
+    ble_fox_hunt_exit_pending=ble_fox_hunt_retry_requested=ble_fox_hunt_cleanup_timed_out=false;
+    ble_fox_hunt_error=ble_fox_hunt_barrier_error=fox_status_error=ESP_OK;
+    fox_status_reads=0;paint_fox();
+    assert(!fox_status_reads&&strstr(drawn,"RELEASING PREVIOUS SCANNERS"));
+    assert(strstr(drawn,"S3 NO SIGNAL SAMPLE")&&strstr(drawn,"C5 NO SIGNAL SAMPLE"));
+    assert(!strstr(drawn,"-31")&&!strstr(drawn,"777")&&!strstr(drawn,"-81"));
+    for(unsigned y=180;y<192;++y)for(unsigned x=20;x<300;++x)assert(screen[y*320+x]==UI_PANEL);
+    for(unsigned y=274;y<286;++y)for(unsigned x=20;x<300;++x)assert(screen[y*320+x]==UI_PANEL);
+    save(prefix,"fox-pending-new-target");
+    ble_fox_hunt_barrier_error=ESP_ERR_TIMEOUT;paint_fox();
+    assert(!fox_status_reads&&strstr(drawn,"START DELAYED / RETRY START"));
+    ble_fox_hunt_barrier_error=ESP_OK;ble_fox_hunt_start_pending=false;
+    /* Desired and committed typed identities each independently fence C5. */
+    dual_ble_ui_fox_view_t v;
+    dual_ble_ui_fox_view(ble_fox_hunt_target.address,2,200,true,&v);
+    assert(v.requested&&v.bound&&v.sample_current_job&&v.track.seen&&v.track.age_upper_ms==150);
+    dual_ble_ui_fox_view(NULL,2,200,true,&v);assert(!v.requested&&!v.track.seen);
+    dual_ble_ui_fox_view(ble_fox_hunt_target.address,4,200,true,&v);assert(!v.requested&&!v.track.seen);
+    dual_ble_ui_fox_view(ble_fox_hunt_target.address,2,200,false,&v);assert(!v.requested&&!v.track.seen);
+    dual_ble_ui_fox_view(ble_fox_hunt_target.address,2,200,true,NULL);
+    dual_ble_ui_fox_view(ble_fox_hunt_target.address,1,200,true,&v);assert(!v.track.seen&&!v.requested);
+    dual_ble_ui_store->start.address_type=1;
+    dual_ble_ui_fox_view(ble_fox_hunt_target.address,2,200,true,&v);assert(v.requested&&!v.bound&&!v.track.seen);
+    dual_ble_ui_store->start.address_type=2;dual_ble_ui_target[0]^=1;
+    paint_fox();assert(!strstr(drawn,"-81")&&!strstr(drawn,"-31")&&!strstr(drawn,"777"));
+    dual_ble_ui_target[0]^=1;
+    memcpy(fox_sample.address,ble_fox_hunt_target.address,6);fox_sample.rssi_dbm=-65;fox_sample.reports=3;
+    paint_fox();assert(strstr(drawn,"S3 LAST -65 dBm / EXACT AGE 15 ms"));
+    assert(strstr(drawn,"C5 LAST -81 dBm / AGE <= 150 ms"));
+    assert(strstr(drawn,"S3 REPORTS 3 / ADV + RESPONSES")&&strstr(drawn,"C5 ORIGINAL CALLBACKS 7"));
+    assert(strstr(drawn,"TRACKER COUNT / RESETS WITH HOST")&&strstr(drawn,"C5 COUNTS EXCLUDE SCAN RESPONSES"));
+    assert(strstr(drawn,"CURRENT JOB / RECENT UPPER BOUND"));
+    assert(screen[180*320+20]==UI_GOOD&&screen[180*320+160]==UI_PANEL);
+    assert(screen[274*320+20]==UI_GOOD&&screen[274*320+100]==UI_PANEL);
+    save(prefix,"fox-both-recent");
+    ble_fox_hunt_s3_started=false;paint_fox();
+    assert(strstr(drawn,"S3 / WAITING FOR SWEEP")&&!strstr(drawn,"S3 / LISTENING"));
+    assert(strstr(drawn,"S3 LAST -65")&&screen[180*320+20]==UI_MUTED);
+    ble_fox_hunt_s3_started=true;
+    /* An S3 attach failure must not hide a healthy C5 reading. */
+    ble_fox_hunt_s3_attached=false;ble_fox_hunt_error=ESP_ERR_NO_MEM;unsigned reads=fox_status_reads;
+    paint_fox();assert(fox_status_reads==reads&&strstr(drawn,"S3 / ERROR")&&strstr(drawn,"C5 LAST -81"));
+    assert(!strstr(drawn,"S3 LAST -65")&&strstr(drawn,"RETRY S3")&&strstr(drawn,"STOP BOTH RECEIVERS"));
+    assert(strstr(drawn,"S3 REPORTS / NOT AVAILABLE")&&!strstr(drawn,"S3 REPORTS 0"));
+    save(prefix,"fox-s3-error-c5-receiving");
+    ble_fox_hunt_s3_attached=true;ble_fox_hunt_error=ESP_OK;
+    dual_ble_ui_store->error=ESP_ERR_TIMEOUT;paint_fox();
+    assert(strstr(drawn,"C5 / ERROR")&&strstr(drawn,"S3 / LISTENING / RECENT"));
+    assert(strstr(drawn,"LAST READING / RECEIVER NOT LISTENING")&&screen[274*320+20]==UI_MUTED);
+    save(prefix,"fox-c5-error-s3-receiving");dual_ble_ui_store->error=ESP_OK;
+    fox_status_error=ESP_FAIL;paint_fox();assert(strstr(drawn,"S3 / ERROR")&&!strstr(drawn,"S3 LAST -65"));
+    fox_status_error=ESP_OK;fox_sample.address_type=1;paint_fox();
+    assert(!strstr(drawn,"S3 LAST -65")&&strstr(drawn,"S3 REPORTS / NOT AVAILABLE"));fox_sample.address_type=2;
+    fox_sample.reports=0;fox_sample.seen=false;paint_fox();
+    assert(strstr(drawn,"S3 REPORTS 0 / ADV + RESPONSES")&&!strstr(drawn,"S3 REPORTS / NOT AVAILABLE"));
+    fox_sample.reports=3;fox_sample.seen=true;
+    fox_sample.enabled=false;paint_fox();assert(!strstr(drawn,"S3 LAST -65"));fox_sample.enabled=true;
+    /* A conservative upper bound beyond the threshold cannot prove stale. */
+    clock_ms=5101;fox_sample.age_ms=5001;fox_sample.fresh=false;paint_fox();
+    assert(strstr(drawn,"CURRENT JOB / RECENCY UNCONFIRMED")&&!strstr(drawn,"STALE"));
+    assert(strstr(drawn,"LAST SAMPLE NOT RECENT")&&screen[274*320+20]==UI_MUTED);
+    save(prefix,"fox-age-semantics");
+    clock_ms=99;paint_fox();assert(strstr(drawn,"C5 LAST -81 dBm / AGE UNKNOWN"));
+    clock_ms=200;fox_sample.fresh=true;fox_sample.age_ms=15;
+    /* The production getter retains A's sample across release and job B.
+     * No status read is itself a new report; current-job count starts at one. */
+    dual_ble_ui_store->start.job_id=0;memset(&dual_ble_ui_store->remote,0,sizeof(dual_ble_ui_store->remote));
+    paint_fox();assert(strstr(drawn,"LAST JOB / RETAINED READING")&&strstr(drawn,"C5 ORIGINAL CALLBACKS 7"));
+    dual_ble_ui_store->start.job_id=12;
+    dual_ble_ui_store->remote=(cerberus_dual_ble_status_t){.epoch=102,.job_id=12,
+        .flags=CERBERUS_DUAL_BLE_ATTACHED|CERBERUS_DUAL_BLE_OWNED};
+    paint_fox();assert(strstr(drawn,"C5 / LISTENING")&&strstr(drawn,"LAST JOB / RETAINED READING"));
+    assert(!strstr(drawn,"CURRENT JOB / RECENT")&&screen[274*320+20]==UI_MUTED);
+    save(prefix,"fox-c5-new-job-retained");
+    dual_ble_ui_store->track=(cerberus_dual_ble_track_t){.epoch=102,.job_id=12,.age_ms=0,.rssi=-55,.flags=3,.reports=1};
+    dual_ble_ui_store->track_request_ms=200;paint_fox();
+    assert(strstr(drawn,"C5 ORIGINAL CALLBACKS 1\n")&&!strstr(drawn,"C5 ORIGINAL CALLBACKS 8"));
+    assert(strstr(drawn,"CURRENT JOB / RECENT UPPER BOUND")&&strstr(drawn,"AGE <= 0 ms"));
+    clock_ms=300;paint_fox();assert(strstr(drawn,"C5 ORIGINAL CALLBACKS 1\n")&&strstr(drawn,"AGE <= 100 ms"));
+    clock_ms=400;paint_fox();assert(strstr(drawn,"C5 ORIGINAL CALLBACKS 1\n")&&strstr(drawn,"AGE <= 200 ms"));
+    /* Both counters saturate independently; neither becomes a sum. */
+    fox_sample.reports=UINT32_MAX;fox_sample.age_ms=UINT32_MAX;fox_sample.fresh=false;
+    dual_ble_ui_store->track.reports=UINT32_MAX;dual_ble_ui_store->track.age_ms=UINT32_MAX;
+    paint_fox();assert(strstr(drawn,"S3 REPORTS >=4294967295 / ADV + RESPONSES"));
+    assert(strstr(drawn,"C5 ORIGINAL CALLBACKS >=4294967295")&&strstr(drawn,"AGE UNKNOWN"));
+    save(prefix,"fox-counter-saturation");
+    assert(strstr(drawn,"06:05:04:03:02:01"));
+    masked=true;paint_fox();assert(!strstr(drawn,"06:05:04:03:02:01"));masked=false;
+    ble_fox_hunt_exit_pending=true;ble_fox_hunt_cleanup_timed_out=true;reads=fox_status_reads;
+    paint_fox();assert(fox_status_reads==reads&&!strstr(drawn,"-55")&&!strstr(drawn,"-65"));
+    assert(strstr(drawn,"RELEASE DELAYED / STILL STOPPING")&&strstr(drawn,"STOPPING BOTH"));
+    assert(!strstr(drawn,"4294967295"));save(prefix,"fox-stopping-delayed");
+    /* Rendering never advances either owner or allocates, including errors. */
+    companion_fail_fill_after=1;assert(draw_ble_fox_hunt()==ESP_FAIL);
+    assert(companion_exchanges==calls&&companion_allocations==allocations&&starts==rf_starts&&stops==rf_stops);
+    ble_fox_hunt_exit_pending=ble_fox_hunt_cleanup_timed_out=false;
+    dual_ble_ui_store->has_track=false;
+}
 
 static void check_list_order(void)
 {
@@ -766,35 +901,7 @@ int main(int argc,char **argv)
     assert(dual_ble_ui_draw(false)==ESP_OK&&dual_ble_ui_painted_count==2);
     assert(strstr(drawn,"Companion 4")&&!strstr(drawn,"Companion 0"));
     assert(dual_ble_ui_tap(20,340)==DUAL_BLE_UI_REDRAW);
-    dual_ble_ui_mode=CERBERUS_DUAL_BLE_TRACK;memcpy(dual_ble_ui_target,target.address,6);dual_ble_ui_type=0;
-    dual_ble_ui_store->start.mode=1;memcpy(dual_ble_ui_store->start.address,target.address,6);
-    dual_ble_ui_store->start.address_type=0;dual_ble_ui_store->track_request_ms=100;
-    dual_ble_ui_store->has_track=true;dual_ble_ui_store->track=(cerberus_dual_ble_track_t){.age_ms=50,.rssi=-81,.flags=3};
-    drawn[0]=0;assert(dual_ble_ui_draw_fox(280,200)==ESP_OK);
-    assert(strstr(drawn,"C5 -81 dBm / AGE <= 150 ms"));
-    ++dual_ble_ui_target[0];drawn[0]=0;assert(dual_ble_ui_draw_fox(280,200)==ESP_OK);
-    assert(strstr(drawn,"WAITING")&&!strstr(drawn,"-81")); /* Never relabel an old target sample. */
-    dual_ble_ui_mode=-1;drawn[0]=0;assert(dual_ble_ui_draw_fox(280,200)==ESP_OK);
-    assert(!strstr(drawn,"-81"));
-    /* Actual complete Fox drawing: a newly selected target must not inherit
-     * the still-draining S3 tracker's old RSSI, report count or green meter. */
-    ble_fox_hunt_target=target;strcpy(ble_fox_hunt_target.name,"NEW TARGET");
-    fox_sample=(cerberus_s3_ble_track_status_t){.enabled=true,.seen=true,.fresh=true,
-        .address={99,88,77,66,55,44},.address_type=2,.rssi_dbm=-31,.age_ms=15,.reports=777};
-    ble_fox_hunt_start_pending=true;drawn[0]=0;assert(draw_ble_fox_hunt()==ESP_OK);
-    assert(fox_status_reads==0&&strstr(drawn,"NEW TARGET")&&strstr(drawn,"RELEASING SCANNERS"));
-    assert(strstr(drawn,"WAITING FOR THIS EXACT ADDRESS")&&strstr(drawn,"S3 MATCHED REPORTS 0"));
-    assert(!strstr(drawn,"-31")&&!strstr(drawn,"777"));
-    for(unsigned y=204;y<230;++y)for(unsigned x=20;x<300;++x)assert(screen[y*320+x]==UI_PANEL);
-    save(argv[1],"fox-pending-new-target");
-    ble_fox_hunt_error=ESP_ERR_TIMEOUT;drawn[0]=0;assert(draw_ble_fox_hunt()==ESP_OK);
-    assert(fox_status_reads==0&&!strstr(drawn,"-31")&&!strstr(drawn,"777"));
-    ble_fox_hunt_error=ESP_OK;ble_fox_hunt_start_pending=false;
-    memcpy(fox_sample.address,target.address,6);fox_sample.address_type=target.address_type;
-    fox_sample.rssi_dbm=-65;fox_sample.reports=3;drawn[0]=0;assert(draw_ble_fox_hunt()==ESP_OK);
-    assert(fox_status_reads==1&&strstr(drawn,"S3 -65 dBm")&&strstr(drawn,"S3 MATCHED REPORTS 3"));
-    assert(screen[204*320+20]==UI_GOOD&&screen[204*320+160]==UI_PANEL);
-    save(argv[1],"fox-bound-new-target");
+    check_dual_fox(argv[1]);
     check_list_controls(argv[1]);
     check_reader_metrics(argv[1]);
     check_receive_metadata(argv[1]);
@@ -805,6 +912,6 @@ int main(int argc,char **argv)
     heap_caps_free(dual_ble_ui_store);dual_ble_ui_store=NULL;
     check_focused_lifecycle(argv[1]);
     check_response_mode_lifecycle(argv[1]);
-    puts("Dual BLE UI: frozen typed rows, raw/receive/hints tabs, all family evidence and complete Meta paging without RF/allocation, unavailable/nohint distinction, source labels, reader metrics and old-target isolation passed");
+    puts("Dual BLE UI: frozen typed rows, raw/receive/hints tabs, all family evidence, separate Fox receivers and ages, per-job rollover, independent source errors, pending isolation and cached rendering without RF/allocation passed");
     return 0;
 }
