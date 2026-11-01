@@ -1,9 +1,60 @@
 # BLE SD snapshots and offline analysis
 
-The current installed checkpoint is [rev111](DUAL_RADIO_REV111.md), including
+The last verified installed checkpoint is [rev113](DUAL_RADIO_REV113.md), including
 the v6 workflow below. Paired boot and SD mount are verified; physical
 save/reopen acceptance is still pending. Earlier sections retain their own
 revision-specific evidence and installation history.
+
+## Rev123 source checkpoint: separate JSON interchange
+
+[Rev123](DUAL_RADIO_REV123.md) implements a separate offline viewer for Marauder
+AirTag JSON lists, canonical copy saves and compatibility export of complete
+qualifying S3/C5 packets. An explicit file action imports safe `.LOG` or `.JSON`
+files. It preserves order, duplicate MAC records, empty payloads and opaque
+bytes. Source, address type, time, RSSI and ADV/RSP identity remain unknown; the
+imported model is never mapped into v6 or installed in live discovery. Address
+privacy also hides the raw payload display.
+
+Export from a validated native `.BLE` report considers each saved original and
+matched response independently, in row/ADV/response order. Only complete,
+source-proven raw packets with qualifying Find My evidence are exported;
+decoded hints cannot reconstruct missing payload bytes. Omitted incomplete or
+unproven packets and nonmatching packets have separate counts. More than 64
+eligible packets fails without a partial export. The richer native document
+remains available, and the confirmation explains metadata lost by JSON.
+
+The imported document is bounded to 64 records and 8,192 total payload bytes;
+encoded/read JSON is bounded to 49,152 bytes. Unknown extension values are
+validated but not retained. Canonical saves retain the schema fields and bytes,
+not original whitespace, case or extension members. Save Copy and export use
+new `A00001.LOG`-style names under `/CERBERUS/BLE`, through exclusive temporary
+files. They never overwrite the imported source or `/Airtags_0.log`.
+
+There is one optional JSON viewer model and the existing serialized worker.
+The selected native or JSON allocation arm is allocated exactly, with no
+internal-RAM fallback. Export copies the native source before returning,
+converts in the worker and reuses aligned scratch for encoded bytes. A retained
+native viewer can coexist with the JSON viewer and worker. Linked native
+measurements agree with the host layout: 57,648 bytes for an ordinary native
+job (unchanged), 58,760 bytes for a JSON job and 8,836 bytes for the embedded
+imported model. The optional JSON viewer is 9,440 bytes, giving 68,200 bytes
+for JSON viewer plus worker, or 129,312 bytes while retaining the existing
+61,112-byte native viewer for export Back. These sums exclude allocator/task
+overhead and other stores; they are not running heap or fragmentation evidence.
+
+Typed result copies are pinned outside the critical section. Canceling a load
+discards its result; an in-flight Save Copy or export may still publish its
+actual storage outcome. Failed saves retain their temporary file for diagnosis.
+Focused codec, IO/storage and UI checks and independent reviews pass. The first
+complete 132-suite host run passed on 1,096 unchanged inputs and is retained
+under `artifacts/rev123-host-evidence`. All five native builds and the linked
+resource audit pass; S3 fixed data/BSS grows by 32 bytes and C5 is unchanged.
+The worker entry frame is 64 bytes (previously 48), with its existing 6,144-byte
+stack allocation unchanged; selected frames do not establish full-chain stack
+margin. The matched three-target, nine-image package and verify-only checks
+pass. Rev123 is not installed, and real-card save/reopen, cancellation, failure
+recovery and touchscreen acceptance remain
+unproven. The earlier revision-specific sections below retain their own scope.
 
 ## Rev110 source checkpoint
 
@@ -29,7 +80,7 @@ rev104 and rev105 are local checkpoints pending device acceptance.
 
 This guide describes installed rev102's v4 saved-report workflow. [The rev102 checkpoint](DUAL_RADIO_REV102.md) records matching host/native validation, verified installation/boot and remaining physical-acceptance limits. It extends [rev101's live C5 receive metadata](DUAL_RADIO_REV101.md) into saved reports. [The rev100 checkpoint](DUAL_RADIO_REV100.md) preserves the preceding v3 archive implementation and its revision-specific validation, while [rev99](DUAL_RADIO_REV99.md) records the earlier dual-receiver report scope. Earlier contribution evidence remains in [CONTRIBUTION_REV93.md](CONTRIBUTION_REV93.md); it does not establish physical acceptance of the new report.
 
-Cerberus can save retained S3 and C5 Bluetooth observations in one SD report and reopen them for analysis after leaving the scan or rebooting. It supports the persistence outcome of saving received BLE evidence, including a selected Find My observation. It does not establish full Marauder Save/Load Airtags parity: Cerberus uses its own versioned `.BLE` format, does not import Marauder's JSON files, and never loads saved observations into live targeting, GATT or sound actions.
+Cerberus can save retained S3 and C5 Bluetooth observations in one SD report and reopen them for analysis after leaving the scan or rebooting. It supports the persistence outcome of saving received BLE evidence, including a selected Find My observation. This v6 workflow uses Cerberus's versioned `.BLE` format. The separate rev123 interchange work above addresses Marauder JSON files; neither offline format loads saved observations into live targeting, GATT or sound actions, so full upstream live-list parity remains open.
 
 ## Save an observation or retained list
 

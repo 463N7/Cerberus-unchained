@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ble_archive.h"
+#include "airtag_json.h"
 #include "esp_err.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -20,10 +21,20 @@ typedef enum {
 typedef enum {
     CERBERUS_BLE_ARCHIVE_IO_SAVE = 0,
     CERBERUS_BLE_ARCHIVE_IO_LOAD,
+    CERBERUS_BLE_ARCHIVE_IO_LOAD_AIRTAG_JSON,
+    CERBERUS_BLE_ARCHIVE_IO_SAVE_AIRTAG_JSON,
+    CERBERUS_BLE_ARCHIVE_IO_EXPORT_AIRTAG_JSON,
 } cerberus_ble_archive_io_operation_t;
+
+typedef enum {
+    CERBERUS_BLE_ARCHIVE_IO_FORMAT_BLE = 0,
+    CERBERUS_BLE_ARCHIVE_IO_FORMAT_AIRTAG_JSON,
+} cerberus_ble_archive_io_format_t;
 typedef struct {
     cerberus_ble_archive_io_state_t state;
     cerberus_ble_archive_io_operation_t operation;
+    cerberus_ble_archive_io_format_t format;
+    cerberus_airtag_json_export_stats_t export_stats;
     esp_err_t error;
     uint64_t job_id;
     bool worker_active, cancel_requested, result_ready;
@@ -41,9 +52,23 @@ esp_err_t cerberus_ble_archive_io_save(const cerberus_ble_archive_t *document,
     uint64_t *job_id);
 esp_err_t cerberus_ble_archive_io_load(const char *relative_path,
     const char *file_name, uint64_t *job_id);
+/* JSON imports are a separate historical model with unknown source/type/time.
+ * Export copies the native document before returning, then the same worker
+ * validates/converts each eligible packet separately. No UI parsing or radio
+ * lookup occurs. Conversion stats count packets, not physical devices.
+ * All successful JSON operations publish only a typed JSON result. */
+esp_err_t cerberus_ble_archive_io_load_airtag_json(const char *relative_path,
+    const char *file_name, uint64_t *job_id);
+esp_err_t cerberus_ble_archive_io_save_airtag_json(const cerberus_airtag_json_t *document,
+    uint64_t *job_id);
+esp_err_t cerberus_ble_archive_io_export_airtag_json(const cerberus_ble_archive_t *document,
+    uint64_t *job_id);
+esp_err_t cerberus_ble_archive_io_copy_airtag_json(uint64_t job_id,
+    cerberus_airtag_json_t *document);
 void cerberus_ble_archive_io_get_status(cerberus_ble_archive_io_status_t *status);
-/* Copies only a fully validated completed SAVE or LOAD, without changing output on
- * failure. The immutable result is pinned and copied outside the critical section;
+/* Copies only a fully validated completed native BLE SAVE or LOAD. JSON jobs
+ * require copy_airtag_json; both typed getters reject the other format without
+ * changing output on failure. The immutable result is pinned and copied outside the critical section;
  * a concurrent Release prevents new readers and defers disposal until all accepted
  * copies return. Historical data never becomes a live scan or active target. */
 esp_err_t cerberus_ble_archive_io_copy_result(uint64_t job_id,

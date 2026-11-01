@@ -115,25 +115,53 @@ remains the last verified installed build, and GPS/NMEA parity remains partial.
 
 ## BLE persistence and external analysis
 
-Pinned `WiFiScan.cpp:4028-4131` saves/loads an AirTag JSON array with `mac`,
-hexadecimal `payload` and `payload_size`. The file omits address type,
-receiver, source epoch/time and ADV/RSP provenance. An importer must not invent
-those fields. Existing-MAC sightings update upstream RSSI/time without replacing
-the stored payload. This is retained-list persistence, not a callback timeline.
+Pinned `RunSaveATList()` and `RunLoadATList()` in `WiFiScan.cpp:4028-4131`
+save/load an AirTag root JSON array with `mac`, hexadecimal `payload` and
+`payload_size`; `byteArrayToHexString()` and `hexStringToByteArray()` are in
+pinned `esp32_marauder/utils.h` (lines 91 and 111).
+The file omits address type, receiver, source epoch/time, RSSI and ADV/RSP
+provenance. Existing-MAC sightings update upstream RSSI/time without replacing
+the retained payload. This is retained-list persistence, not a callback timeline.
+The read-only comparison at 2026-11-01 19:45:27 UTC again reported develop
+identical to `79cc6bcba1db6679baee1dab2b0c1ad5010e6363`; its response is retained
+in `artifacts/device-rev123/marauder-develop-check.json`.
 
-The inspected ordinary `RunBluetoothScan()` path does not open PCAP or a log.
-The shared CLI serial option and `Buffer.cpp` logging support alone do not prove
-a generic BLE PCAP feature. Cerberus's v6 `.BLE` snapshots retain richer source
-evidence but have at most 64 observations, 32 per receiver, and 31-byte raw
+Local [rev123](DUAL_RADIO_REV123.md) implements this schema as a separate offline
+import/view/save-copy model and exports qualifying complete packets from
+validated native `.BLE` documents. It preserves duplicate MAC records, order,
+empty payloads and opaque bytes without inventing absent provenance or inserting
+imported records into live discovery. Saved originals and matched responses
+are considered independently; omitted incomplete/unproven and nonmatching
+packets are counted separately. A full decoded hint is not a substitute for
+missing raw bytes. More than 64 eligible packets fails atomically.
+
+The explicit Cerberus bounds are 64 records, 8,192 aggregate payload bytes and
+49,152 JSON bytes. One optional JSON viewer and the existing serialized worker
+use the selected allocation arm; ordinary native `.BLE` allocation is unchanged.
+Codec, IO/storage and UI focused checks and independent reviews pass. The first
+complete 132-suite host run passed on 1,096 unchanged inputs. All five native
+builds, the linked resource audit and matched package verification pass. The
+local matched package contains three targets and nine images. Native S3 fixed
+data/BSS grows by 32 bytes, C5 is unchanged, and the optional JSON viewer plus worker requests 68,200 bytes before allocator
+overhead and other stores. Retaining the native viewer during export raises
+that allocation sum to 129,312 bytes; no runtime headroom or SD-latency claim
+follows from these sizes. SD save/reopen, interrupted-write recovery and physical
+UI acceptance remain open; rev113 is still the last verified installed build.
+
+The inspected ordinary upstream `RunBluetoothScan()` path does not open PCAP
+or a log. The shared CLI serial option and `Buffer.cpp` logging support alone
+do not prove a generic BLE PCAP feature. Cerberus v6 snapshots retain richer
+source evidence but at most 64 observations, 32 per receiver, and 31-byte raw
 previews. Decoded evidence beyond a preview is not a lossless retained payload.
 
-Marauder JSON compatibility, broader history and complete raw payload retention
-remain gaps. A separate human-readable export of a validated `.BLE` document
-would help external analysis but would not, by itself, implement Marauder's
-load-to-live-list workflow. It should use the existing worker and bounded
-streaming scratch, preserve unknowns and lossless 64-bit identities, and never
-replace historical evidence with a fresh clock or radio lookup. A true timeline
-needs its own journal semantics rather than repeated rows in a v6 snapshot.
+Remaining work includes an explicitly designed load-to-live-list workflow,
+continuous callback/history journaling, full original and response payload
+retention, and richer external exports that preserve native source/type/time
+proof. Current JSON intentionally loses that metadata; it cannot carry full
+Cerberus identity or replace the original `.BLE` evidence. Repeated snapshot
+rows are not a callback timeline. AP/SSID persistence and broader backup/restore
+also remain separate. Offline schema compatibility alone does not establish
+full Marauder persistence parity or hardware acceptance.
 
 ## SHOW_INFO source review
 

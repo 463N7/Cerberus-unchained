@@ -30,6 +30,7 @@ extern "C" {
 #define CERBERUS_STORAGE_BLE_ARCHIVE_PATH "/CERBERUS/BLE"
 /* v6: header32 + up to64 receiver-tagged rows of432 bytes. */
 #define CERBERUS_STORAGE_BLE_ARCHIVE_MAX_BYTES 27680U
+#define CERBERUS_STORAGE_AIRTAG_JSON_MAX_BYTES 49152U
 
 typedef struct {
     bool mounted;
@@ -189,6 +190,13 @@ esp_err_t cerberus_storage_recon_finish(const char *manifest, size_t length,
 esp_err_t cerberus_storage_ble_archive_save(const uint8_t *data, size_t length,
     char *file_name, size_t capacity);
 esp_err_t cerberus_storage_ble_archive_load(const char *relative_path,
+    const char *file_name, uint8_t *data, size_t capacity, size_t *length);
+/* Same exclusive storage boundary as .BLE. JSON load allows safe .LOG/.JSON
+ * names. Save chooses Annnnn.LOG via an exclusive Annnnn.TMP; it never writes
+ * a caller-supplied destination or overwrites upstream /Airtags_0.log. */
+esp_err_t cerberus_storage_airtag_json_save(const uint8_t *data, size_t length,
+    char *file_name, size_t capacity);
+esp_err_t cerberus_storage_airtag_json_load(const char *relative_path,
     const char *file_name, uint8_t *data, size_t capacity, size_t *length);
 esp_err_t cerberus_storage_write_qr_bmp(
     const uint8_t *modules,

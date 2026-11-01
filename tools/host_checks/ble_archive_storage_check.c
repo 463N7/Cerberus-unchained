@@ -66,6 +66,7 @@ static void xSemaphoreGive(SemaphoreHandle_t value){CHECK(value==&mutex_token&&l
 enum event {STAT,MKDIR,OPEN,FDOPEN,RAW_CLOSE,WRITE,FLUSH,SYNC,CLOSE,RENAME,FOPEN,READ,GETC,EVENTS};
 static unsigned calls[EVENTS],fault[EVENTS];
 static bool extra_error, no_eof, short_read, collide_all, race_temp, race_final;
+static const char *race_final_path="sdcard/CERBERUS/BLE/B00001.BLE";
 static unsigned zero_read_at;
 static int stat_size_delta;
 static bool event(enum event which)
@@ -85,7 +86,7 @@ static int wrapped_stat(const char *path,struct stat *item)
 {
     if(event(STAT)){errno=EIO;return -1;}
     const char *leaf=strrchr(path,'/');
-    if(collide_all&&leaf&&strlen(leaf)==11&&leaf[1]=='B'){memset(item,0,sizeof(*item));item->st_mode=S_IFREG;return 0;}
+    if(collide_all&&leaf&&strlen(leaf)==11&&(leaf[1]=='B'||leaf[1]=='A')){memset(item,0,sizeof(*item));item->st_mode=S_IFREG;return 0;}
     int result=stat(path,item);
     if(result==0&&S_ISREG(item->st_mode))item->st_size+=stat_size_delta;
     return result;
@@ -125,7 +126,7 @@ static int wrapped_getc(FILE *stream){if(event(GETC))return 'X';return fgetc(str
 /* The successful-close hook creates a competing final entry before the final
  * absence gate, proving publication cannot replace it under fault injection. */
 static int close_with_race(FILE *stream)
-{int r=wrapped_fclose(stream);if(race_final){race_final=false;put("sdcard/CERBERUS/BLE/B00001.BLE","KEEP",4);}return r;}
+{int r=wrapped_fclose(stream);if(race_final){race_final=false;put(race_final_path,"KEEP",4);}return r;}
 #define stat(p,s) wrapped_stat(p,s)
 #define mkdir wrapped_mkdir
 #define open wrapped_open
@@ -170,7 +171,8 @@ static void setup(void)
     CHECK(native_mkdir(directory)==0&&native_chdir(directory)==0&&native_mkdir("sdcard")==0);
     CHECK(native_mkdir("sdcard/CERBERUS")==0&&native_mkdir("sdcard/CERBERUS/BLE")==0);
     storage_mutex=&mutex_token;sd_mounted=true;storage_owner=CERBERUS_STORAGE_OWNER_FIRMWARE;
-    sd_recon.active=wardrive_busy=fail_lock=fail_mutex=false;sd_wifi_capture_file=NULL;sd_ble_archive_next_index=1;
+    sd_recon.active=wardrive_busy=fail_lock=fail_mutex=false;sd_wifi_capture_file=NULL;sd_ble_archive_next_index=sd_airtag_json_next_index=1;
+    race_final_path="sdcard/CERBERUS/BLE/B00001.BLE";
     extra_error=no_eof=short_read=collide_all=race_temp=race_final=false;zero_read_at=0;stat_size_delta=0;
     handoff_probes=unmounts=0;probe_handoff=false;
     memset(calls,0,sizeof(calls));memset(fault,0,sizeof(fault));name[0]=0;
@@ -251,9 +253,85 @@ static void check_full_v6_document(void)
     failure_output(got);clean();
 }
 
+
+static uint8_t json_payload[CERBERUS_STORAGE_AIRTAG_JSON_MAX_BYTES],json_output[CERBERUS_STORAGE_AIRTAG_JSON_MAX_BYTES];
+static esp_err_t json_save(size_t length){return cerberus_storage_airtag_json_save(json_payload,length,name,sizeof(name));}
+static esp_err_t json_load(size_t *length)
+{memset(json_output,0xA5,sizeof(json_output));*length=123;return cerberus_storage_airtag_json_load("/CERBERUS/BLE","A00001.LOG",json_output,sizeof(json_output),length);}
+static void json_failure(size_t length)
+{CHECK(length==0);for(size_t i=0;i<sizeof(json_output);++i)CHECK(json_output[i]==0);clean();}
+static void json_verify(const char *file,const void *expected,size_t length)
+{
+    char path[128];snprintf(path,sizeof(path),"sdcard/CERBERUS/BLE/%s",file);
+    FILE*f=fopen(path,"rb");CHECK(f);CHECK(fread(json_output,1,sizeof(json_output),f)==length);
+    CHECK(!memcmp(json_output,expected,length)&&fgetc(f)==EOF&&fclose(f)==0);
+}
+static void check_json_storage(void)
+{
+    CHECK(CERBERUS_STORAGE_AIRTAG_JSON_MAX_BYTES==49152U);
+    for(unsigned i=0;i<sizeof(json_payload);++i)json_payload[i]=(uint8_t)i;
+    size_t got=0;
+    /* Exact maximum and chunked host reads execute actual storage code. No
+     * parser or source type is inferred by the byte-storage layer. */
+    setup();probe_handoff=true;CHECK(json_save(sizeof(json_payload))==ESP_OK&&!strcmp(name,"A00001.LOG"));
+    short_read=true;CHECK(json_load(&got)==ESP_OK&&got==sizeof(json_payload)&&!memcmp(json_output,json_payload,got));
+    CHECK(calls[READ]>7000&&handoff_probes>7000);clean();probe_handoff=false;
+    CHECK(cerberus_storage_reserve_for_usb()==ESP_OK&&!sd_mounted&&unmounts==1);clean();
+    setup();put("sdcard/Airtags_0.log","UPSTREAM",8);put("sdcard/CERBERUS/BLE/A00001.LOG","KEEP",4);put("sdcard/CERBERUS/BLE/A00002.TMP","KEEP",4);
+    CHECK(json_save(33)==ESP_OK&&!strcmp(name,"A00003.LOG"));json_verify("A00001.LOG","KEEP",4);json_verify("A00002.TMP","KEEP",4);
+    CHECK(cerberus_storage_airtag_json_load("/","Airtags_0.log",json_output,sizeof(json_output),&got)==ESP_OK&&got==8&&!memcmp(json_output,"UPSTREAM",8));
+    setup();race_temp=true;CHECK(json_save(33)==ESP_OK&&!strcmp(name,"A00002.LOG"));json_verify("A00001.TMP","KEEP",4);
+    setup();race_final_path="sdcard/CERBERUS/BLE/A00001.LOG";race_final=true;
+    CHECK(json_save(33)!=ESP_OK&&!strcmp(name,"A00001.TMP"));json_verify("A00001.LOG","KEEP",4);json_verify("A00001.TMP",json_payload,33);
+    setup();collide_all=true;CHECK(json_save(33)==ESP_ERR_NOT_FOUND&&calls[STAT]==1026&&!calls[OPEN]&&!name[0]);clean();
+    setup();sd_airtag_json_next_index=99999;CHECK(json_save(33)==ESP_OK&&!strcmp(name,"A99999.LOG"));CHECK(json_save(33)==ESP_OK&&!strcmp(name,"A00001.LOG"));
+    CHECK(sd_ble_archive_next_index==1&&save(33)==ESP_OK&&!strcmp(name,"B00001.BLE"));
+    const enum event failures[]={STAT,OPEN,FDOPEN,WRITE,FLUSH,SYNC,CLOSE,RENAME};
+    for(unsigned n=0;n<sizeof(failures)/sizeof(failures[0]);++n){
+        setup();fault[failures[n]]=1;CHECK(json_save(71)!=ESP_OK&&!exists("A00001.LOG"));
+        if(failures[n]>=FDOPEN)CHECK(exists("A00001.TMP")&&!strcmp(name,"A00001.TMP"));
+        CHECK(!calls[RENAME]||failures[n]==RENAME);clean();memset(fault,0,sizeof(fault));CHECK(json_save(71)==ESP_OK);clean();
+    }
+    for(unsigned nth=3;nth<=5;++nth){setup();fault[STAT]=nth;CHECK(json_save(71)!=ESP_OK&&!exists("A00001.LOG"));clean();}
+    setup();CHECK(native_rmdir("sdcard/CERBERUS/BLE")==0);fault[MKDIR]=1;CHECK(json_save(33)!=ESP_OK&&!name[0]);clean();
+    setup();extra_error=true;CHECK(json_save(33)!=ESP_OK&&!calls[RENAME]&&exists("A00001.TMP"));clean();
+    setup();fault[FDOPEN]=1;fault[RAW_CLOSE]=1;CHECK(json_save(33)!=ESP_OK&&calls[RAW_CLOSE]==1);clean();
+    for(unsigned owner=0;owner<7;++owner){
+        setup();if(owner==0)sd_mounted=false;if(owner==1)storage_owner=CERBERUS_STORAGE_OWNER_USB;
+        if(owner==2)sd_recon.active=true;if(owner==3)wardrive_busy=true;if(owner==4)sd_wifi_capture_file=(FILE*)1;
+        if(owner==5)fail_lock=true;if(owner==6){storage_mutex=NULL;fail_mutex=true;}
+        CHECK(json_save(33)!=ESP_OK&&!calls[STAT]&&!calls[OPEN]);CHECK(json_load(&got)!=ESP_OK);json_failure(got);
+    }
+    const enum event read_failures[]={STAT,FOPEN,READ,GETC,CLOSE};
+    for(unsigned n=0;n<sizeof(read_failures)/sizeof(read_failures[0]);++n){
+        setup();put("sdcard/CERBERUS/BLE/A00001.LOG",json_payload,128);fault[read_failures[n]]=1;
+        CHECK(json_load(&got)!=ESP_OK);json_failure(got);json_verify("A00001.LOG",json_payload,128);clean();
+    }
+    for(unsigned kind=0;kind<6;++kind){
+        setup();put("sdcard/CERBERUS/BLE/A00001.LOG",json_payload,128);
+        if(kind==0)stat_size_delta=1;if(kind==1)stat_size_delta=-1;if(kind==2)extra_error=true;
+        if(kind==3)no_eof=true;if(kind==4){short_read=true;zero_read_at=3;}if(kind==5)stat_size_delta=CERBERUS_STORAGE_AIRTAG_JSON_MAX_BYTES;
+        CHECK(json_load(&got)!=ESP_OK);if(kind==5)CHECK(!calls[FOPEN]);json_failure(got);
+    }
+    setup();CHECK(json_load(&got)==ESP_ERR_NOT_FOUND);json_failure(got);
+    put("sdcard/CERBERUS/BLE/A00001.LOG",json_payload,0);CHECK(json_load(&got)==ESP_ERR_INVALID_SIZE);json_failure(got);
+    setup();CHECK(native_mkdir("sdcard/CERBERUS/BLE/A00001.LOG")==0);CHECK(json_load(&got)==ESP_ERR_INVALID_SIZE&&!calls[FOPEN]);json_failure(got);
+    setup();CHECK(native_mkdir("sdcard/COPIES")==0);put("sdcard/COPIES/import.JsOn",json_payload,77);
+    CHECK(cerberus_storage_airtag_json_load("/COPIES","import.JsOn",json_output,sizeof(json_output),&got)==ESP_OK&&got==77&&!memcmp(json_output,json_payload,77));
+    const char*bad[]={"../A00001.LOG","A00001.TMP","B00001.BLE","A00001.LOG/",".LOG",".JSON","","sub/import.json","C:import.LOG"};
+    for(unsigned i=0;i<sizeof(bad)/sizeof(bad[0]);++i){unsigned opened=calls[FOPEN];
+        CHECK(cerberus_storage_airtag_json_load("/COPIES",bad[i],json_output,sizeof(json_output),&got)==ESP_ERR_INVALID_ARG&&calls[FOPEN]==opened);}
+    CHECK(cerberus_storage_airtag_json_load("/../COPIES","import.JsOn",json_output,sizeof(json_output),&got)==ESP_ERR_INVALID_ARG);
+    CHECK(json_save(0)==ESP_ERR_INVALID_ARG&&json_save(sizeof(json_payload)+1)==ESP_ERR_INVALID_ARG);
+    CHECK(cerberus_storage_airtag_json_save(json_payload,1,name,10)==ESP_ERR_INVALID_ARG);
+    CHECK(cerberus_storage_airtag_json_load("/COPIES","import.JsOn",json_output,1,&got)==ESP_ERR_INVALID_SIZE);
+    CHECK(cerberus_storage_airtag_json_load("/COPIES","import.JsOn",json_output,sizeof(json_output)+1,&got)==ESP_ERR_INVALID_ARG);clean();
+}
+
 int main(void)
 {
     check_full_v6_document();
+    check_json_storage();
     for(unsigned length=1;length<=sizeof(payload);length=length<128?length+31:sizeof(payload)+1){
         setup();CHECK(save(length)==ESP_OK&&!strcmp(name,"B00001.BLE"));verify(name,payload,length);
         size_t got;CHECK(load(&got)==ESP_OK&&got==length&&!memcmp(output,payload,length));clean();

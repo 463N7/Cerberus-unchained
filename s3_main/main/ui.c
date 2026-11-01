@@ -354,6 +354,13 @@ static const cerberus_ui_widget_theme_t ui_colors = {
 
 static esp_err_t draw_detail_page(void);
 static esp_err_t ble_archive_draw(void);
+static bool airtag_json_is_file(const char *name);
+static bool airtag_json_is_open(void);
+static void airtag_json_open_file(const char *path, const char *name);
+static void airtag_json_open_export(void);
+static esp_err_t airtag_json_draw(void);
+static void airtag_json_tap(uint16_t x, uint16_t y);
+static bool airtag_json_tick(bool asleep);
 static void ble_archive_tap(uint16_t x, uint16_t y);
 static void ble_archive_tick(bool asleep);
 static void ble_archive_open_menu(void);
@@ -6063,6 +6070,8 @@ static esp_err_t draw_file_actions(void)
     ESP_RETURN_ON_ERROR(draw_button(168, 184, 136, 52, "DELETE"), TAG, "delete action failed");
     if (!file_selected_entry.is_directory && strcmp(file_selected_path, CERBERUS_STORAGE_FIRMWARE_PATH) == 0) {
         ESP_RETURN_ON_ERROR(draw_button(48, 258, 224, 52, "INSPECT PACKAGE"), TAG, "package action failed");
+    } else if (!file_selected_entry.is_directory && airtag_json_is_file(file_selected_entry.name)) {
+        ESP_RETURN_ON_ERROR(draw_button(48, 258, 224, 52, "OPEN AIRTAG JSON"), TAG, "JSON action failed");
     } else {
         ESP_RETURN_ON_ERROR(draw_centered(278, "COPY/MOVE: CHOOSE DESTINATION", UI_MUTED, 1), TAG, "actions help failed");
         ESP_RETURN_ON_ERROR(draw_centered(296, "THEN TAP PASTE", UI_MUTED, 1), TAG, "actions paste help failed");
@@ -10603,6 +10612,9 @@ static void handle_file_actions_tap(uint16_t x, uint16_t y)
             file_selected_entry.name, &file_package_info);
         file_mode = UI_FILE_MODE_PACKAGE_INFO;
         ESP_ERROR_CHECK(draw_detail_page());
+    } else if (x >= 48U && x < 272U && y >= 258U && y < 310U &&
+        !file_selected_entry.is_directory && airtag_json_is_file(file_selected_entry.name)) {
+        airtag_json_open_file(file_selected_path, file_selected_entry.name);
     }
 }
 
@@ -11339,6 +11351,7 @@ static void handle_scripts_tap(uint16_t x, uint16_t y)
 #include "ble_analyzer_live_ui.h"
 #include "s3_findmy_monitor_ui.h"
 #include "ble_archive_live_ui.h"
+#include "airtag_json_live_ui.h"
 #include "wardrive_recent_live_ui.h"
 #include "wardrive_gps_live_ui.h"
 #include "sentinel_watch_ui.h"

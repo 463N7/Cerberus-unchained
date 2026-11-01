@@ -3,6 +3,7 @@
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <stddef.h>
 #include <string.h>
 
 #define BLE_ARCHIVE_IO_STACK_BYTES 6144U
@@ -11,15 +12,31 @@
 
 _Static_assert(CERBERUS_BLE_ARCHIVE_MAX_SIZE <= CERBERUS_STORAGE_BLE_ARCHIVE_MAX_BYTES,
     "Archive codec must fit its storage bound");
+_Static_assert(CERBERUS_AIRTAG_JSON_MAX_BYTES <= CERBERUS_STORAGE_AIRTAG_JSON_MAX_BYTES,
+    "JSON codec must fit its storage bound");
 _Static_assert(CERBERUS_BLE_ARCHIVE_IO_PATH_CAPACITY == CERBERUS_STORAGE_PATH_MAX &&
     CERBERUS_BLE_ARCHIVE_IO_NAME_CAPACITY == CERBERUS_STORAGE_NAME_MAX,
     "Archive paths must fit storage validators");
 
 typedef struct {
-    cerberus_ble_archive_t document;
-    uint8_t bytes[CERBERUS_BLE_ARCHIVE_MAX_SIZE];
     char relative_path[CERBERUS_BLE_ARCHIVE_IO_PATH_CAPACITY];
     char file_name[CERBERUS_BLE_ARCHIVE_IO_NAME_CAPACITY];
+    union {
+        struct {
+            cerberus_ble_archive_t document;
+            uint8_t bytes[CERBERUS_BLE_ARCHIVE_MAX_SIZE];
+        } native;
+        struct {
+            cerberus_airtag_json_t document;
+            /* Export source is immutable until conversion completes. Encoding
+             * then reuses this aligned scratch; the codec arguments never
+             * overlap, and no third document/buffer allocation is needed. */
+            union {
+                cerberus_ble_archive_t export_source;
+                uint8_t bytes[CERBERUS_AIRTAG_JSON_MAX_BYTES];
+            } buffer;
+        } json;
+    } payload;
 } ble_archive_io_context_t;
 static portMUX_TYPE archive_io_lock = portMUX_INITIALIZER_UNLOCKED;
 static ble_archive_io_context_t *archive_io_context;
@@ -27,6 +44,25 @@ static cerberus_ble_archive_io_status_t archive_io_status;
 static uint64_t archive_io_last_job;
 static bool archive_io_release_requested;
 static uint16_t archive_io_readers;
+
+static bool archive_io_loading(cerberus_ble_archive_io_operation_t operation)
+{ return operation == CERBERUS_BLE_ARCHIVE_IO_LOAD || operation == CERBERUS_BLE_ARCHIVE_IO_LOAD_AIRTAG_JSON; }
+
+static bool archive_io_json(cerberus_ble_archive_io_operation_t operation)
+{ return operation >= CERBERUS_BLE_ARCHIVE_IO_LOAD_AIRTAG_JSON; }
+
+static size_t archive_io_allocation_size(cerberus_ble_archive_io_operation_t operation)
+{
+    return offsetof(ble_archive_io_context_t, payload) + (archive_io_json(operation) ?
+        sizeof(((ble_archive_io_context_t *)0)->payload.json) : sizeof(((ble_archive_io_context_t *)0)->payload.native));
+}
+
+static esp_err_t archive_io_json_error(cerberus_airtag_json_result_t result)
+{
+    return result == CERBERUS_AIRTAG_JSON_OK ? ESP_OK :
+        result == CERBERUS_AIRTAG_JSON_LIMIT ? ESP_ERR_INVALID_SIZE :
+        result == CERBERUS_AIRTAG_JSON_NO_ELIGIBLE ? ESP_ERR_NOT_FOUND : ESP_ERR_INVALID_RESPONSE;
+}
 
 static bool archive_io_string_fits(const char *value, size_t capacity)
 {
@@ -50,12 +86,14 @@ static void archive_io_finish(ble_archive_io_context_t *context,
     /* Cancellation racing LOAD completion still prevents result publication.
      * A completed SAVE reports actual storage outcome; no rollback is implied. */
     if (state == CERBERUS_BLE_ARCHIVE_IO_COMPLETE &&
-        archive_io_status.operation == CERBERUS_BLE_ARCHIVE_IO_LOAD &&
+        archive_io_loading(archive_io_status.operation) &&
         archive_io_status.cancel_requested) state = CERBERUS_BLE_ARCHIVE_IO_CANCELED;
     archive_io_status.state = state;
     archive_io_status.error = error;
     archive_io_status.bytes = (uint32_t)bytes;
-    archive_io_status.count = state == CERBERUS_BLE_ARCHIVE_IO_COMPLETE ? context->document.count : 0U;
+    archive_io_status.count = state == CERBERUS_BLE_ARCHIVE_IO_COMPLETE ?
+        (archive_io_json(archive_io_status.operation) ? context->payload.json.document.count :
+            context->payload.native.document.count) : 0U;
     memcpy(archive_io_status.file_name, context->file_name, sizeof(context->file_name));
     archive_io_status.worker_active = false;
     bool dispose = archive_io_release_requested || state != CERBERUS_BLE_ARCHIVE_IO_COMPLETE;
@@ -69,24 +107,43 @@ static void ble_archive_io_worker(void *argument)
 {
     ble_archive_io_context_t *context = argument;
     portENTER_CRITICAL(&archive_io_lock);
-    bool save = archive_io_status.operation == CERBERUS_BLE_ARCHIVE_IO_SAVE;
+    cerberus_ble_archive_io_operation_t operation = archive_io_status.operation;
+    bool save = !archive_io_loading(operation);
+    bool json = archive_io_json(operation);
     archive_io_status.state = save ? CERBERUS_BLE_ARCHIVE_IO_SAVING : CERBERUS_BLE_ARCHIVE_IO_LOADING;
     portEXIT_CRITICAL(&archive_io_lock);
     esp_err_t error = ESP_OK;
     size_t length = 0U;
     bool canceled = archive_io_canceled();
-    if (!canceled && save && !cerberus_ble_archive_encode(&context->document,
-            context->bytes, sizeof(context->bytes), &length)) error = ESP_ERR_INVALID_RESPONSE;
+    uint8_t *bytes = json ? context->payload.json.buffer.bytes : context->payload.native.bytes;
+    size_t capacity = json ? sizeof(context->payload.json.buffer.bytes) : sizeof(context->payload.native.bytes);
+    if (!canceled && operation == CERBERUS_BLE_ARCHIVE_IO_EXPORT_AIRTAG_JSON) {
+        cerberus_airtag_json_export_stats_t stats = {0};
+        error = archive_io_json_error(cerberus_airtag_json_from_archive(
+            &context->payload.json.buffer.export_source, &context->payload.json.document, &stats));
+        portENTER_CRITICAL(&archive_io_lock);
+        archive_io_status.export_stats = stats;
+        portEXIT_CRITICAL(&archive_io_lock);
+    }
+    if (!canceled && error == ESP_OK && save) {
+        if (json) error = archive_io_json_error(cerberus_airtag_json_encode(
+            &context->payload.json.document, bytes, capacity, &length));
+        else if (!cerberus_ble_archive_encode(&context->payload.native.document,
+            bytes, capacity, &length)) error = ESP_ERR_INVALID_RESPONSE;
+    }
     canceled = canceled || archive_io_canceled();
     if (!canceled && error == ESP_OK) {
-        if (save) error = cerberus_storage_ble_archive_save(context->bytes, length,
+        if (save) error = json ? cerberus_storage_airtag_json_save(bytes, length,
+            context->file_name, sizeof(context->file_name)) : cerberus_storage_ble_archive_save(bytes, length,
             context->file_name, sizeof(context->file_name));
-        else error = cerberus_storage_ble_archive_load(context->relative_path,
-            context->file_name, context->bytes, sizeof(context->bytes), &length);
+        else error = json ? cerberus_storage_airtag_json_load(context->relative_path,
+            context->file_name, bytes, capacity, &length) : cerberus_storage_ble_archive_load(context->relative_path,
+            context->file_name, bytes, capacity, &length);
         if (!save && archive_io_canceled()) canceled = true;
-        if (!save && !canceled && error == ESP_OK &&
-            !cerberus_ble_archive_decode(context->bytes, length, &context->document))
-            error = ESP_ERR_INVALID_RESPONSE;
+        if (!save && !canceled && error == ESP_OK) {
+            if (json) error = archive_io_json_error(cerberus_airtag_json_decode(bytes, length, &context->payload.json.document));
+            else if (!cerberus_ble_archive_decode(bytes, length, &context->payload.native.document)) error = ESP_ERR_INVALID_RESPONSE;
+        }
     }
     archive_io_finish(context, error != ESP_OK ? CERBERUS_BLE_ARCHIVE_IO_ERROR :
         canceled ? CERBERUS_BLE_ARCHIVE_IO_CANCELED : CERBERUS_BLE_ARCHIVE_IO_COMPLETE,
@@ -94,11 +151,12 @@ static void ble_archive_io_worker(void *argument)
     vTaskDelete(NULL);
 }
 
-static esp_err_t archive_io_start(const cerberus_ble_archive_t *document,
+static esp_err_t archive_io_start(cerberus_ble_archive_io_operation_t operation,
+    const cerberus_ble_archive_t *document, const cerberus_airtag_json_t *json_document,
     const char *relative_path, const char *file_name, uint64_t *job_id)
 {
     if (job_id != NULL) *job_id = 0U;
-    bool save = document != NULL;
+    bool save = !archive_io_loading(operation);
     if (job_id == NULL || (!save && (!archive_io_string_fits(relative_path, CERBERUS_BLE_ARCHIVE_IO_PATH_CAPACITY) ||
         !archive_io_string_fits(file_name, CERBERUS_BLE_ARCHIVE_IO_NAME_CAPACITY))))
         return ESP_ERR_INVALID_ARG;
@@ -111,7 +169,8 @@ static esp_err_t archive_io_start(const cerberus_ble_archive_t *document,
     memset(&archive_io_status, 0, sizeof(archive_io_status));
     archive_io_status.job_id = ++archive_io_last_job;
     *job_id = archive_io_status.job_id;
-    archive_io_status.operation = save ? CERBERUS_BLE_ARCHIVE_IO_SAVE : CERBERUS_BLE_ARCHIVE_IO_LOAD;
+    archive_io_status.operation = operation;
+    archive_io_status.format = archive_io_json(operation) ? CERBERUS_BLE_ARCHIVE_IO_FORMAT_AIRTAG_JSON : CERBERUS_BLE_ARCHIVE_IO_FORMAT_BLE;
     archive_io_status.state = CERBERUS_BLE_ARCHIVE_IO_STARTING;
     archive_io_status.worker_active = true;
     archive_io_release_requested = false;
@@ -123,9 +182,11 @@ static esp_err_t archive_io_start(const cerberus_ble_archive_t *document,
     ble_archive_io_context_t *context = NULL;
     if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) >= BLE_ARCHIVE_IO_MIN_FREE_INTERNAL &&
         heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) >= BLE_ARCHIVE_IO_MIN_LARGEST_INTERNAL)
-        context = heap_caps_calloc(1U, sizeof(*context), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        context = heap_caps_calloc(1U, archive_io_allocation_size(operation), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (context != NULL) {
-        if (save) context->document = *document;
+        if (operation == CERBERUS_BLE_ARCHIVE_IO_SAVE) context->payload.native.document = *document;
+        else if (operation == CERBERUS_BLE_ARCHIVE_IO_SAVE_AIRTAG_JSON) context->payload.json.document = *json_document;
+        else if (operation == CERBERUS_BLE_ARCHIVE_IO_EXPORT_AIRTAG_JSON) context->payload.json.buffer.export_source = *document;
         memcpy(context->relative_path, path, strlen(path) + 1U);
         if (!save) memcpy(context->file_name, file_name, strlen(file_name) + 1U);
         portENTER_CRITICAL(&archive_io_lock);
@@ -147,10 +208,23 @@ static esp_err_t archive_io_start(const cerberus_ble_archive_t *document,
 esp_err_t cerberus_ble_archive_io_save(const cerberus_ble_archive_t *document, uint64_t *job_id)
 {
     if (document == NULL) { if (job_id != NULL) *job_id = 0U; return ESP_ERR_INVALID_ARG; }
-    return archive_io_start(document, NULL, NULL, job_id);
+    return archive_io_start(CERBERUS_BLE_ARCHIVE_IO_SAVE, document, NULL, NULL, NULL, job_id);
 }
 esp_err_t cerberus_ble_archive_io_load(const char *relative_path, const char *file_name, uint64_t *job_id)
-{ return archive_io_start(NULL, relative_path, file_name, job_id); }
+{ return archive_io_start(CERBERUS_BLE_ARCHIVE_IO_LOAD, NULL, NULL, relative_path, file_name, job_id); }
+
+esp_err_t cerberus_ble_archive_io_load_airtag_json(const char *relative_path, const char *file_name, uint64_t *job_id)
+{ return archive_io_start(CERBERUS_BLE_ARCHIVE_IO_LOAD_AIRTAG_JSON, NULL, NULL, relative_path, file_name, job_id); }
+esp_err_t cerberus_ble_archive_io_save_airtag_json(const cerberus_airtag_json_t *document, uint64_t *job_id)
+{
+    if (!document) { if (job_id) *job_id = 0U; return ESP_ERR_INVALID_ARG; }
+    return archive_io_start(CERBERUS_BLE_ARCHIVE_IO_SAVE_AIRTAG_JSON, NULL, document, NULL, NULL, job_id);
+}
+esp_err_t cerberus_ble_archive_io_export_airtag_json(const cerberus_ble_archive_t *document, uint64_t *job_id)
+{
+    if (!document) { if (job_id) *job_id = 0U; return ESP_ERR_INVALID_ARG; }
+    return archive_io_start(CERBERUS_BLE_ARCHIVE_IO_EXPORT_AIRTAG_JSON, document, NULL, NULL, NULL, job_id);
+}
 
 void cerberus_ble_archive_io_get_status(cerberus_ble_archive_io_status_t *status)
 {
@@ -159,23 +233,21 @@ void cerberus_ble_archive_io_get_status(cerberus_ble_archive_io_status_t *status
     *status = archive_io_status;
     portEXIT_CRITICAL(&archive_io_lock);
 }
-esp_err_t cerberus_ble_archive_io_copy_result(uint64_t job_id, cerberus_ble_archive_t *document)
+static ble_archive_io_context_t *archive_io_pin(uint64_t job_id, cerberus_ble_archive_io_format_t format)
 {
-    if (document == NULL) return ESP_ERR_INVALID_ARG;
     ble_archive_io_context_t *borrowed = NULL;
     portENTER_CRITICAL(&archive_io_lock);
     if (job_id && job_id == archive_io_status.job_id && !archive_io_status.worker_active &&
-        archive_io_status.result_ready && archive_io_context != NULL &&
+        archive_io_status.result_ready && archive_io_context != NULL && archive_io_status.format == format &&
         archive_io_status.state == CERBERUS_BLE_ARCHIVE_IO_COMPLETE && archive_io_readers != UINT16_MAX) {
         borrowed = archive_io_context;
         ++archive_io_readers;
     }
     portEXIT_CRITICAL(&archive_io_lock);
-    if (borrowed == NULL) return ESP_ERR_INVALID_STATE;
-
-    /* The completed document is immutable. Pin it while copying outside the
-     * interrupt-disabled lock; release cannot free it or admit another job. */
-    memcpy(document, &borrowed->document, sizeof(*document));
+    return borrowed;
+}
+static void archive_io_unpin(ble_archive_io_context_t *borrowed)
+{
     ble_archive_io_context_t *dispose = NULL;
     portENTER_CRITICAL(&archive_io_lock);
     --archive_io_readers;
@@ -186,7 +258,23 @@ esp_err_t cerberus_ble_archive_io_copy_result(uint64_t job_id, cerberus_ble_arch
     }
     portEXIT_CRITICAL(&archive_io_lock);
     if (dispose != NULL) heap_caps_free(dispose);
-    return ESP_OK;
+}
+esp_err_t cerberus_ble_archive_io_copy_result(uint64_t job_id, cerberus_ble_archive_t *document)
+{
+    if (!document) return ESP_ERR_INVALID_ARG;
+    ble_archive_io_context_t *borrowed = archive_io_pin(job_id, CERBERUS_BLE_ARCHIVE_IO_FORMAT_BLE);
+    if (!borrowed) return ESP_ERR_INVALID_STATE;
+    /* Both typed immutable copies remain outside the interrupt-disabled lock. */
+    memcpy(document, &borrowed->payload.native.document, sizeof(*document));
+    archive_io_unpin(borrowed); return ESP_OK;
+}
+esp_err_t cerberus_ble_archive_io_copy_airtag_json(uint64_t job_id, cerberus_airtag_json_t *document)
+{
+    if (!document) return ESP_ERR_INVALID_ARG;
+    ble_archive_io_context_t *borrowed = archive_io_pin(job_id, CERBERUS_BLE_ARCHIVE_IO_FORMAT_AIRTAG_JSON);
+    if (!borrowed) return ESP_ERR_INVALID_STATE;
+    memcpy(document, &borrowed->payload.json.document, sizeof(*document));
+    archive_io_unpin(borrowed); return ESP_OK;
 }
 void cerberus_ble_archive_io_cancel(uint64_t job_id)
 {

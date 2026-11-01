@@ -1,6 +1,7 @@
 #undef NDEBUG
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +25,8 @@ static bool locked;
 #define pdPASS 1
 static size_t free_internal=100000,largest_internal=50000;
 static unsigned allocations,frees,outstanding,tasks,deletes;
+static void *allocation_pointer;
+static size_t allocation_size;
 static bool fail_alloc,fail_task,immediate_task,release_in_alloc,storage_active;
 static void (*pending_task)(void*);
 static void *pending_argument;
@@ -36,11 +39,15 @@ static size_t heap_caps_get_largest_free_block(unsigned caps){CHECK(!locked&&cap
 static void *heap_caps_calloc(size_t count,size_t size,unsigned caps)
 {
     CHECK(!locked&&count==1&&caps==(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));++allocations;
-    void*p=fail_alloc?NULL:calloc(count,size);if(p)++outstanding;
+    CHECK(!allocation_pointer);
+    void*p=fail_alloc?NULL:calloc(count,size+64U);
+    if(p){++outstanding;allocation_pointer=p;allocation_size=size;memset((uint8_t*)p+size,0xCD,64U);}
     if(release_in_alloc)cerberus_ble_archive_io_release(status().job_id);
     return p;
 }
-static void heap_caps_free(void *p){CHECK(!locked&&!storage_active);if(p){CHECK(outstanding);--outstanding;++frees;}free(p);}
+static void heap_caps_free(void *p){CHECK(!locked&&!storage_active);if(p){
+    CHECK(outstanding&&p==allocation_pointer);for(unsigned i=0;i<64;++i)CHECK(((uint8_t*)p)[allocation_size+i]==0xCD);
+    allocation_pointer=NULL;--outstanding;++frees;}free(p);}
 static int xTaskCreate(void(*fn)(void*),const char *name,unsigned stack,void*arg,unsigned priority,void*handle)
 {
     CHECK(!locked&&!pending_task&&!strcmp(name,"ble_archive")&&stack==6144&&priority==2&&!handle);++tasks;
@@ -71,21 +78,52 @@ static esp_err_t cerberus_storage_ble_archive_load(const char*path,const char*na
     if(storage_error==ESP_OK){memcpy(data,storage_bytes,storage_length);*length=storage_length;}else *length=0;
     storage_active=false;return storage_error;
 }
+static uint8_t json_bytes[CERBERUS_AIRTAG_JSON_MAX_BYTES];
+static size_t json_length;
+static unsigned json_saves,json_loads;
+static esp_err_t cerberus_storage_airtag_json_save(const uint8_t*data,size_t length,char*name,size_t capacity)
+{
+    CHECK(!locked&&!storage_active&&length<=sizeof(json_bytes)&&capacity==256);++json_saves;storage_active=true;
+    CHECK(status().worker_active&&status().state==CERBERUS_BLE_ARCHIVE_IO_SAVING);
+    if(storage_hook)storage_hook();
+    if(storage_error==ESP_OK){memcpy(json_bytes,data,length);json_length=length;strcpy(name,"A00001.LOG");}
+    else if(partial_save)strcpy(name,"A00001.TMP");
+    storage_active=false;return storage_error;
+}
+static esp_err_t cerberus_storage_airtag_json_load(const char*path,const char*name,uint8_t*data,size_t capacity,size_t*length)
+{
+    CHECK(!locked&&!storage_active&&capacity==sizeof(json_bytes));++json_loads;storage_active=true;
+    CHECK(status().worker_active&&status().state==CERBERUS_BLE_ARCHIVE_IO_LOADING);
+    strcpy(last_path,path);strcpy(last_name,name);if(storage_hook)storage_hook();
+    if(storage_error==ESP_OK){memcpy(data,json_bytes,json_length);*length=json_length;}else *length=0;
+    storage_active=false;return storage_error;
+}
 /* Interleave Release and nested readers at the actual large copy. No document
  * bytes may be copied while interrupts are disabled, nor freed while pinned. */
 static void (*copy_hook)(void);
 static unsigned document_copies;
 static void *archive_checked_copy(void *out,const void *in,size_t bytes)
 {
-    if(bytes==sizeof(cerberus_ble_archive_t)){
+    if(bytes==sizeof(cerberus_ble_archive_t)||bytes==sizeof(cerberus_airtag_json_t)){
         CHECK(!locked);++document_copies;
         void(*hook)(void)=copy_hook;copy_hook=NULL;if(hook)hook();
     }
     return memcpy(out,in,bytes);
 }
+static void (*conversion_hook)(void);
+static cerberus_airtag_json_result_t checked_conversion(const cerberus_ble_archive_t *doc,
+    cerberus_airtag_json_t *out,cerberus_airtag_json_export_stats_t *stats)
+{
+    CHECK(!locked);
+    cerberus_airtag_json_result_t result=cerberus_airtag_json_from_archive(doc,out,stats);
+    void(*hook)(void)=conversion_hook;conversion_hook=NULL;if(hook)hook();
+    return result;
+}
+#define cerberus_airtag_json_from_archive checked_conversion
 #define memcpy archive_checked_copy
 #include "archive_io_impl.h"
 #undef memcpy
+#undef cerberus_airtag_json_from_archive
 
 static char console_text[1600];
 static size_t console_length;
@@ -165,7 +203,7 @@ static void reset(void)
     CHECK(!locked&&!pending_task&&!storage_active&&!status().worker_active&&!archive_io_readers);
     cerberus_ble_archive_io_release(status().job_id);CHECK(!outstanding&&!archive_io_context);
     free_internal=100000;largest_internal=50000;fail_alloc=fail_task=immediate_task=release_in_alloc=false;
-    storage_hook=copy_hook=NULL;storage_error=ESP_OK;partial_save=false;saves=loads=0;last_path[0]=last_name[0]=0;
+    storage_hook=copy_hook=conversion_hook=NULL;storage_error=ESP_OK;partial_save=false;saves=loads=json_saves=json_loads=0;last_path[0]=last_name[0]=0;
     memset(&output,0xA5,sizeof(output));untouched=output;
 }
 static void run_worker(void)
@@ -179,7 +217,7 @@ static uint64_t start_load(void)
 {uint64_t id;CHECK(cerberus_ble_archive_io_load("/COPIED","saved.ble",&id)==ESP_OK&&id>last_job);last_job=id;return id;}
 static void release_hook(void)
 {
-    console_check(status().operation==CERBERUS_BLE_ARCHIVE_IO_SAVE?CERBERUS_BLE_ARCHIVE_IO_SAVING:CERBERUS_BLE_ARCHIVE_IO_LOADING);
+    console_check(archive_io_loading(status().operation)?CERBERUS_BLE_ARCHIVE_IO_LOADING:CERBERUS_BLE_ARCHIVE_IO_SAVING);
     uint64_t id=status().job_id;unsigned before=frees;cerberus_ble_archive_io_release(id);CHECK(frees==before&&outstanding==1);
     uint64_t refused=99;CHECK(cerberus_ble_archive_io_load("/","x.BLE",&refused)==ESP_ERR_INVALID_STATE&&refused==0);
     CHECK(cerberus_ble_archive_io_copy_result(id,&output)==ESP_ERR_INVALID_STATE&&!memcmp(&output,&untouched,sizeof(output)));
@@ -225,6 +263,164 @@ static void check_old_file_loads(void)
         CHECK(output.rows[0].response_state==CERBERUS_BLE_ARCHIVE_RESPONSE_UNKNOWN&&!output.rows[0].receive.source_kind);
         cerberus_ble_archive_io_release(id);CHECK(!outstanding&&!archive_io_context);
     }
+}
+
+
+static cerberus_airtag_json_t json_input,json_expected,json_output,json_untouched,json_nested;
+static void fill_json(unsigned count,unsigned total)
+{
+    memset(&json_input,0,sizeof(json_input));json_input.count=(uint8_t)count;json_input.payload_used=(uint16_t)total;
+    unsigned offset=0;
+    for(unsigned i=0;i<count;++i){
+        unsigned length=(total-offset)/(count-i);
+        json_input.records[i]=(cerberus_airtag_json_record_t){.address={1,2,3,4,5,6},.offset=(uint16_t)offset,.length=(uint16_t)length};
+        offset+=length;
+    }
+    for(unsigned i=0;i<total;++i)json_input.payload[i]=(uint8_t)i;
+    CHECK(cerberus_airtag_json_validate(&json_input)==CERBERUS_AIRTAG_JSON_OK);json_expected=json_input;
+    memset(&json_output,0xA5,sizeof(json_output));json_untouched=json_output;
+}
+static void export_source(unsigned count,bool response)
+{
+    memset(&input,0,sizeof(input));input.count=(uint8_t)count;input.saved_uptime_ms=100;
+    for(unsigned i=0;i<count;++i){
+        cerberus_ble_archive_row_t*r=&input.rows[i];r->address[0]=(uint8_t)(i%32+1);r->address[5]=0xA1;
+        r->index=(uint8_t)(i%32);r->rssi=CERBERUS_BLE_ARCHIVE_RSSI_UNAVAILABLE;r->scan_epoch_valid=true;r->scan_epoch=UINT64_C(0x100000005);
+        r->receiver=i<32?CERBERUS_BLE_ARCHIVE_RECEIVER_S3:CERBERUS_BLE_ARCHIVE_RECEIVER_C5;
+        r->advertisement_length=4;memcpy(r->advertisement,(uint8_t[]){3,3,0x44,0xfd},4);
+        if(i>=32){r->rssi_kind=CERBERUS_BLE_ARCHIVE_RSSI_LATEST_ADV;r->receiver_boot_id=0xC501;
+            r->receive=(cerberus_dual_ble_receive_metadata_t){.source_kind=1,.callback_length=4,.sid=255,.data_status=255,.ad_validation=1};}
+        else if(response){r->response_state=CERBERUS_BLE_ARCHIVE_RESPONSE_PRESENT;
+            r->response_length=r->response_original_length=4;r->response_event_type=4;
+            memcpy(r->response,r->advertisement,4);r->response_original_sequence=1;r->response_sequence=2;
+            r->response_original_observed_ms=10;r->response_observed_ms=11;}
+    }
+    CHECK(cerberus_ble_archive_validate(&input));expected=input;
+}
+static uint64_t start_json(unsigned operation)
+{
+    uint64_t id=0;esp_err_t err;
+    if(operation==0)err=cerberus_ble_archive_io_load_airtag_json("/", "Airtags_0.log",&id);
+    else if(operation==1)err=cerberus_ble_archive_io_save_airtag_json(&json_input,&id);
+    else err=cerberus_ble_archive_io_export_airtag_json(&input,&id);
+    CHECK(err==ESP_OK&&id>last_job);last_job=id;
+    CHECK(status().format==CERBERUS_BLE_ARCHIVE_IO_FORMAT_AIRTAG_JSON);
+    CHECK(allocation_size==archive_io_allocation_size(CERBERUS_BLE_ARCHIVE_IO_LOAD_AIRTAG_JSON));
+    return id;
+}
+static void json_copy_release(void)
+{
+    CHECK(archive_io_readers>0&&!locked&&outstanding==1);
+    cerberus_ble_archive_io_release(status().job_id);CHECK(outstanding==1);
+    CHECK(cerberus_ble_archive_io_copy_airtag_json(status().job_id,&json_untouched)==ESP_ERR_INVALID_STATE);
+}
+static void json_nested_release(void)
+{
+    CHECK(archive_io_readers==1);copy_hook=json_copy_release;
+    CHECK(cerberus_ble_archive_io_copy_airtag_json(status().job_id,&json_nested)==ESP_OK);
+    CHECK(!memcmp(&json_nested,&json_expected,sizeof(json_expected))&&archive_io_readers==1&&outstanding==1);
+}
+static void check_json_operations(void)
+{
+    /* Exact selected-arm allocations, trailing canaries and cross-format copy
+     * rejection protect the discriminated context, including the smaller BLE arm. */
+    reset();fill(1);uint64_t id=start_save();
+    CHECK(allocation_size==768U+sizeof(cerberus_ble_archive_t)+CERBERUS_BLE_ARCHIVE_MAX_SIZE);
+    run_worker();fill_json(1,1);
+    CHECK(cerberus_ble_archive_io_copy_airtag_json(id,&json_output)==ESP_ERR_INVALID_STATE&&!memcmp(&json_output,&json_untouched,sizeof(json_output)));
+    for(unsigned n=0;n<3;++n){
+        reset();fill_json(n==0?0:n==1?2:64,n==0?0:n==1?3:8192);
+        id=start_json(1);memset(&json_input,0xCC,sizeof(json_input));run_worker();
+        CHECK(status().state==CERBERUS_BLE_ARCHIVE_IO_COMPLETE&&json_saves==1&&!saves&&!loads&&!json_loads);
+        CHECK(status().count==json_expected.count&&!strcmp(status().file_name,"A00001.LOG"));
+        CHECK(cerberus_ble_archive_io_copy_airtag_json(id,&json_output)==ESP_OK&&!memcmp(&json_output,&json_expected,sizeof(json_output)));
+        CHECK(cerberus_ble_archive_io_copy_result(id,&output)==ESP_ERR_INVALID_STATE&&!memcmp(&output,&untouched,sizeof(output)));
+        CHECK(cerberus_ble_archive_io_copy_airtag_json(id+1,&json_output)==ESP_ERR_INVALID_STATE);
+        cerberus_ble_archive_io_release(id);id=start_json(0);run_worker();
+        CHECK(status().state==CERBERUS_BLE_ARCHIVE_IO_COMPLETE&&json_loads==1&&status().count==json_expected.count);
+        CHECK(!strcmp(last_path,"/")&&!strcmp(last_name,"Airtags_0.log"));
+        CHECK(cerberus_ble_archive_io_copy_airtag_json(id,&json_output)==ESP_OK&&!memcmp(&json_output,&json_expected,sizeof(json_output)));
+        if(n==2)CHECK(json_length>40000U&&json_length<=49152U);
+    }
+    for(unsigned nested=0;nested<2;++nested){
+        reset();fill_json(64,8192);id=start_json(1);run_worker();unsigned before=frees;
+        copy_hook=nested?json_nested_release:json_copy_release;
+        CHECK(cerberus_ble_archive_io_copy_airtag_json(id,&json_output)==ESP_OK);
+        CHECK(!memcmp(&json_output,&json_expected,sizeof(json_output))&&!outstanding&&!archive_io_context&&frees==before+1);
+    }
+    reset();fill_json(1,1);id=start_json(1);run_worker();archive_io_readers=UINT16_MAX;
+    CHECK(cerberus_ble_archive_io_copy_airtag_json(id,&json_output)==ESP_ERR_INVALID_STATE&&!memcmp(&json_output,&json_untouched,sizeof(json_output)));
+    archive_io_readers=0;
+    for(unsigned count=1;count<=64;count+=63){
+        reset();export_source(count,false);id=start_json(2);memset(&input,0xCC,sizeof(input));
+        CHECK(!json_saves);run_worker();CHECK(status().state==CERBERUS_BLE_ARCHIVE_IO_COMPLETE&&json_saves==1);
+        CHECK(status().export_stats.eligible==count&&!status().export_stats.incomplete&&!status().export_stats.filtered);
+        CHECK(cerberus_ble_archive_io_copy_airtag_json(id,&json_output)==ESP_OK&&json_output.count==count);
+        for(unsigned i=0;i<count;++i){CHECK(!memcmp(json_output.records[i].address,expected.rows[i].address,6));
+            CHECK(json_output.records[i].length==4&&!memcmp(json_output.payload+json_output.records[i].offset,expected.rows[i].advertisement,4));}
+    }
+    reset();export_source(1,true);id=start_json(2);run_worker();CHECK(status().export_stats.eligible==2&&status().count==2);
+    CHECK(cerberus_ble_archive_io_copy_airtag_json(id,&json_output)==ESP_OK);
+    CHECK(!memcmp(json_output.records[0].address,json_output.records[1].address,6)&&json_output.records[1].offset==4);
+    reset();export_source(33,true);id=start_json(2);run_worker();
+    CHECK(status().error==ESP_ERR_INVALID_SIZE&&status().export_stats.eligible==65&&!json_saves&&!outstanding);
+    reset();export_source(2,false);memcpy(input.rows[0].advertisement,(uint8_t[]){3,3,0x12,0x18},4);
+    input.rows[1].advertisement_flags=1;id=start_json(2);run_worker();
+    CHECK(status().error==ESP_ERR_NOT_FOUND&&!status().export_stats.eligible&&status().export_stats.filtered==1&&status().export_stats.incomplete==1&&!json_saves&&!outstanding);
+    reset();export_source(1,false);input.rows[0].address_type=99;id=start_json(2);run_worker();
+    CHECK(status().error==ESP_ERR_INVALID_RESPONSE&&!json_saves&&!outstanding);
+    /* Cancel before dispatch performs no FS; while inside FS, SAVE/EXPORT
+     * reports actual publication while LOAD never exposes a canceled result. */
+    for(unsigned operation=0;operation<3;++operation)for(unsigned release=0;release<2;++release){
+        for(unsigned during=0;during<2;++during){
+            reset();fill_json(2,3);export_source(1,true);
+            CHECK(cerberus_airtag_json_encode(&json_input,json_bytes,sizeof(json_bytes),&json_length)==CERBERUS_AIRTAG_JSON_OK);
+            if(during)storage_hook=release?release_hook:cancel_hook;
+            id=start_json(operation);
+            if(!during){if(release)cerberus_ble_archive_io_release(id);else cerberus_ble_archive_io_cancel(id);}
+            run_worker();CHECK(status().cancel_requested);
+            CHECK(status().state==((during&&operation)?CERBERUS_BLE_ARCHIVE_IO_COMPLETE:CERBERUS_BLE_ARCHIVE_IO_CANCELED));
+            CHECK(status().result_ready==(during&&operation&&!release));
+            CHECK(json_saves+json_loads==during&&!saves&&!loads);
+            cerberus_ble_archive_io_release(id);CHECK(!outstanding);
+        }
+    }
+    /* Conversion is real; cancellation injected at its return must prevent
+     * storage of the staging result and free exactly once. */
+    for(unsigned release=0;release<2;++release){
+        reset();export_source(1,true);conversion_hook=release?release_hook:cancel_hook;
+        id=start_json(2);run_worker();
+        CHECK(status().state==CERBERUS_BLE_ARCHIVE_IO_CANCELED&&status().export_stats.eligible==2);
+        CHECK(!json_saves&&!json_loads&&!outstanding&&!status().result_ready);
+    }
+    for(unsigned operation=0;operation<3;++operation)for(unsigned kind=0;kind<5;++kind){
+        reset();fill_json(1,1);export_source(1,false);
+        if(kind==0)free_internal=24575;if(kind==1)largest_internal=8191;if(kind==2)fail_alloc=true;if(kind==3)fail_task=true;
+        if(kind==4){immediate_task=true;release_in_alloc=true;}
+        esp_err_t err=operation==0?cerberus_ble_archive_io_load_airtag_json("/","x.LOG",&id):operation==1?
+            cerberus_ble_archive_io_save_airtag_json(&json_input,&id):cerberus_ble_archive_io_export_airtag_json(&input,&id);
+        CHECK(id>last_job);last_job=id;CHECK(err==(kind==4?ESP_OK:ESP_ERR_NO_MEM));
+        CHECK(!outstanding&&!pending_task&&!json_saves&&!json_loads&&!status().worker_active);
+    }
+    reset();fill_json(1,1);json_input.records[0].offset=1;id=start_json(1);run_worker();CHECK(status().error==ESP_ERR_INVALID_RESPONSE&&!json_saves&&!outstanding);
+    reset();fill_json(1,1);json_input.count=65;id=start_json(1);run_worker();CHECK(status().error==ESP_ERR_INVALID_SIZE&&!json_saves&&!outstanding);
+    const char *bad[]={"", "[", "[{}]", "[{\"mac\":\"FF\"}]"};
+    for(unsigned i=0;i<sizeof(bad)/sizeof(bad[0]);++i){reset();json_length=strlen(bad[i]);memcpy(json_bytes,bad[i],json_length);
+        id=start_json(0);run_worker();CHECK(status().error==ESP_ERR_INVALID_RESPONSE&&!outstanding&&!status().result_ready);}
+    reset();fill_json(1,1);storage_error=ESP_FAIL;partial_save=true;id=start_json(1);run_worker();
+    CHECK(status().state==CERBERUS_BLE_ARCHIVE_IO_ERROR&&!strcmp(status().file_name,"A00001.TMP")&&!outstanding);
+    reset();storage_error=ESP_ERR_TIMEOUT;id=start_json(0);run_worker();CHECK(status().error==ESP_ERR_TIMEOUT&&!outstanding);
+    reset();fill_json(0,0);json_length=2;memcpy(json_bytes,"[]",2);char path[20]="/COPY",name[20]="before.json";
+    CHECK(cerberus_ble_archive_io_load_airtag_json(path,name,&id)==ESP_OK);path[1]='!';name[0]='!';run_worker();
+    CHECK(!strcmp(last_path,"/COPY")&&!strcmp(last_name,"before.json"));
+    uint64_t stale=id;cerberus_ble_archive_io_release(id);id=start_json(1);cerberus_ble_archive_io_cancel(stale);cerberus_ble_archive_io_release(stale);
+    CHECK(!status().cancel_requested&&outstanding==1);run_worker();CHECK(status().result_ready);reset();
+    CHECK(cerberus_ble_archive_io_save_airtag_json(NULL,&id)==ESP_ERR_INVALID_ARG&&id==0);
+    CHECK(cerberus_ble_archive_io_export_airtag_json(NULL,&id)==ESP_ERR_INVALID_ARG&&id==0);
+    CHECK(cerberus_ble_archive_io_copy_airtag_json(0,NULL)==ESP_ERR_INVALID_ARG);
+    char badpath[512];memset(badpath,'X',sizeof(badpath));
+    CHECK(cerberus_ble_archive_io_load_airtag_json(badpath,"x.LOG",&id)==ESP_ERR_INVALID_ARG&&id==0);
+    CHECK(cerberus_ble_archive_io_save_airtag_json(&json_input,NULL)==ESP_ERR_INVALID_ARG);
 }
 
 int main(void)
@@ -346,10 +542,14 @@ int main(void)
     char badpath[512];memset(badpath,'X',sizeof(badpath));CHECK(cerberus_ble_archive_io_load(badpath,"x.BLE",&id)==ESP_ERR_INVALID_ARG&&id==0);
     CHECK(cerberus_ble_archive_io_save(NULL,&id)==ESP_ERR_INVALID_ARG&&id==0);CHECK(cerberus_ble_archive_io_load(NULL,"x.BLE",&id)==ESP_ERR_INVALID_ARG);
     CHECK(cerberus_ble_archive_io_save(&input,NULL)==ESP_ERR_INVALID_ARG);CHECK(cerberus_ble_archive_io_copy_result(0,NULL)==ESP_ERR_INVALID_ARG);
+    check_json_operations();
     archive_io_last_job=UINT64_MAX;CHECK(cerberus_ble_archive_io_save(&input,&id)==ESP_ERR_INVALID_STATE&&id==0&&!pending_task);
+    CHECK(cerberus_ble_archive_io_save_airtag_json(&json_input,&id)==ESP_ERR_INVALID_STATE&&id==0);
+    CHECK(cerberus_ble_archive_io_load_airtag_json("/","x.LOG",&id)==ESP_ERR_INVALID_STATE&&id==0);
+    CHECK(cerberus_ble_archive_io_export_airtag_json(&input,&id)==ESP_ERR_INVALID_STATE&&id==0);
     CHECK(!strcmp(cerberus_ble_archive_io_state_name(CERBERUS_BLE_ARCHIVE_IO_CANCELED),"CANCELED"));
     CHECK(!strcmp(cerberus_ble_archive_io_state_name((cerberus_ble_archive_io_state_t)99),"UNKNOWN"));
     cerberus_ble_archive_io_get_status(NULL);cerberus_ble_archive_io_release(0);cerberus_ble_archive_io_cancel(0);
-    CHECK(!outstanding&&allocations>=frees);printf("Archive async lifecycle passed %u checks; host sizeof context=%zu status=%zu.\n",checks,sizeof(ble_archive_io_context_t),sizeof(cerberus_ble_archive_io_status_t));
+    CHECK(!outstanding&&allocations>=frees);printf("Archive async lifecycle passed %u checks; host native allocation=%zu JSON allocation=%zu status=%zu.\n",checks,archive_io_allocation_size(CERBERUS_BLE_ARCHIVE_IO_SAVE),archive_io_allocation_size(CERBERUS_BLE_ARCHIVE_IO_SAVE_AIRTAG_JSON),sizeof(cerberus_ble_archive_io_status_t));
     return 0;
 }

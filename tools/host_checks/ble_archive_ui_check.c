@@ -169,8 +169,10 @@ static void test_list(const char *directory)
     CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK&&viewer.paint_valid&&viewer.painted_count==4);
     CHECK(!memcmp(&prior,&viewer.document,sizeof(prior)));CHECK(strstr(drawn,"32/32 OBS / P1/8")&&strstr(drawn,"AGE AT SAVE 1000ms"));
     preview(directory,"archive-list");
-    const uint16_t gaps[][2]={{7,150},{312,150},{8,200},{8,203},{8,254},{8,308},{8,362},{156,374},{163,374},{8,418},{63,426},{256,426},{64,470}};
+    const uint16_t gaps[][2]={{7,150},{312,150},{8,200},{8,203},{8,254},{8,308},{8,362},{156,374},{163,374},{8,418},{7,426},{104,426},{111,426},{312,426},{64,470}};
     for(unsigned i=0;i<sizeof(gaps)/sizeof(gaps[0]);++i) CHECK(ble_archive_ui_tap(&viewer,gaps[i][0],gaps[i][1])==BLE_ARCHIVE_UI_NONE);
+    CHECK(ble_archive_ui_tap(&viewer,112,426)==BLE_ARCHIVE_UI_EXPORT&&viewer.view==BLE_ARCHIVE_UI_LIST);
+    CHECK(!memcmp(&prior,&viewer.document,sizeof(prior)));
     for(unsigned p=1;p<8;++p) {
         CHECK(ble_archive_ui_tap(&viewer,164,374)==BLE_ARCHIVE_UI_REDRAW&&viewer.page==p&&!viewer.paint_valid);
         CHECK(ble_archive_ui_tap(&viewer,8,150)==BLE_ARCHIVE_UI_NONE);clear_draw();CHECK(ble_archive_ui_draw(&viewer,ESP_OK)==ESP_OK);

@@ -82,6 +82,13 @@ esp_err_t cerberus_ble_archive_io_copy_result(uint64_t job,cerberus_ble_archive_
 { ++copies;CHECK(job==io.job_id&&!io.worker_active&&io.result_ready);if(copy_error)return copy_error;*out=saved;return ESP_OK; }
 void cerberus_ble_archive_io_cancel(uint64_t job) { CHECK(job);++cancels;last_canceled_job=job;if(job==io.job_id)io.cancel_requested=true; }
 void cerberus_ble_archive_io_release(uint64_t job) { CHECK(job);++releases;last_released_job=job;if(job==io.job_id)io.result_ready=false; }
+/* JSON is a separate offline controller, exercised by check_airtag_json_ui.
+ * This native capture fixture never enters it; unexpected dispatch fails. */
+static bool airtag_json_is_open(void) { return false; }
+static esp_err_t airtag_json_draw(void) { CHECK(false); return ESP_FAIL; }
+static void airtag_json_tap(uint16_t x,uint16_t y) { (void)x;(void)y;CHECK(false); }
+static void airtag_json_open_export(void) { CHECK(false); }
+static bool airtag_json_tick(bool asleep) { (void)asleep;return false; }
 #include "ble_archive_live_ui.h"
 /* Shared-owner boundary: the dedicated discovery/controller suites exercise
  * its actual lifecycle; here a stop deliberately mutates the source to prove

@@ -9,7 +9,7 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev122`, paired with onboard
+**Current source version: `0.1.0-dev.rev123`, paired with onboard
 C5 protocol firmware revision 69. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -40,6 +40,22 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev123 implements Marauder-compatible retained Find My JSON import, offline
+inspection, copy saving and export from complete saved S3/C5 originals and
+matched responses, considered independently. Imported provenance stays unknown.
+The separate model is bounded to 64 records, 8,192 total payload bytes and
+49,152 JSON bytes; one optional JSON viewer and the existing serialized worker
+handle the files. Ordinary native `.BLE` allocation is unchanged. Focused codec,
+IO/storage and UI checks and independent reviews pass. The first complete
+132-suite host run passed on 1,096 unchanged inputs; all five native builds
+and the linked resource audit pass. S3 fixed data/BSS increases by 32 bytes,
+C5 is unchanged, and optional JSON viewer/worker allocations total 68,200 bytes
+before allocator overhead and other retained stores. Matched package build
+and verify-only checks pass for three targets and nine images. See
+[rev123](docs/DUAL_RADIO_REV123.md) for the exact local package and evidence. Rev113
+remains the last verified installed build. This offline interchange does not
+restore imported records into live discovery or establish full Marauder parity.
 
 Rev122 implements integrated GPS DATA and received-NMEA views, independent GGA
 metadata freshness and retained UART cleanup. GPS remains optional and OFF

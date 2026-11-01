@@ -202,6 +202,7 @@ static void ble_archive_open_file(const char *path, const char *name)
 
 static esp_err_t ble_archive_draw(void)
 {
+    if (airtag_json_is_open()) return airtag_json_draw();
     if (!ble_archive_menu || !ble_archive_view)
         return ble_archive_ui_draw(ble_archive_view, ble_archive_open_error);
     ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(0, 0, 320, 480, UI_BACKGROUND), TAG, "archive clear");
@@ -218,6 +219,7 @@ static esp_err_t ble_archive_draw(void)
 
 static void ble_archive_tap(uint16_t x, uint16_t y)
 {
+    if (airtag_json_is_open()) { airtag_json_tap(x, y); return; }
     if (ble_archive_menu && ble_archive_view) {
         if (x >= 24U && x < 296U) {
             if (y >= 144U && y < 192U) { ble_archive_save(BLE_ARCHIVE_BOTH); return; }
@@ -235,11 +237,13 @@ static void ble_archive_tap(uint16_t x, uint16_t y)
     }
     ble_archive_ui_action_t action = ble_archive_ui_tap(ble_archive_view, x, y);
     if (action == BLE_ARCHIVE_UI_BACK || action == BLE_ARCHIVE_UI_CANCEL) ble_archive_return();
+    else if (action == BLE_ARCHIVE_UI_EXPORT) airtag_json_open_export();
     else if (action == BLE_ARCHIVE_UI_REDRAW) ESP_ERROR_CHECK(draw_detail_page());
 }
 
 static void ble_archive_tick(bool asleep)
 {
+    if (airtag_json_tick(asleep)) return;
     if (current_page != UI_PAGE_BLE_ARCHIVE) { ble_archive_dispose(); return; }
     if (ble_archive_view && ble_archive_view->release_pending) {
         int64_t clock = esp_timer_get_time();

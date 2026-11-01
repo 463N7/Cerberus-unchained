@@ -2,6 +2,24 @@
 
 ## Current local checkpoint
 
+[Rev123](DUAL_RADIO_REV123.md) implements offline Find My JSON interchange
+over the existing serialized archive worker. Complete saved originals and
+matched responses from both receivers are considered independently; duplicate
+MAC records remain separate and imports do not invent source/type/time or
+ADV/RSP provenance. The bounded model allows 64 records, 8,192 aggregate payload
+bytes and 49,152 JSON bytes. One optional JSON viewer holds the committed model;
+only the selected worker allocation arm is allocated, preserving the ordinary
+native `.BLE` job size. Focused codec, IO/storage and UI checks and independent
+reviews pass. The first complete 132-suite host run passed on 1,096 unchanged
+inputs; all five native builds and the linked resource audit pass. S3 fixed
+data/BSS grows by 32 bytes and C5 is unchanged. The optional JSON viewer and
+worker total 68,200 bytes before allocator overhead and other stores; keeping
+the native viewer during export brings those allocations to 129,312 bytes.
+These are allocation sizes, not runtime headroom. Matched package build and
+verify-only checks pass for the three-target, nine-image local package. The
+completed rev122 local checkpoint follows; rev113 remains the last verified
+installed build. Offline import is not load-to-live-list or complete raw-history parity.
+
 [Rev122](DUAL_RADIO_REV122.md) implements integrated GPS DATA/received-NMEA
 observation through S3's existing UART owner while C5 remains available for
 Wardriving Wi-Fi. Independent GGA freshness, optional bounded trace storage

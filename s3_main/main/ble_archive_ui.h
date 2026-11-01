@@ -18,7 +18,7 @@ typedef enum {
 } ble_archive_ui_view_t;
 typedef enum {
     BLE_ARCHIVE_UI_NONE, BLE_ARCHIVE_UI_REDRAW,
-    BLE_ARCHIVE_UI_BACK, BLE_ARCHIVE_UI_CANCEL,
+    BLE_ARCHIVE_UI_BACK, BLE_ARCHIVE_UI_CANCEL, BLE_ARCHIVE_UI_EXPORT,
 } ble_archive_ui_action_t;
 typedef struct {
     cerberus_ble_archive_t document, incoming;
@@ -208,7 +208,8 @@ static inline esp_err_t ble_archive_ui_list(ble_archive_ui_store_t *store)
     ESP_RETURN_ON_ERROR(draw_centered(364, line, UI_MUTED, 1), TAG, "archive source counts");
     ESP_RETURN_ON_ERROR(draw_button(8, 374, 148, 44, "PREV"), TAG, "archive prev");
     ESP_RETURN_ON_ERROR(draw_button(164, 374, 148, 44, "NEXT"), TAG, "archive next");
-    ESP_RETURN_ON_ERROR(ble_archive_ui_back("BACK"), TAG, "archive back");
+    ESP_RETURN_ON_ERROR(draw_button(8, 426, 96, 44, "BACK"), TAG, "archive back");
+    ESP_RETURN_ON_ERROR(draw_button(112, 426, 200, 44, "EXPORT FINDMY JSON"), TAG, "archive export");
     store->painted_saved_uptime_ms = store->document.saved_uptime_ms;
     store->paint_valid = true;
     return ESP_OK;
@@ -553,6 +554,12 @@ static inline esp_err_t ble_archive_ui_draw(ble_archive_ui_store_t *store, esp_e
 static inline ble_archive_ui_action_t ble_archive_ui_tap(ble_archive_ui_store_t *store,
     uint16_t x, uint16_t y)
 {
+    if (store && store->view == BLE_ARCHIVE_UI_LIST && store->has_document &&
+        !store->release_pending && !store->job_pending && y >= 426U && y < 470U) {
+        if (x >= 8U && x < 104U) return BLE_ARCHIVE_UI_BACK;
+        if (x >= 112U && x < 312U) return BLE_ARCHIVE_UI_EXPORT;
+        return BLE_ARCHIVE_UI_NONE;
+    }
     if (x >= 64U && x < 256U && y >= 426U && y < 470U) {
         if (!store) return BLE_ARCHIVE_UI_BACK;
         store->paint_valid = false;

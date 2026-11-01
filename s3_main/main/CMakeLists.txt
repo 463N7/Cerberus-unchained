@@ -37,6 +37,7 @@ idf_component_register(
         "s3_ble_discovery_session.c"
         "ble_analyzer.c"
         "ble_archive.c"
+        "airtag_json.c"
         "ble_archive_io.c"
         "../../shared/cerberus_watch_capture.c"
         "../../shared/sentinel_watch_protocol.c"
