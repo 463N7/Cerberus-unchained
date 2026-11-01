@@ -96,3 +96,18 @@ measured console-stack improvement remain the last installed evidence.
 Physical acceptance still needs live source filtering and selected-row checks,
 Back/Stop/restart, a C5-selected passive Fox handoff, save/reopen, and the next
 split Wi-Fi scan. No GPS or six-radio expansion acceptance is implied.
+
+## Local matched package
+
+Implementation commit `e7c5775b9d6a5a8e5726e79fe3a036d1203859d1` is retained
+locally. Package
+`dist/cerberus-unchained-0.1.0-dev.rev104-20261101T091414Z` passes hash, chip
+header, partition and image-bound verification. All three application hashes
+match the retained five-target matrix. The firmware source SHA-256 is
+`9d39d23c08f419b8a5a9f2f270619fb9163108f12dfab8fd092f1069a6398631`.
+
+`artifacts/device-rev104/local-milestone.json` binds that package to the host,
+native and memory evidence. The manifest, matched receipt and package log are
+also retained with native evidence. No image was flashed, no device command
+was sent, and no PR, push or public release was created for this milestone.
+Rev103 remains the last installed checkpoint.
