@@ -5,6 +5,10 @@ This is a source-grounded proposal following [rev112](DUAL_RADIO_REV112.md).
 Rev112 installation and acceptance evidence belongs to that checkpoint document.
 This audit makes no new hardware timing or RF-coverage claim.
 
+The subsequent [rev113 implementation checkpoint](DUAL_RADIO_REV113.md) records
+the chosen format and validation separately. The proposal below is retained
+as the original source audit, not as proof of implementation or acceptance.
+
 ## Current cost and user-facing gap
 
 `s3_main/main/dual_ble_scan.c:snapshot_step()` downloads every response-mode row

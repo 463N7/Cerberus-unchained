@@ -13,6 +13,9 @@ _Static_assert(offsetof(cerberus_dual_ble_snapshot_family_row_t, family) ==
     sizeof(cerberus_dual_ble_snapshot_metadata_row_t), "Family wire preserves metadata prefix");
 _Static_assert(offsetof(cerberus_dual_ble_snapshot_response_row_t, response) ==
     sizeof(cerberus_dual_ble_snapshot_family_row_t), "Response wire preserves family prefix");
+_Static_assert(CERBERUS_DUAL_BLE_COMPACT_RESPONSE_UNKNOWN_BYTES ==
+    offsetof(cerberus_dual_ble_snapshot_response_row_t, response) + 2U,
+    "Compact response header follows the unchanged original prefix");
 
 static bool response_mode(uint8_t mode)
 { return mode == CERBERUS_DUAL_BLE_RESPONSE_DISCOVERY || mode == CERBERUS_DUAL_BLE_RESPONSE_FAMILY; }
@@ -55,6 +58,7 @@ static esp_err_t begin_request(cerberus_dual_ble_scan_t *s, uint8_t mode,
     s->live_updates = false; s->snapshots_capable = false;
     s->inventory_query_enabled = true; s->pending_inventory_known = false;
     s->metadata_read_enabled = true;
+    s->compact_response_read_enabled = true;
     s->inventory_retries = 0U;
     s->discovery_clock_valid = s->ops.now_ms != NULL;
     s->discovery_started_ms = s->ops.now_ms ? s->ops.now_ms(s->ops.context) : 0U;
@@ -272,17 +276,21 @@ static esp_err_t snapshot_step(cerberus_dual_ble_scan_t *s, uint64_t now)
         cerberus_dual_ble_snapshot_chunk_t result;
         bool response = response_mode(s->start.mode);
         bool family = family_mode(s->start.mode);
-        uint8_t command = response ? CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE :
+        bool compact = response && s->compact_response_read_enabled;
+        uint8_t command = compact ? CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE_COMPACT :
+            response ? CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE :
             family ? CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY :
             s->metadata_read_enabled ? CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA :
             CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ;
         esp_err_t error = exchange(s, command,
             &request, sizeof(request), &result, sizeof(result));
-        if (error == ESP_ERR_NOT_SUPPORTED && !response && !family && s->metadata_read_enabled) {
+        if (error == ESP_ERR_NOT_SUPPORTED && (compact || (!response && !family && s->metadata_read_enabled))) {
             /* Optional projection only. Discard every partially copied row,
              * including completed metadata rows, then reread this exact frozen
-             * handle through READ. FIRST BEGIN's age anchor must not move. */
-            s->metadata_read_enabled = false;
+             * handle through the full projection. FIRST BEGIN's age anchor
+             * must not move, and response acquisition remains explicit. */
+            if (compact) s->compact_response_read_enabled = false;
+            else s->metadata_read_enabled = false;
             memset(s->staging, 0, sizeof(s->staging));
             memset(&s->snapshot_response, 0, sizeof(s->snapshot_response));
             s->read_index = 0U; s->copied = 0U;
@@ -298,13 +306,30 @@ static esp_err_t snapshot_step(cerberus_dual_ble_scan_t *s, uint64_t now)
         }
         uint16_t wire_size = response ? sizeof(s->snapshot_response) : family ? sizeof(s->snapshot_family) :
             s->metadata_read_enabled ? sizeof(s->snapshot_metadata) : sizeof(s->snapshot_row);
+        if (compact) {
+            /* The first 160 bytes always arrive in 16 full chunks. Only then
+             * is the response projection header available to bound the rest. */
+            wire_size = s->copied < CERBERUS_DUAL_BLE_COMPACT_RESPONSE_UNKNOWN_BYTES ?
+                CERBERUS_DUAL_BLE_COMPACT_RESPONSE_UNKNOWN_BYTES : cerberus_dual_ble_compact_response_wire_size(
+                s->snapshot_response.response.version, s->snapshot_response.response.state);
+            if (!wire_size) return ESP_ERR_INVALID_RESPONSE;
+        }
         if (s->copied >= wire_size) return ESP_ERR_INVALID_RESPONSE;
         uint16_t amount = wire_size - s->copied;
         if (amount > CERBERUS_DUAL_BLE_SNAPSHOT_CHUNK_BYTES) amount = CERBERUS_DUAL_BLE_SNAPSHOT_CHUNK_BYTES;
         if (result.byte_count != amount || !zero_bytes(result.data + amount, sizeof(result.data) - amount))
             return ESP_ERR_INVALID_RESPONSE;
         memcpy((uint8_t *)&s->snapshot_response + s->copied, result.data, amount); s->copied += amount;
+        if (compact && s->copied == CERBERUS_DUAL_BLE_COMPACT_RESPONSE_UNKNOWN_BYTES) {
+            wire_size = cerberus_dual_ble_compact_response_wire_size(
+                s->snapshot_response.response.version, s->snapshot_response.response.state);
+            if (!wire_size) return ESP_ERR_INVALID_RESPONSE;
+        }
         if (s->copied == wire_size) {
+            /* Compact UNKNOWN's format header is not response evidence.
+             * NONE already has the full canonical zero suffix from row reset. */
+            if (compact && s->snapshot_response.response.state == CERBERUS_DUAL_BLE_RESPONSE_UNKNOWN)
+                memset(&s->snapshot_response.response, 0, sizeof(s->snapshot_response.response));
             error = decode_snapshot_row(s);
             if (error != ESP_OK) return error;
             s->copied = 0U; ++s->read_index;

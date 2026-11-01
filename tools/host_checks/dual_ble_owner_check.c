@@ -1000,6 +1000,166 @@ static void response_dispatch_once_checks(void)
     puts("C5 actual callback dispatch: legacy/EXT mode predicate once, passive3-lock/active2-lock originals, response ownership, partial/null/malformed invalidation and stale-token retention passed");
 }
 
+static cerberus_dual_ble_snapshot_chunk_t compact_chunk(
+    cerberus_dual_ble_snapshot_read_t request, uint8_t error)
+{
+    cerberus_dual_ble_snapshot_chunk_t out;
+    memset(&out,0xa5,sizeof(out));
+    command(CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE_COMPACT,
+        &request,sizeof(request),&out,sizeof(out));
+    assert(out.handle==request.handle && out.index==request.index && out.chunk==request.chunk && out.error==error);
+    if(error){assert(!out.byte_count);for(unsigned i=0;i<sizeof(out.data);++i)assert(!out.data[i]);}
+    return out;
+}
+
+static void response_compact_checks(void)
+{
+    uint8_t original[]={6,9,'H','C','-','0','5'};
+    uint8_t response[]={6,9,'H','C','-','0','6'};
+    const unsigned lengths[]={160,174,310};
+    now_ms=1000000;
+    for(unsigned focused=0;focused<2;++focused){
+        cerberus_dual_ble_start_t start={.boot_id=dual_boot_id,.job_id=dual_job_highwater+1U,.version=2,
+            .mode=focused?CERBERUS_DUAL_BLE_RESPONSE_FAMILY:CERBERUS_DUAL_BLE_RESPONSE_DISCOVERY,
+            .reserved=focused?6:0};
+        cerberus_dual_ble_status_t owner;
+        command(CERBERUS_SPI_COMMAND_DUAL_BLE_START,&start,sizeof(start),&owner,sizeof(owner));
+        assert(!owner.error_code && dual_response);
+        cerberus_dual_ble_binding_t binding={dual_boot_id,start.job_id};
+        struct ble_gap_event event={.type=BLE_GAP_EVENT_EXT_DISC,.ext_disc={.props=2,
+            .addr={{90,2,3,4,5,6},1},.rssi=-70,.sid=7,.prim_phy=1,.sec_phy=1,
+            .length_data=sizeof(original),.data=original}};
+        /* Use real callbacks to create UNKNOWN (a partial original invalidates
+         * correlation), NONE (eligible original), and PRESENT in one bank. */
+        for(unsigned index=0;index<3;++index){
+            event.ext_disc.addr.val[0]=(uint8_t)(90U+index);
+            event.ext_disc.props=2;event.ext_disc.data_status=0;event.ext_disc.data=original;
+            ++now_ms;assert(!gap_event(&event,(void*)(uintptr_t)scan_callback_epoch));
+            if(index!=1){
+                if(!index)event.ext_disc.data_status=1;
+                else {event.ext_disc.props=10;event.ext_disc.data=response;event.ext_disc.rssi=-25;}
+                ++now_ms;assert(!gap_event(&event,(void*)(uintptr_t)scan_callback_epoch));
+            }
+        }
+        assert(scan_status.stored_count==3);
+        ++now_ms;cerberus_dual_ble_snapshot_status_t frozen=snapshot_begin(binding,1);
+        assert(!frozen.error_code && frozen.count==3);
+        const unsigned starts_before=starts,stops_before=stops,allocations=response_allocations;
+        uint8_t old[3][310];
+        for(unsigned index=0;index<3;++index){
+            for(unsigned part=0;part<31;++part){
+                cerberus_dual_ble_snapshot_read_t request={binding,frozen.handle,(uint8_t)index,(uint8_t)part};
+                cerberus_dual_ble_snapshot_chunk_t full;
+                command(CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE,&request,sizeof(request),&full,sizeof(full));
+                assert(!full.error && full.byte_count==10);
+                memcpy(old[index]+10U*part,full.data,10);
+            }
+            assert(old[index][159]==index && old[index][158]==(index?1:0));
+            /* Verify the omitted full-read bytes really are canonical zero.
+             * NONE must preserve every byte of the nonzero LE64 sequence. */
+            for(unsigned i=lengths[index];i<310;++i)assert(!old[index][i]);
+            if(index==1){uint64_t sequence=0;
+                for(unsigned i=0;i<8;++i)sequence|=(uint64_t)old[index][166U+i]<<(8U*i);
+                assert(sequence==dual_response->live[1].wire.original_sequence && sequence);
+            }
+        }
+        unsigned reads=0;
+        for(unsigned index=0;index<3;++index){
+            const unsigned count=(lengths[index]+9U)/10U;
+            for(unsigned part=0;part<count;++part){
+                /* Update the corresponding live source between every chunk.
+                 * The projection and its original FIRST BEGIN stay frozen. */
+                event.ext_disc.addr.val[0]=(uint8_t)(90U+index);
+                event.ext_disc.props=2;event.ext_disc.data_status=0;event.ext_disc.data=original;
+                ++now_ms;assert(!gap_event(&event,(void*)(uintptr_t)scan_callback_epoch));
+                cerberus_dual_ble_snapshot_read_t request={binding,frozen.handle,(uint8_t)index,(uint8_t)part};
+                cerberus_dual_ble_snapshot_chunk_t compact=compact_chunk(request,CERBERUS_DUAL_BLE_SNAPSHOT_OK);
+                const unsigned remaining=lengths[index]-part*10U, amount=remaining<10U?remaining:10U;
+                assert(compact.byte_count==amount);++reads;
+                for(unsigned j=0;j<10;++j){
+                    unsigned offset=part*10U+j;
+                    uint8_t expected=j>=amount?0:offset==158U?1:old[index][offset];
+                    assert(compact.data[j]==expected);
+                }
+            }
+            for(unsigned part=count;part<=UINT8_MAX;++part){
+                cerberus_dual_ble_snapshot_read_t request={binding,frozen.handle,(uint8_t)index,(uint8_t)part};
+                compact_chunk(request,CERBERUS_DUAL_BLE_SNAPSHOT_RANGE);
+            }
+            /* The new command must not mutate the old full310 representation. */
+            for(unsigned part=0;part<31;++part){
+                cerberus_dual_ble_snapshot_read_t request={binding,frozen.handle,(uint8_t)index,(uint8_t)part};
+                cerberus_dual_ble_snapshot_chunk_t full;
+                command(CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE,&request,sizeof(request),&full,sizeof(full));
+                assert(!full.error && full.byte_count==10 && !memcmp(full.data,old[index]+part*10U,10));
+            }
+        }
+        assert(reads==65 && starts==starts_before && stops==stops_before && response_allocations==allocations);
+        cerberus_dual_ble_snapshot_status_t retry=snapshot_begin(binding,1);
+        assert(!memcmp(&frozen,&retry,sizeof(frozen)));
+        cerberus_dual_ble_snapshot_status_t fence=snapshot_status(binding,frozen.handle);
+        assert(!memcmp(&frozen,&fence,sizeof(frozen)));
+
+        /* Corrupt each omitted/canonical field independently. No shortened
+         * reply may conceal corruption, even when only prefix chunk0 is read. */
+        for(unsigned index=0;index<2;++index){
+            cerberus_dual_ble_snapshot_read_t request={binding,frozen.handle,(uint8_t)index,0};
+            for(unsigned byte=0;byte<152;++byte){
+                if(index && byte>=8U && byte<16U)continue;
+                uint8_t saved=dual_response->frozen[index][byte];
+                dual_response->frozen[index][byte]^=0x80U;
+                compact_chunk(request,CERBERUS_DUAL_BLE_SNAPSHOT_INVALID);
+                dual_response->frozen[index][byte]=saved;
+            }
+            compact_chunk(request,CERBERUS_DUAL_BLE_SNAPSHOT_OK);
+        }
+        uint8_t sequence[8];memcpy(sequence,dual_response->frozen[1]+8,8);
+        memset(dual_response->frozen[1]+8,0,8);
+        cerberus_dual_ble_snapshot_read_t request={binding,frozen.handle,1,0};
+        compact_chunk(request,CERBERUS_DUAL_BLE_SNAPSHOT_INVALID);
+        memcpy(dual_response->frozen[1]+8,sequence,8);
+        request.index=2;
+        for(unsigned byte=0;byte<2;++byte){
+            uint8_t saved=dual_response->frozen[2][byte];dual_response->frozen[2][byte]=255;
+            compact_chunk(request,CERBERUS_DUAL_BLE_SNAPSHOT_INVALID);dual_response->frozen[2][byte]=saved;
+        }
+        for(unsigned bad_index=3;bad_index<=UINT8_MAX;++bad_index){
+            request.index=(uint8_t)bad_index;compact_chunk(request,CERBERUS_DUAL_BLE_SNAPSHOT_RANGE);
+        }
+        request.index=0;
+        snapshot_busy=true;compact_chunk(request,CERBERUS_DUAL_BLE_SNAPSHOT_BUSY);snapshot_busy=false;
+        for(unsigned fault=0;fault<4;++fault){
+            cerberus_dual_ble_snapshot_read_t wrong=request;uint64_t epoch=dual_epoch;
+            if(fault==0)++wrong.binding.boot_id;if(fault==1)++wrong.binding.job_id;
+            if(fault==2)++wrong.handle;if(fault==3)++dual_epoch;
+            compact_chunk(wrong,CERBERUS_DUAL_BLE_SNAPSHOT_STALE);dual_epoch=epoch;
+        }
+        uint8_t saved_mode=dual_mode;dual_mode=CERBERUS_DUAL_BLE_DISCOVERY;
+        compact_chunk(request,CERBERUS_DUAL_BLE_SNAPSHOT_INVALID);dual_mode=saved_mode;
+        c5_response_context_t *context=dual_response;dual_response=NULL;
+        compact_chunk(request,CERBERUS_DUAL_BLE_SNAPSHOT_INVALID);dual_response=context;
+        void *saved_mutex=scanner_mutex;scanner_mutex=NULL;
+        compact_chunk(request,CERBERUS_DUAL_BLE_SNAPSHOT_INVALID);scanner_mutex=saved_mutex;
+        uint8_t malformed[sizeof(request)+1];memcpy(malformed,&request,sizeof(request));malformed[sizeof(request)]=0;
+        for(unsigned length=0;length<=sizeof(malformed);++length)if(length!=sizeof(request)){
+            cerberus_dual_ble_snapshot_chunk_t out;memset(&out,0xa5,sizeof(out));
+            command(CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE_COMPACT,malformed,length,&out,sizeof(out));
+            assert(out.error==CERBERUS_DUAL_BLE_SNAPSHOT_INVALID && !out.handle && !out.index && !out.chunk && !out.byte_count);
+            for(unsigned i=0;i<sizeof(out.data);++i)assert(!out.data[i]);
+        }
+        cerberus_dual_ble_snapshot_status_t replacement=snapshot_begin(binding,2);
+        assert(!replacement.error_code && replacement.handle!=frozen.handle);
+        compact_chunk(request,CERBERUS_DUAL_BLE_SNAPSHOT_STALE);
+        request.handle=replacement.handle;compact_chunk(request,CERBERUS_DUAL_BLE_SNAPSHOT_OK);
+        command(CERBERUS_SPI_COMMAND_DUAL_BLE_STOP,&binding,sizeof(binding),&owner,sizeof(owner));
+        compact_chunk(request,CERBERUS_DUAL_BLE_SNAPSHOT_STALE);
+        command(CERBERUS_SPI_COMMAND_DUAL_BLE_RELEASE,&binding,sizeof(binding),&owner,sizeof(owner));
+        compact_chunk(request,CERBERUS_DUAL_BLE_SNAPSHOT_STALE);
+        assert(!dual_attached && !dual_response && response_allocations==response_frees);
+    }
+    puts("C5 compact response actual callbacks/service: UNKNOWN160/NONE174/PRESENT310, 65 versus93 reads, frozen byte equivalence, all index/chunk bounds, canonical omission faults, busy/binding/malformed/lifecycle rejection passed");
+}
+
 int main(void)
 {
     dual_boot_id=123;host_synced=true;now_ms=100;
@@ -1064,6 +1224,7 @@ int main(void)
     response_checks();
     response_dense_clock_checks();
     response_dispatch_once_checks();
+    response_compact_checks();
     puts("dual BLE C5 owner/callback: exact typed tracker, latest RSSI, capacity, idempotency, foreign ownership, orphan checks passed");
     return 0;
 }

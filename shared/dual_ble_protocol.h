@@ -15,6 +15,7 @@
 #define CERBERUS_DUAL_BLE_ANALYZER_MIN_FIRMWARE 65U
 #define CERBERUS_DUAL_BLE_FAMILY_MIN_FIRMWARE 66U
 #define CERBERUS_DUAL_BLE_RESPONSE_MIN_FIRMWARE 67U
+#define CERBERUS_DUAL_BLE_COMPACT_RESPONSE_MIN_FIRMWARE 68U
 #define CERBERUS_DUAL_BLE_CAPACITY 32U
 #define CERBERUS_DUAL_BLE_RAW_BYTES 31U
 #define CERBERUS_DUAL_BLE_STALE_MS 5000U
@@ -267,6 +268,55 @@ typedef struct __attribute__((packed)) {
 } cerberus_dual_ble_snapshot_response_row_t;
 _Static_assert(sizeof(cerberus_dual_ble_response_wire_t) == 152U, "response sidecar layout");
 _Static_assert(sizeof(cerberus_dual_ble_snapshot_response_row_t) == 310U, "response projection layout");
+
+/* Optional firmware68 projection; INFO/version2, response acquisition and the
+ * full READ_RESPONSE representation remain unchanged. Bytes0..157 are the
+ * same frozen original prefix. Bytes158/159 are this format's version/state,
+ * including UNKNOWN (1/0 on wire, canonical allzero sidecar after decoding).
+ * NONE retains bytes0..15 of its sidecar, including LE64 original_sequence.
+ * PRESENT retains all152 bytes. Omitted bytes are canonical zero, never an
+ * inference from a short transfer. This command preserves the frozen handle. */
+#define CERBERUS_DUAL_BLE_COMPACT_RESPONSE_VERSION 1U
+#define CERBERUS_DUAL_BLE_COMPACT_RESPONSE_UNKNOWN_BYTES 160U
+#define CERBERUS_DUAL_BLE_COMPACT_RESPONSE_NONE_BYTES 174U
+_Static_assert(offsetof(cerberus_dual_ble_snapshot_response_row_t, response) == 158U,
+    "compact response prefix");
+_Static_assert(offsetof(cerberus_dual_ble_response_wire_t, original_sequence) == 8U &&
+    offsetof(cerberus_dual_ble_response_wire_t, response_sequence) == 16U,
+    "compact NONE retains full original sequence");
+
+static inline uint16_t cerberus_dual_ble_compact_response_wire_size(uint8_t version, uint8_t state)
+{
+    if (version != CERBERUS_DUAL_BLE_COMPACT_RESPONSE_VERSION) return 0U;
+    switch (state) {
+    case CERBERUS_DUAL_BLE_RESPONSE_UNKNOWN: return CERBERUS_DUAL_BLE_COMPACT_RESPONSE_UNKNOWN_BYTES;
+    case CERBERUS_DUAL_BLE_RESPONSE_NONE: return CERBERUS_DUAL_BLE_COMPACT_RESPONSE_NONE_BYTES;
+    case CERBERUS_DUAL_BLE_RESPONSE_PRESENT: return CERBERUS_DUAL_BLE_SNAPSHOT_RESPONSE_ROW_BYTES;
+    default: return 0U;
+    }
+}
+
+/* Producer-side canonical omission check over the frozen LE byte sidecar.
+ * No row copy or unaligned multibyte read. PRESENT is not shortened; its
+ * existing full semantic validator remains mandatory at the receiver. */
+static inline uint16_t cerberus_dual_ble_compact_response_size(const uint8_t response[152])
+{
+    if (!response) return 0U;
+    if (response[1] == CERBERUS_DUAL_BLE_RESPONSE_UNKNOWN) {
+        for (size_t i = 0U; i < 152U; ++i) if (response[i]) return 0U;
+        return CERBERUS_DUAL_BLE_COMPACT_RESPONSE_UNKNOWN_BYTES;
+    }
+    if (response[0] != CERBERUS_DUAL_BLE_RESPONSE_VERSION) return 0U;
+    if (response[1] == CERBERUS_DUAL_BLE_RESPONSE_PRESENT)
+        return CERBERUS_DUAL_BLE_SNAPSHOT_RESPONSE_ROW_BYTES;
+    if (response[1] != CERBERUS_DUAL_BLE_RESPONSE_NONE) return 0U;
+    uint8_t sequence_nonzero = 0U;
+    for (size_t i = 2U; i < 152U; ++i) {
+        if (i >= 8U && i < 16U) sequence_nonzero |= response[i];
+        else if (response[i]) return 0U;
+    }
+    return sequence_nonzero ? CERBERUS_DUAL_BLE_COMPACT_RESPONSE_NONE_BYTES : 0U;
+}
 
 _Static_assert(sizeof(cerberus_dual_ble_family_wire_t) == 48U, "family evidence layout");
 _Static_assert(sizeof(cerberus_dual_ble_snapshot_family_row_t) == 158U, "family snapshot row layout");

@@ -124,7 +124,8 @@ static void dual_snapshot_status_locked(int32_t error, cerberus_dual_ble_snapsho
 static bool dual_snapshot_command(uint8_t command, const void *request,
     size_t request_size, void *response, size_t *response_size)
 {
-    bool response_read = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE;
+    bool compact_response = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE_COMPACT;
+    bool response_read = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE || compact_response;
     bool family = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY;
     bool metadata = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA;
     bool reading = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ || metadata || family || response_read;
@@ -238,12 +239,17 @@ static bool dual_snapshot_command(uint8_t command, const void *request,
                 error = ESP_ERR_INVALID_ARG;
             else {
                 const size_t offset = (size_t)read.chunk * CERBERUS_DUAL_BLE_SNAPSHOT_CHUNK_BYTES;
-                const size_t row_size = response_read ? CERBERUS_DUAL_BLE_SNAPSHOT_RESPONSE_ROW_BYTES : family ? CERBERUS_DUAL_BLE_SNAPSHOT_FAMILY_ROW_BYTES :
+                const size_t row_size = compact_response ?
+                    cerberus_dual_ble_compact_response_size(dual_response->frozen[read.index]) :
+                    response_read ? CERBERUS_DUAL_BLE_SNAPSHOT_RESPONSE_ROW_BYTES : family ? CERBERUS_DUAL_BLE_SNAPSHOT_FAMILY_ROW_BYTES :
                     metadata ? CERBERUS_DUAL_BLE_SNAPSHOT_METADATA_ROW_BYTES : CERBERUS_DUAL_BLE_SNAPSHOT_ROW_BYTES;
-                const size_t remaining = row_size - offset;
+                if (!row_size) error = ESP_ERR_INVALID_RESPONSE;
+                else if (offset >= row_size) error = ESP_ERR_INVALID_ARG;
+                const size_t remaining = error ? 0U : row_size - offset;
                 const size_t length = remaining < sizeof(chunk.data) ? remaining : sizeof(chunk.data);
-                /* Project the three immutable segments without a158-byte stack
-                 * copy or subtracting a segment base before its bounds check. */
+                /* Project immutable segments without a full-row stack copy.
+                 * Compact UNKNOWN/NONE omit only validated canonical suffixes;
+                 * the format marker replaces the response version at byte158. */
                 for (size_t i = 0U; i < length; ++i) {
                     const size_t position = offset + i;
                     if (position < sizeof(cerberus_dual_ble_snapshot_row_t))
@@ -255,7 +261,9 @@ static bool dual_snapshot_command(uint8_t command, const void *request,
                         if (cerberus_dual_ble_family_mode(dual_mode))
                             chunk.data[i] = ((const uint8_t *)&dual_snapshot.family[read.index])[
                                 position - CERBERUS_DUAL_BLE_SNAPSHOT_METADATA_ROW_BYTES];
-                    } else chunk.data[i] = dual_response->frozen[read.index][
+                    } else if (compact_response && position == CERBERUS_DUAL_BLE_SNAPSHOT_FAMILY_ROW_BYTES)
+                        chunk.data[i] = CERBERUS_DUAL_BLE_COMPACT_RESPONSE_VERSION;
+                    else chunk.data[i] = dual_response->frozen[read.index][
                         position - CERBERUS_DUAL_BLE_SNAPSHOT_FAMILY_ROW_BYTES];
                 }
                 chunk.byte_count = (uint8_t)length;
@@ -348,7 +356,8 @@ bool cerberus_ble_dual_command(uint8_t command, const void *request,
         command <= CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_STATUS) ||
         command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA ||
         command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY ||
-        command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE)
+        command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE ||
+        command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE_COMPACT)
         return dual_snapshot_command(command, request, request_size, response, response_size);
     if (command == CERBERUS_SPI_COMMAND_DUAL_BLE_INFO) {
         if (request_size) return false;

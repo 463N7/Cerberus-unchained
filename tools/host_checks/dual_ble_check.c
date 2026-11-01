@@ -25,6 +25,8 @@ typedef struct {
     cerberus_dual_ble_response_wire_t frozen_response[CERBERUS_DUAL_BLE_CAPACITY];
     bool response_supported, response_read_unsupported;
     unsigned response_reads, response_fault;
+    bool compact_supported, compact_fail_enabled;
+    unsigned compact_reads, compact_fail_after, compact_fault;
     bool family_supported, family_read_unsupported;
     unsigned family_reads, family_fault;
     uint8_t family_code;
@@ -175,12 +177,20 @@ static esp_err_t snapshot_exchange(peer_t *p,uint8_t cmd,const void *request,
     if(cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ ||
         cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA ||
         cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY ||
-        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE) {
+        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE ||
+        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE_COMPACT) {
         bool family=cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY;
-        bool response=cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE;
+        bool compact=cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE_COMPACT;
+        bool response=compact||cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE;
         bool metadata=cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA;
         assert(request_size==22);
-        if(response) {++p->response_reads;if(p->response_read_unsupported)return ESP_ERR_NOT_SUPPORTED;}
+        if(compact) {
+            ++p->compact_reads;
+            if(!p->compact_supported||(p->compact_fail_enabled&&p->compact_reads>p->compact_fail_after))
+                return ESP_ERR_NOT_SUPPORTED;
+            if(p->compact_fault==12)return ESP_ERR_TIMEOUT;
+        }
+        else if(response) {++p->response_reads;if(p->response_read_unsupported)return ESP_ERR_NOT_SUPPORTED;}
         else if(family) {++p->family_reads;if(p->family_read_unsupported)return ESP_ERR_NOT_SUPPORTED;}
         else if(metadata) {
             ++p->metadata_reads;
@@ -197,7 +207,16 @@ static esp_err_t snapshot_exchange(peer_t *p,uint8_t cmd,const void *request,
             memcpy((uint8_t*)&wire+102,&p->frozen_receive[r->index],sizeof(p->frozen_receive[r->index]));
             wire.family.family=p->frozen_family[r->index];
             wire.response=p->frozen_response[r->index];
-            size_t offset=r->chunk*10U, amount=(response?sizeof(wire):family?158U:metadata?110U:102U)-offset;
+            size_t length=response?sizeof(wire):family?158U:metadata?110U:102U;
+            if(compact) {
+                if(wire.response.state==CERBERUS_DUAL_BLE_RESPONSE_UNKNOWN) {
+                    length=160U;wire.response.version=CERBERUS_DUAL_BLE_COMPACT_RESPONSE_VERSION;
+                } else if(wire.response.state==CERBERUS_DUAL_BLE_RESPONSE_NONE)length=174U;
+                if(p->compact_fault==1)wire.response.version=2;
+                else if(p->compact_fault==2)wire.response.state=3;
+            }
+            size_t offset=r->chunk*10U;assert(offset<length);
+            size_t amount=length-offset;
             if(amount>10U)amount=10U;out.byte_count=(uint8_t)amount;
             memcpy(out.data,(const uint8_t *)&wire+offset,amount);
             switch(p->fault) {
@@ -209,6 +228,18 @@ static esp_err_t snapshot_exchange(peer_t *p,uint8_t cmd,const void *request,
             case BAD_READ_ERROR_BODY:out.error=CERBERUS_DUAL_BLE_SNAPSHOT_BUSY;break;
             case BAD_READ_TAIL:if(r->chunk==(response?30:family?15:10))out.data[9]=1;break;
             default:break;
+            }
+            if(compact) {
+                if(p->compact_fault==3&&offset==150U)--out.byte_count;
+                else if(p->compact_fault==4&&offset+amount==length)++out.byte_count;
+                else if(p->compact_fault==5&&length==174U&&offset==170U)out.data[4]=1;
+                else if(p->compact_fault==6&&offset==150U)++out.handle;
+                else if(p->compact_fault==7&&offset==150U)++out.index;
+                else if(p->compact_fault==8&&offset==150U)++out.chunk;
+                else if(p->compact_fault==9||p->compact_fault==10) {
+                    out.error=p->compact_fault==9?CERBERUS_DUAL_BLE_SNAPSHOT_STALE:CERBERUS_DUAL_BLE_SNAPSHOT_BUSY;
+                    out.byte_count=0;memset(out.data,0,sizeof(out.data));
+                } else if(p->compact_fault==11)out.error=CERBERUS_DUAL_BLE_SNAPSHOT_INVALID+1U;
             }
         }
         memcpy(reply,&out,sizeof(out));return ESP_OK;
@@ -277,7 +308,8 @@ static esp_err_t exchange(void *ctx, uint8_t cmd, const void *request,
     if((cmd>=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_BEGIN&&cmd<=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_STATUS) ||
         cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA ||
         cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY ||
-        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE)
+        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE ||
+        cmd==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE_COMPACT)
         return snapshot_exchange(p,cmd,request,request_size,reply,reply_size);
     if (cmd == CERBERUS_SPI_COMMAND_DUAL_BLE_INFO) {
         assert(!request_size && reply_size==sizeof(cerberus_dual_ble_info_t));
@@ -1010,6 +1042,10 @@ static void response_start(cerberus_dual_ble_scan_t *s,peer_t *p,uint8_t family,
 {
     init_live(s,p);p->response_supported=true;p->count=count;
     assert(cerberus_dual_ble_begin_response(s,family)==ESP_OK);
+    assert(s->compact_response_read_enabled);
+    /* These pre-existing tests intentionally exercise the full310 reader.
+     * The separate compact matrix below uses the public begin default. */
+    s->compact_response_read_enabled=false;
     tick(s,p);assert(p->starts==1&&cerberus_dual_ble_response_mode(p->mode)&&p->family_code==family);
 }
 static void response_read_begin(cerberus_dual_ble_scan_t *s,peer_t *p,uint8_t family,uint8_t count)
@@ -1139,6 +1175,137 @@ static void check_response_reader(void)
     p.fail_stop=false;drain(&s,&p);
     puts("Response310 reader: explicit before-RF capability, 64-bit binding, separate hints/ages, 32x31 bounded transfer, frozen bank, UNKNOWN/NONE, Stop and no passive downgrade passed");
 }
+
+static void compact_read_begin(cerberus_dual_ble_scan_t *s,peer_t *p,uint8_t family,uint8_t count)
+{
+    init_live(s,p);p->response_supported=p->compact_supported=true;p->count=count;
+    assert(cerberus_dual_ble_begin_response(s,family)==ESP_OK&&s->compact_response_read_enabled);
+    tick(s,p);p->cost_ms=8;
+    for(unsigned n=0;n<100&&s->phase!=12;++n)fast_tick(s,p);
+    assert(s->phase==12&&!s->copied&&!p->compact_reads&&!p->response_reads&&p->snapshot_begins==1);
+}
+static void compact_state(peer_t *p,uint8_t index,uint8_t state)
+{
+    assert(state<=2);
+    if(state<2) {
+        memset(&p->frozen_response[index],0,sizeof(p->frozen_response[index]));
+        if(state==1)p->frozen_response[index]=(cerberus_dual_ble_response_wire_t){
+            .version=1,.state=CERBERUS_DUAL_BLE_RESPONSE_NONE,.original_sequence=UINT64_C(0x123456789abcdef0)+index};
+    }
+}
+static void assert_compact_bank(const cerberus_dual_ble_scan_t *s,const peer_t *p)
+{
+    assert(s->count==p->snapshot.count&&s->published_response);
+    for(unsigned i=0;i<s->count;++i) {
+        assert(!memcmp(&s->rows[i].response,&p->frozen_response[i],sizeof(s->rows[i].response)));
+        assert(s->rows[i].request_started_ms==s->snapshot_request_started_ms);
+        assert(s->rows[i].raw_length==p->frozen[i].raw_length&&s->rows[i].rssi==p->frozen[i].latest_rssi);
+    }
+}
+static void check_compact_response_reader(void)
+{
+    cerberus_dual_ble_scan_t s;peer_t p;
+    /* All six selectors plus ordinary response acquisition retain the exact
+     * original158 prefix and reconstruct the same152-byte response object. */
+    for(uint8_t family=0;family<=6;++family) {
+        compact_read_begin(&s,&p,family,3);
+        for(uint8_t i=0;i<3;++i)compact_state(&p,i,i);
+        await_snapshots(&s,&p,1);
+        assert(p.compact_reads==16U+18U+31U&&!p.response_reads&&!p.family_reads&&!p.metadata_reads&&!p.snapshot_reads);
+        assert_compact_bank(&s,&p);assert(s.published_family==family);drain(&s,&p);
+    }
+    /* Every read position in a32-row mixed bank can return NOT_SUPPORTED.
+     * All completed/partial staging is discarded, then the same frozen handle
+     * is reread at row0 using full310. No public bank or age anchor is changed. */
+    compact_read_begin(&s,&p,6,32);
+    for(uint8_t i=0;i<32;++i)compact_state(&p,i,i%3U);
+    s.count=1;s.rows[0].rssi=-117;s.published_family=2;s.published_response=false;
+    cerberus_dual_ble_row_t saved=s.rows[0];unsigned positions=0,stop_positions=0;
+    const unsigned expected=11U*16U+11U*18U+10U*31U;
+    for(unsigned n=0;n<1000&&!s.snapshots;++n) {
+        if(s.phase==12) {
+            cerberus_dual_ble_scan_t copy=s;peer_t other=p;copy.ops.context=&other;
+            uint64_t handle=copy.snapshot.handle,anchor=copy.snapshot_request_started_ms,request=copy.snapshot_request_id;
+            other.compact_fail_enabled=true;other.compact_fail_after=other.compact_reads;
+            copy.staging[31].rssi=99; /* Even an unused/old suffix is cleared. */
+            unsigned begins=other.snapshot_begins,reads=other.compact_reads;
+            fast_tick(&copy,&other);
+            assert(!copy.compact_response_read_enabled&&!copy.read_index&&!copy.copied);
+            assert(bytes_zero(copy.staging,sizeof(copy.staging))&&bytes_zero(&copy.snapshot_response,sizeof(copy.snapshot_response)));
+            assert(copy.snapshot.handle==handle&&copy.snapshot_request_id==request&&copy.snapshot_request_started_ms==anchor);
+            assert(copy.count==1&&!memcmp(&copy.rows[0],&saved,sizeof(saved))&&!copy.snapshots);
+            await_snapshots(&copy,&other,1);
+            assert(other.compact_reads==reads+1U&&other.response_reads==32U*31U);
+            assert(other.starts==1&&other.snapshot_begins==begins&&other.handle_counter==1);
+            assert_compact_bank(&copy,&other);drain(&copy,&other);++positions;
+            /* Stop at that same partial state must not download one more chunk. */
+            copy=s;other=p;copy.ops.context=&other;reads=other.compact_reads;
+            drain(&copy,&other);
+            assert(other.compact_reads==reads&&!other.response_reads&&!copy.snapshots&&
+                !memcmp(&copy.rows[0],&saved,sizeof(saved)));++stop_positions;
+        } else if(s.phase==13||s.phase==17) {
+            cerberus_dual_ble_scan_t copy=s;peer_t other=p;copy.ops.context=&other;
+            unsigned fences=other.snapshot_fences;drain(&copy,&other);
+            assert(other.snapshot_fences==fences&&!copy.snapshots&&!memcmp(&copy.rows[0],&saved,sizeof(saved)));
+        }
+        unsigned calls=fast_tick(&s,&p);assert(calls<=1); /* Eight-ms local budget. */
+        if(!s.snapshots)assert(s.count==1&&!memcmp(&s.rows[0],&saved,sizeof(saved)));
+    }
+    assert(s.snapshots==1&&p.compact_reads==expected&&positions==expected&&stop_positions==expected);
+    assert(!p.response_reads);assert_compact_bank(&s,&p);drain(&s,&p);
+    /* Full-read compatibility stays disabled for automatic sweeps, but a new
+     * explicit public begin negotiates the optional projection again. */
+    compact_read_begin(&s,&p,0,1);p.compact_supported=false;
+    uint64_t anchor=s.snapshot_request_started_ms;
+    await_snapshots(&s,&p,1);
+    assert(!s.compact_response_read_enabled&&p.compact_reads==1&&p.response_reads==31&&s.rows[0].request_started_ms==anchor);
+    await_snapshots(&s,&p,2);assert(p.compact_reads==1&&p.response_reads==62);
+    completed(&p);for(unsigned n=0;n<1000&&p.starts<2;++n)fast_tick(&s,&p);
+    assert(p.starts==2&&!s.compact_response_read_enabled&&p.compact_reads==1);
+    drain(&s,&p);assert(cerberus_dual_ble_begin_response(&s,0)==ESP_OK&&s.compact_response_read_enabled);drain(&s,&p);
+    /* Invalid header/framing/body/fence never silently chooses the old read. */
+    for(unsigned fault=1;fault<=8;++fault)for(uint8_t state=0;state<3;++state) {
+        if(fault==5&&state!=1)continue;
+        compact_read_begin(&s,&p,0,1);compact_state(&p,0,state);p.compact_fault=fault;
+        s.count=1;s.rows[0].rssi=-118;saved=s.rows[0];
+        for(unsigned n=0;n<200&&!s.error;++n)fast_tick(&s,&p);
+        assert(s.error==ESP_ERR_INVALID_RESPONSE&&!p.response_reads&&!s.snapshots&&s.compact_response_read_enabled);
+        assert(!memcmp(&saved,&s.rows[0],sizeof(saved)));drain(&s,&p);
+    }
+    for(unsigned fault=9;fault<=12;++fault) {
+        compact_read_begin(&s,&p,0,1);p.compact_fault=fault;
+        s.count=1;s.rows[0].rssi=-120;saved=s.rows[0];
+        for(unsigned n=0;n<200&&!s.error;++n)fast_tick(&s,&p);
+        esp_err_t expected_error=fault==9?ESP_ERR_NOT_FOUND:fault==11?ESP_ERR_INVALID_RESPONSE:ESP_ERR_TIMEOUT;
+        assert(s.error==expected_error&&!p.response_reads&&!s.snapshots&&s.compact_response_read_enabled);
+        assert(!memcmp(&saved,&s.rows[0],sizeof(saved)));drain(&s,&p);
+    }
+    /* NONE's transmitted prefix must still be canonical, including its full
+     * nonzero64-bit original sequence; omitted bytes cannot hide a bad prefix. */
+    for(unsigned fault=0;fault<3;++fault) {
+        compact_read_begin(&s,&p,0,1);compact_state(&p,0,1);
+        if(!fault)p.frozen_response[0].original_sequence=0;
+        else if(fault==1)p.frozen_response[0].flags=1;
+        else p.frozen_response[0].rssi=-40;
+        for(unsigned n=0;n<200&&!s.error;++n)fast_tick(&s,&p);
+        assert(s.error==ESP_ERR_INVALID_RESPONSE&&!p.response_reads&&!s.snapshots);drain(&s,&p);
+    }
+    for(unsigned fault=BAD_FENCE_HANDLE;fault<=BAD_FENCE_FLAGS;++fault) {
+        compact_read_begin(&s,&p,0,3);compact_state(&p,0,0);compact_state(&p,1,1);
+        p.fault=fault;s.count=1;s.rows[0].rssi=-119;saved=s.rows[0];
+        for(unsigned n=0;n<200&&!s.error;++n)fast_tick(&s,&p);
+        assert(s.error==ESP_ERR_INVALID_RESPONSE&&!s.snapshots&&!p.response_reads&&
+            !memcmp(&saved,&s.rows[0],sizeof(saved)));drain(&s,&p);
+    }
+    /* A canonical BUSY response retriescompact without downgrade; lostBEGIN
+     * replies also retain the first request's age anchor and one frozen bank. */
+    init_live(&s,&p);p.response_supported=p.compact_supported=true;p.lose_begin_replies=2;p.busy_read=2;
+    assert(cerberus_dual_ble_begin_response(&s,0)==ESP_OK);
+    await_snapshots(&s,&p,1);
+    assert(p.snapshot_begins==3&&p.handle_counter==1&&!p.response_reads&&s.compact_response_read_enabled);
+    assert(s.rows[0].request_started_ms+1==p.snapshot_clock_ms);drain(&s,&p);
+    puts("Compact response reader: 32 mixed rows, 16/18/31 chunks, all 684 fallback/Stop positions, same-handle anchor, canonical reconstruction, strict wire/fence, per-run downgrade and no passive fallback passed");
+}
 int main(void)
 {
     cerberus_dual_ble_scan_t s;peer_t p;
@@ -1196,6 +1363,7 @@ int main(void)
     check_analyzer_history();check_analyzer_controller();
     check_family_reader();
     check_response_reader();
+    check_compact_response_reader();
     printf("dual BLE reader: owner/replay/fence/lost-reply/age/typed-row checks passed; store=%zu row=%zu wire=%zu scratch=%zu bytes\n",
         sizeof(s),sizeof(s.rows[0]),sizeof(s.rows[0].response),sizeof(s.snapshot_response));
     return 0;

@@ -12,6 +12,7 @@ typedef struct {
     bool legacy, lose_begin, mutated, extended, old_metadata, bad_fence, bad_analyzer_binding, family, response;
     uint64_t rf_started_ms, first_begin_ms, fallback_handle;
     unsigned begin_calls, reads, releases, frames, metadata_reads, old_reads, unsupported_at, analyzer_reads, family_reads, response_reads;
+    unsigned compact_reads, full_response_reads, compact_unsupported_at;
 } integration_t;
 
 static uint64_t integration_clock(void *context) { (void)context; return now_ms; }
@@ -73,7 +74,18 @@ static esp_err_t integration_exchange(void *context,uint8_t command_id,const voi
 {
     integration_t *i=context;++i->frames;
     if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY)++i->family_reads;
-    if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE)++i->response_reads;
+    if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE){
+        ++i->response_reads;++i->full_response_reads;
+        if(i->compact_unsupported_at){const cerberus_dual_ble_snapshot_read_t *r=request;
+            assert(r->handle==i->fallback_handle);}
+    }
+    if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE_COMPACT){
+        ++i->response_reads;++i->compact_reads;
+        if(i->compact_unsupported_at==i->compact_reads){
+            const cerberus_dual_ble_snapshot_read_t *r=request;
+            i->fallback_handle=r->handle;now_ms+=8U;return ESP_ERR_NOT_SUPPORTED;
+        }
+    }
     cerberus_dual_ble_binding_t wrong_binding;
     if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_ANALYZER_SAMPLE){
         ++i->analyzer_reads;
@@ -131,7 +143,8 @@ static esp_err_t integration_exchange(void *context,uint8_t command_id,const voi
     if(command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ||
         command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_METADATA||
         command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY||
-        command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE){
+        command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE||
+        command_id==CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE_COMPACT){
         ++i->reads;
         /* This update occurs AFTER the first real chunk reply, while remaining
          * chunks are still in flight. No mixture may reach the S3 publisher. */
@@ -365,6 +378,69 @@ static void integration_response(void)
     assert(cerberus_dual_ble_released(&s)&&!dual_attached&&!s.snapshots);
     puts("Actual C5 original/response255 -> frozen310 -> S3: response-only family, preserved first-BEGIN age, immutable selection, partial/SID/type invalidation, final sweep, fence and Stop passed");
 }
+static void integration_compact_response(void)
+{
+    /* Exercise real callback admission, freeze, compact projection, reader
+     * reconstruction and archive capture. Late optional-command rejection
+     * must reread the same bank, including already staged complete rows. */
+    const unsigned fallback_at[]={0,1,16,31,32,47,65,712};
+    for(unsigned pass=0;pass<sizeof(fallback_at)/sizeof(fallback_at[0]);++pass){
+        integration_t i;cerberus_dual_ble_scan_t s;
+        integration_reset(&i,&s,false);cerberus_dual_ble_stop(&s);
+        i.response=true;i.lose_begin=true;i.compact_unsupported_at=fallback_at[pass];
+        assert(cerberus_dual_ble_begin_response(&s,0)==ESP_OK);
+        for(unsigned n=0;n<20&&!i.rf_started_ms;++n)integration_tick(&i,&s);
+        assert(i.rf_started_ms&&!i.begin_calls&&scan_status.stored_count==1);
+        for(uint8_t address=2;address<=32;++address){
+            ++now_ms;
+            if(address%3U==0U)integration_extended_report(address,1,-60,7);
+            else {
+                integration_response_original(address,1,7,false);
+                if(address%3U==2U){now_ms+=3U;integration_response_packet(address,1,7,'5');}
+            }
+        }
+        assert(scan_status.stored_count==32);
+        for(unsigned n=0;n<2100&&!s.snapshots;++n)integration_tick(&i,&s);
+        assert(s.snapshots==1&&s.count==32&&i.begin_calls==2&&starts==1&&i.mutated);
+        assert(i.compact_reads==(fallback_at[pass]?fallback_at[pass]:712));
+        assert(i.full_response_reads==(fallback_at[pass]?992U:0U));
+        assert(!i.family_reads&&!i.metadata_reads&&!i.old_reads);
+        assert(!fallback_at[pass]||s.snapshot.handle==i.fallback_handle);
+        unsigned states[3]={0};
+        cerberus_dual_ble_binding_t binding={s.start.boot_id,s.start.job_id};
+        for(uint8_t index=0;index<32;++index){
+            cerberus_dual_ble_row_t row;cerberus_dual_ble_provenance_t proof;
+            assert(cerberus_dual_ble_copy_row(&s,index,&row,&proof));
+            /* Independent existing full133 and base127 projections from the
+             * exact same frozen handle establish lossless reconstruction. */
+            cerberus_dual_ble_snapshot_response_row_t full=snapshot_response_row(binding,s.snapshot.handle,index);
+            assert(!memcmp(row.address,full.family.metadata.row.address,6)&&
+                row.address_type==full.family.metadata.row.address_type&&
+                row.rssi==full.family.metadata.row.latest_rssi&&
+                row.callback_age_ms==full.family.metadata.row.age_ms&&
+                row.request_started_ms==i.first_begin_ms&&
+                row.reports==full.family.metadata.row.reports&&
+                row.raw_length==full.family.metadata.row.raw_length&&
+                !memcmp(row.raw,full.family.metadata.row.raw,sizeof(row.raw))&&
+                !memcmp(&row.receive,&full.family.metadata.receive,sizeof(row.receive))&&
+                !memcmp(&row.family,&full.family.family,sizeof(row.family))&&
+                !memcmp(&row.response,&full.response,sizeof(row.response)));
+            assert(row.response.state<=CERBERUS_DUAL_BLE_RESPONSE_PRESENT);
+            ++states[row.response.state];
+            cerberus_ble_archive_row_t archived;
+            assert(cerberus_dual_ble_archive_capture_row(&archived,&row,&proof,now_ms));
+            assert(!memcmp(&archived.c5_response,&full.response,sizeof(full.response))&&
+                !memcmp(&archived.receive,&full.family.metadata.receive,sizeof(archived.receive))&&
+                archived.receiver_boot_id==proof.boot_id&&archived.scan_epoch==proof.epoch);
+        }
+        assert(states[0]==10&&states[1]==10&&states[2]==12);
+        cerberus_dual_ble_stop(&s);
+        for(unsigned n=0;n<50&&!cerberus_dual_ble_released(&s);++n)integration_tick(&i,&s);
+        assert(cerberus_dual_ble_released(&s)&&!dual_attached&&!dual_radio_active&&starts==1);
+    }
+    puts("Actual C5 mixed32 response callbacks -> compact712/full992 reads -> S3/archive: exact frozen equivalence, lost-BEGIN anchor, late fallback, immutable live mutation and Stop passed");
+}
+
 int main(void)
 {
     integration_t i;cerberus_dual_ble_scan_t s;
@@ -500,6 +576,7 @@ int main(void)
     integration_analyzer();
     integration_family();
     integration_response();
+    integration_compact_response();
     puts("Actual C5 service/callback + S3 coordinator: live immutable readout, lost-BEGIN age, final 8s sweep, Stop and v1 completed-bank fallback passed");
     return 0;
 }

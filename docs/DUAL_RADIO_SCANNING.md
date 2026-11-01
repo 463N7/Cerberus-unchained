@@ -2,6 +2,10 @@
 
 ## Current local checkpoint
 
+[Rev113](DUAL_RADIO_REV113.md) adds compact C5 response-result transfer with
+full-format fallback for older peers. It is a local source checkpoint; the
+installed baseline and its physical acceptance limits remain rev112 below.
+
 [Rev112](DUAL_RADIO_REV112.md) addresses independent dual-receiver Fox Hunt
 startup, retry, signal/status display and retained cleanup. The matched update
 is installed with verified writes, paired boot and mounted SD; dual-receiver

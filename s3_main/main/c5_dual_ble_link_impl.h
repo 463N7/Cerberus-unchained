@@ -13,7 +13,8 @@ esp_err_t c5_spi_link_dual_ble_exchange(uint8_t command, const void *input,
     bool analyzer = command == CERBERUS_SPI_COMMAND_DUAL_BLE_ANALYZER_SAMPLE;
     bool family = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY;
     bool response_read = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE;
-    allowed = allowed || snapshot || inventory || metadata || analyzer || family || response_read;
+    bool compact_response = command == CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE_COMPACT;
+    allowed = allowed || snapshot || inventory || metadata || analyzer || family || response_read || compact_response;
     allowed = allowed || command == CERBERUS_SPI_COMMAND_BLE_SCAN_RESULT ||
         command == CERBERUS_SPI_COMMAND_BLE_SCAN_DATA;
     if (!allowed || !output || !output_size || output_size > CERBERUS_SPI_FRAME_PAYLOAD_SIZE ||
@@ -45,7 +46,8 @@ esp_err_t c5_spi_link_dual_ble_exchange(uint8_t command, const void *input,
             error = ESP_ERR_TIMEOUT;
         peer_firmware_version = error == ESP_OK ? peer.firmware_version : 0U;
     }
-    if (error == ESP_OK && peer_firmware_version < (response_read ? CERBERUS_DUAL_BLE_RESPONSE_MIN_FIRMWARE :
+    if (error == ESP_OK && peer_firmware_version < (compact_response ? CERBERUS_DUAL_BLE_COMPACT_RESPONSE_MIN_FIRMWARE :
+        response_read ? CERBERUS_DUAL_BLE_RESPONSE_MIN_FIRMWARE :
         family ? CERBERUS_DUAL_BLE_FAMILY_MIN_FIRMWARE :
         analyzer ? CERBERUS_DUAL_BLE_ANALYZER_MIN_FIRMWARE :
         metadata ? CERBERUS_DUAL_BLE_METADATA_MIN_FIRMWARE :

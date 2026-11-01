@@ -77,6 +77,9 @@ typedef struct {
     bool has_first_result, live_updates, discovery_clock_valid, snapshot_anchor_valid, snapshots_capable;
     bool inventory_known, inventory_replacement_enabled, pending_inventory_known, inventory_query_enabled;
     bool metadata_read_enabled;
+    /* Optional shorter projection only; unsupported peers keep the same
+     * frozen handle and full response evidence path for this public run. */
+    bool compact_response_read_enabled;
     cerberus_dual_ble_analyzer_history_t analyzer;
 } cerberus_dual_ble_scan_t;
 typedef struct {

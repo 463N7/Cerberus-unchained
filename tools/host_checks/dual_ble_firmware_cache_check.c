@@ -205,6 +205,37 @@ int main(void)
                 &out,sizeof(out))==ESP_ERR_INVALID_ARG&&!commands&&!probes);
         }
     }
-    puts("Production firmware-cache recovery passed: Analyzer/Family/Response START before RF and read gates, transient recovery and shared deadline");
+    /* Compact transfer is optional at68; firmware67 must be rejected locally
+     * so the reader can reuse its frozen handle through the full133 command.
+     * Acquisition START/full response reads above remain supported at67. */
+    const uint8_t compact=CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE_COMPACT;
+    reset();peer_firmware_version=67;expected_command=compact;
+    assert(c5_spi_link_dual_ble_exchange(compact,&metadata_request,sizeof(metadata_request),
+        &metadata,sizeof(metadata))==ESP_ERR_NOT_SUPPORTED&&!probes&&!commands&&zero(&metadata,sizeof(metadata)));
+    reset();reported_version=67;expected_command=compact;
+    assert(c5_spi_link_dual_ble_exchange(compact,&metadata_request,sizeof(metadata_request),
+        &metadata,sizeof(metadata))==ESP_ERR_NOT_SUPPORTED&&probes==1&&!commands&&peer_firmware_version==67);
+    reset();reported_version=68;expected_command=compact;
+    assert(c5_spi_link_dual_ble_exchange(compact,&metadata_request,sizeof(metadata_request),
+        &metadata,sizeof(metadata))==ESP_OK&&probes==1&&commands==1&&peer_firmware_version==68);
+    reset();peer_firmware_version=68;expected_command=compact;
+    assert(c5_spi_link_dual_ble_exchange(compact,&metadata_request,sizeof(metadata_request),
+        &metadata,sizeof(metadata))==ESP_OK&&!probes&&commands==1);
+    reset();reported_version=68;probe_error=ESP_ERR_TIMEOUT;expected_command=compact;
+    assert(c5_spi_link_dual_ble_exchange(compact,&metadata_request,sizeof(metadata_request),
+        &metadata,sizeof(metadata))==ESP_ERR_TIMEOUT&&probes==1&&!commands&&!peer_firmware_version&&zero(&metadata,sizeof(metadata)));
+    probe_error=ESP_OK;
+    assert(c5_spi_link_dual_ble_exchange(compact,&metadata_request,sizeof(metadata_request),
+        &metadata,sizeof(metadata))==ESP_OK&&probes==2&&commands==1);
+    reset();reported_version=68;probe_us=20000;expected_command=compact;
+    assert(c5_spi_link_dual_ble_exchange(compact,&metadata_request,sizeof(metadata_request),
+        &metadata,sizeof(metadata))==ESP_ERR_TIMEOUT&&probes==1&&!commands&&!peer_firmware_version&&zero(&metadata,sizeof(metadata)));
+    reset();reported_version=68;probe_us=10000;request_us=10001;expected_command=compact;
+    assert(c5_spi_link_dual_ble_exchange(compact,&metadata_request,sizeof(metadata_request),
+        &metadata,sizeof(metadata))==ESP_ERR_TIMEOUT&&probes==1&&commands==1&&zero(&metadata,sizeof(metadata)));
+    reset();peer_firmware_version=68;corrupt=true;expected_command=compact;
+    assert(c5_spi_link_dual_ble_exchange(compact,&metadata_request,sizeof(metadata_request),
+        &metadata,sizeof(metadata))==ESP_ERR_INVALID_RESPONSE&&!probes&&commands==1&&zero(&metadata,sizeof(metadata)));
+    puts("Production firmware-cache recovery passed: Analyzer/Family/Response START and read gates, optional compact68/full67 compatibility, transient recovery and shared deadline");
     return 0;
 }
