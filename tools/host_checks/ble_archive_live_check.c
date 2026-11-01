@@ -9,7 +9,8 @@
 #define MALLOC_CAP_SPIRAM 1U
 #define MALLOC_CAP_8BIT 2U
 typedef enum { UI_PAGE_BLE, UI_PAGE_FILES, UI_PAGE_BLE_ARCHIVE, UI_PAGE_MAIN } ui_page_t;
-typedef enum { UI_BLE_MODE_MENU, UI_BLE_MODE_DETAIL, UI_BLE_MODE_C5, UI_BLE_MODE_LIST } ui_ble_mode_t;
+typedef enum { UI_BLE_MODE_MENU, UI_BLE_MODE_DETAIL, UI_BLE_MODE_C5, UI_BLE_MODE_LIST,
+    UI_BLE_MODE_FINDMY_MONITOR } ui_ble_mode_t;
 enum { UI_FILE_MODE_LIST };
 static ui_page_t current_page;
 static ui_ble_mode_t ble_mode;
@@ -32,6 +33,10 @@ static cerberus_dual_ble_scan_t *dual_ble_ui_store;
 static cerberus_dual_ble_row_t dual_ble_ui_selected;
 static cerberus_dual_ble_provenance_t dual_ble_ui_selected_provenance;
 static bool dual_ble_ui_detail, s3_released, c5_released;
+static bool dual_ble_ui_from_monitor, monitor_requested;
+static unsigned monitor_stops, monitor_captured_rows;
+static void ble_findmy_monitor_return(void) { monitor_requested=false;ble_mode=UI_BLE_MODE_FINDMY_MONITOR; }
+static void ble_findmy_request_stop(bool exit, bool select);
 static unsigned s3_stop_requests;
 static void ble_discovery_leave(void) { ++s3_stop_requests; }
 static bool dual_ble_live_discovery_released(void) { return s3_released; }
@@ -73,6 +78,10 @@ esp_err_t cerberus_ble_archive_io_copy_result(uint64_t job,cerberus_ble_archive_
 void cerberus_ble_archive_io_cancel(uint64_t job) { CHECK(job);++cancels;last_canceled_job=job;if(job==io.job_id)io.cancel_requested=true; }
 void cerberus_ble_archive_io_release(uint64_t job) { CHECK(job);++releases;last_released_job=job;if(job==io.job_id)io.result_ready=false; }
 #include "ble_archive_live_ui.h"
+static void ble_findmy_request_stop(bool exit, bool select)
+{ CHECK(!select);monitor_requested=false;++monitor_stops;
+  if(current_page==UI_PAGE_BLE_ARCHIVE&&ble_archive_view)monitor_captured_rows=ble_archive_view->incoming.count;
+  if(exit)ble_mode=UI_BLE_MODE_LIST; }
 static void request_selected(void) { ble_archive_save_selected();ble_archive_tick(false); }
 static esp_err_t draw_detail_page(void) { drawn_size=0;drawn[0]=0;calls=0;++repaints;return ble_archive_draw(); }
 static esp_err_t draw_current_page(void) { ++repaints;return current_page==UI_PAGE_BLE_ARCHIVE?draw_detail_page():ESP_OK; }
@@ -101,6 +110,7 @@ static void seed(void)
     current_page=UI_PAGE_BLE;ble_mode=UI_BLE_MODE_MENU;allocation_fails=false;start_error=copy_error=ESP_OK;
     io=(cerberus_ble_archive_io_status_t){0};privacy_mask=false;
     memset(&companion,0,sizeof(companion));dual_ble_ui_store=NULL;dual_ble_ui_detail=false;
+    dual_ble_ui_from_monitor=monitor_requested=false;monitor_captured_rows=0;
     memset(&dual_ble_ui_selected,0,sizeof(dual_ble_ui_selected));
     memset(&dual_ble_ui_selected_provenance,0,sizeof(dual_ble_ui_selected_provenance));
     s3_released=c5_released=true;
@@ -562,6 +572,47 @@ static void test_invalid_c5_response_capture(void)
         ble_archive_return();
     }
 }
+static void test_monitor_save_return(void)
+{
+    /* The real monitor footer captures both retained banks, including a
+     * response-only Find My proof, before stopping either owner's intent. */
+    seed_both_responses(2);ble_mode=UI_BLE_MODE_FINDMY_MONITOR;monitor_requested=true;
+    s3_released=c5_released=false;
+    unsigned before=saves, stopped=monitor_stops;
+    CHECK(archive_monitor_footer_draw()==ESP_OK&&strstr(drawn,"SAVE BOTH"));
+    archive_monitor_footer_tap(220,440);
+    CHECK(current_page==UI_PAGE_BLE_ARCHIVE&&ble_archive_return_mode==UI_BLE_MODE_FINDMY_MONITOR);
+    CHECK(!monitor_requested&&monitor_stops==stopped+1&&monitor_captured_rows==64);
+    CHECK(ble_archive_view->release_pending&&saves==before);
+    static cerberus_ble_archive_t frozen;frozen=ble_archive_view->incoming;
+    CHECK(frozen.saved_uptime_ms==10000&&frozen.rows[0].source_time_valid);
+    CHECK(frozen.rows[32].receiver==CERBERUS_BLE_ARCHIVE_RECEIVER_C5&&
+        frozen.rows[32].c5_response.state==CERBERUS_DUAL_BLE_RESPONSE_PRESENT);
+    memset(discovery.inventory.entries,0,sizeof(discovery.inventory.entries));
+    memset(companion.rows,0,sizeof(companion.rows));companion.published_epoch=999;
+    now_us+=2000000;s3_released=true;ble_archive_tick(false);CHECK(saves==before);
+    c5_released=true;ble_archive_tick(false);
+    CHECK(saves==before+1&&!memcmp(&frozen,&saved,sizeof(frozen)));
+    complete();ble_archive_return();
+    CHECK(current_page==UI_PAGE_BLE&&ble_mode==UI_BLE_MODE_FINDMY_MONITOR&&!monitor_requested);
+    load_from_file=true;ble_archive_open_file("/sdcard/cerberus/ble/B00001.BLE","B00001.BLE");
+    complete();CHECK(!memcmp(&frozen,&ble_archive_view->document,sizeof(frozen)));
+    ble_archive_return();CHECK(ble_mode==UI_BLE_MODE_FINDMY_MONITOR&&!monitor_requested);
+
+    /* Allocation/capture failure must also clear pre-INFO acquisition intent. */
+    seed();ble_mode=UI_BLE_MODE_FINDMY_MONITOR;monitor_requested=true;
+    ble_discovery_live=NULL;before=saves;ble_archive_save_c5(false);
+    CHECK(ble_archive_open_error==ESP_ERR_NOT_FOUND&&!monitor_requested&&saves==before);
+    ble_archive_return();CHECK(ble_mode==UI_BLE_MODE_FINDMY_MONITOR&&!monitor_requested);
+
+    /* Frozen C5 detail retains the monitor destination through the root Back
+     * control; it never restarts the ordinary companion on the return. */
+    seed_both();dual_ble_ui_detail=dual_ble_ui_from_monitor=true;
+    CHECK(archive_root_footer_draw()==ESP_OK&&strstr(drawn,"FIND MY MONITOR"));
+    archive_root_footer_tap(40,440);
+    CHECK(ble_mode==UI_BLE_MODE_FINDMY_MONITOR&&!monitor_requested);
+}
+
 int main(void)
 {
     test_capture();test_jobs();test_accepted_job_rejected_by_view();test_complete_without_result();
@@ -569,6 +620,7 @@ int main(void)
     test_invalid_family_capture();
     test_saved_family_reopen();
     test_c5_response_jobs();test_saved_c5_response_reopen();test_invalid_c5_response_capture();
+    test_monitor_save_return();
     ble_archive_dispose();CHECK(frees+1==allocations); /* One rejected allocation. */
     printf("%u archive capture/controller checks passed; saves=%u loads=%u copies=%u releases=%u; host viewer=%zu document=%zu row=%zu bytes.\n",
         checks,saves,loads,copies,releases,sizeof(ble_archive_ui_store_t),sizeof(cerberus_ble_archive_t),sizeof(cerberus_ble_archive_row_t));return 0;

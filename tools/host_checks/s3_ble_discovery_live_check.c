@@ -478,7 +478,7 @@ static void unified_all_families(const char *prefix)
         unsigned parsed=unified_classify_calls,boundaries=all_boundary_calls(),sorts=unified_sort_calls;
         for(unsigned i=0;i<4U;++i){clock_ms+=200;repaint_unified();}
         CHECK(unified_classify_calls==parsed&&unified_sort_calls==sorts&&all_boundary_calls()==boundaries);
-        if(family==CERBERUS_S3_BLE_FILTER_FIND_MY)CHECK(!strcmp(live_view.tools_label,"S3 MONITOR"));
+        if(family==CERBERUS_S3_BLE_FILTER_FIND_MY)CHECK(!strcmp(live_view.tools_label,"MONITOR"));
         drawn[0]=0;CHECK(live_paint(true)==ESP_OK);save(prefix,cases[c].preview);
         /* Source-only controls do not parse, copy or request radio work. */
         handle_live_scan_tap(260,85);CHECK(live_view.total_count==1U&&!strcmp(live_view.age_label,"SOURCE S3 >"));
@@ -1084,6 +1084,138 @@ static void fox_back_sleep_and_pending_stop(void)
     }
 }
 
+static void shared_monitor_acquisition_and_frozen_selection(void)
+{
+    static const uint8_t findmy[]={3,3,0x44,0xfd};
+    const uint64_t base=UINT64_C(0x100000000)+1000U;
+    seed_native(CERBERUS_S3_BLE_FILTER_FLIPPER);
+    ble_mode=UI_BLE_MODE_FINDMY_MONITOR;ble_findmy_running=ble_findmy_available=true;
+    CHECK(ble_discovery_page()&&!ble_discovery_presenting()&&!ble_discovery_unified());
+    CHECK(ble_discovery_acquire()&&!ble_discovery_live->session.enabled);
+    CHECK(ble_discovery_family()==CERBERUS_S3_BLE_FILTER_FIND_MY);
+    CHECK(ble_discovery_monitor_start()==ESP_OK);
+    clock_ms=(int64_t)base;unsigned frame=live_frame;
+    ble_discovery_tick(base,false);
+    CHECK(discovery_native.start==1&&discovery_native.bank.meta.family==CERBERUS_S3_BLE_FILTER_FIND_MY);
+    CHECK(live_frame==frame&&ble_discovery_live->painted_count==0U);
+    dual_ble_live_tick(base,false);
+    CHECK(companion_requested_mode==CERBERUS_DUAL_BLE_FAMILY&&companion_requested_family==2U);
+    clock_ms=(int64_t)base+50;s3_payload(0,41,1,findmy,sizeof(findmy),true,false);
+    clock_ms=(int64_t)base+150;ble_discovery_tick(base+150U,false);
+    companion_row(0,41,1,-30);
+    fixture_response_row(&companion_store.rows[0],findmy,sizeof(findmy),2U,base);
+    ++companion_store.snapshots;
+    CHECK(ble_discovery_combined_order()==2U); /* Typed sources remain distinct. */
+    CHECK(ble_discovery_live->c5_response_bits[0]&CERBERUS_DUAL_BLE_FAMILY_FIND_MY);
+    live_ble_recent_only=true;clock_ms=(int64_t)base+40000;
+    CHECK(ble_discovery_combined_order()==2U); /* List-only recent toggle is not monitor policy. */
+    ble_discovery_live->source_filter=CERBERUS_BLE_DISCOVERY_LIST_S3;
+    CHECK(ble_discovery_combined_order()==1U);
+    CHECK(ble_discovery_build_unified_row(0,0,(uint64_t)clock_ms));
+    CHECK(!ble_discovery_build_unified_row(1,1,(uint64_t)clock_ms));
+    const unsigned classifies=unified_classify_calls;
+    cerberus_s3_ble_discovery_entry_t different_hint=ble_discovery_live->inventory.entries[0];
+    different_hint.record.focus.discovery.findmy_advertisement=(cerberus_ble_findmy_hints_t){CERBERUS_BLE_FINDMY_HINT_DULT,0};
+    different_hint.record.focus.discovery.findmy_scan_response.bits=0;
+    different_hint.record.focus.discovery.advertisement_observed_ms=(uint32_t)(base+150U);
+    CHECK(ble_discovery_monitor_hint_recent(&different_hint,base+120149U));
+    CHECK(!ble_discovery_monitor_hint_recent(&different_hint,base+120150U));
+    CHECK(!ble_discovery_monitor_hint_recent(&different_hint,base+UINT64_C(0x100000000)+149U));
+    clock_ms=(int64_t)base+120149;CHECK(ble_discovery_combined_order()==1U);
+    clock_ms=(int64_t)base+120150;CHECK(ble_discovery_combined_order()==0U);
+    clock_ms=(int64_t)base+UINT64_C(0x100000000)+150U;CHECK(ble_discovery_combined_order()==0U);
+    CHECK(unified_classify_calls==classifies); /* No C5 raw reparse on age repaint. */
+    clock_ms=(int64_t)base+40000;CHECK(ble_discovery_combined_order()==1U);
+    uint8_t hint=ble_discovery_live->inventory.entries[0].record.focus.discovery.findmy_scan_response.bits;
+    ble_discovery_live->inventory.entries[0].record.focus.discovery.findmy_scan_response.bits=0U;
+    ++ble_discovery_live->inventory.revision;
+    CHECK(ble_discovery_combined_order()==0U); /* Category alone is not Find My evidence. */
+    ble_discovery_live->inventory.entries[0].record.focus.discovery.findmy_scan_response.bits=hint;
+    ++ble_discovery_live->inventory.revision;CHECK(ble_discovery_combined_order()==1U);
+    ++ble_discovery_live->inventory.entries[0].record.focus.discovery.advertisement_observed_ms;
+    ++ble_discovery_live->inventory.revision;CHECK(ble_discovery_combined_order()==0U);
+    --ble_discovery_live->inventory.entries[0].record.focus.discovery.advertisement_observed_ms;
+    ++ble_discovery_live->inventory.revision;CHECK(ble_discovery_combined_order()==1U);
+    CHECK(ble_discovery_build_unified_row(0,0,(uint64_t)clock_ms));
+    CHECK(!ble_discovery_monitor_freeze_selection(0)); /* Built is not successfully painted. */
+    drawn[0]=0;wifi_ui_fail_fill_after=1;
+    CHECK(draw_ble_findmy_monitor()==ESP_FAIL&&ble_discovery_live->painted_count==0U);
+    CHECK(!ble_discovery_monitor_freeze_selection(0));
+    drawn[0]=0;CHECK(draw_ble_findmy_monitor()==ESP_OK&&ble_discovery_live->painted_count==1U);
+    cerberus_s3_ble_discovery_entry_t frozen=ble_discovery_live->painted[0];
+    CHECK(frozen.original_source_ms==base+50U&&frozen.epoch!=0U);
+    CHECK(ble_discovery_monitor_freeze_selection(0));
+    CHECK(!ble_discovery_monitor_freeze_selection(0)&&!ble_discovery_live->session.enabled);
+    memset(&ble_discovery_live->inventory,0,sizeof(ble_discovery_live->inventory));
+    CHECK(!ble_discovery_monitor_apply_selection());
+    ble_findmy_running=false;discovery_native.hold_stop=true;companion_released=false;
+    ble_discovery_tick(base+40100U,false);dual_ble_live_tick(base+40100U,false);
+    CHECK(companion_requested_mode==-1&&discovery_native.stop==1U);
+    ble_discovery_tick(base+55000U,false);
+    CHECK(discovery_native.bank.meta.attached&&!ble_discovery_monitor_apply_selection());
+    discovery_native.hold_stop=false;discovery_native_finish(true);
+    for(unsigned i=0;i<10U&&!cerberus_ble_discovery_session_released(&ble_discovery_live->session);++i)
+        ble_discovery_tick(base+55200U+i*250U,false);
+    CHECK(!ble_discovery_monitor_apply_selection()); /* C5 still owes release. */
+    /* Foreign scanner ownership is never adopted/stopped for cached details. */
+    unsigned before=all_boundary_calls();owner=CERBERUS_S3_BLE_OWNER_SCANNER;
+    companion_released=true;CHECK(ble_discovery_monitor_apply_selection());
+    CHECK(ble_mode==UI_BLE_MODE_DETAIL&&ble_selected_from_monitor);
+    CHECK(owner==CERBERUS_S3_BLE_OWNER_SCANNER&&all_boundary_calls()==before);
+    owner=CERBERUS_S3_BLE_OWNER_NONE;
+    CHECK(ble_selected_scan_epoch==frozen.epoch&&ble_selected_original_time64_valid);
+    CHECK(ble_selected_original_ms64==frozen.original_source_ms&&
+        ble_selected_source_ceiling_ms64==frozen.source_now_ms);
+    CHECK(!memcmp(&ble_selected_result,&frozen.record.peer,sizeof(ble_selected_result)));
+    clean_live();
+
+    /* C5 frozen selection survives every current-bank identity being replaced. */
+    seed_native(CERBERUS_S3_BLE_FILTER_FIND_MY);ble_mode=UI_BLE_MODE_FINDMY_MONITOR;
+    CHECK(ble_discovery_acquire()&&!ble_discovery_live->session.enabled);
+    companion_row(0,41,2,-25);fixture_response_row(&companion_store.rows[0],findmy,sizeof(findmy),2U,1000U);
+    companion_store.rows[0].address_type=2U;++companion_store.snapshots;
+    CHECK(ble_discovery_combined_order()==1U&&ble_discovery_build_unified_row(0,0,1100U));
+    clock_ms=1100;drawn[0]=0;
+    CHECK(draw_ble_findmy_monitor()==ESP_OK&&ble_discovery_live->painted_count==1U);
+    cerberus_dual_ble_row_t c5=ble_discovery_live->painted_c5[0];
+    cerberus_dual_ble_provenance_t proof=ble_discovery_live->painted_c5_provenance[0];
+    ble_findmy_monitor_tap(20,140);
+    CHECK(ble_findmy_select_pending&&ble_findmy_stopping);
+    memset(&companion_store,0,sizeof(companion_store));
+    ble_findmy_monitor_tick(1200,false);
+    CHECK(ble_mode==UI_BLE_MODE_C5&&dual_ble_ui_from_monitor&&!ble_findmy_stopping);
+    CHECK(!memcmp(&c5,&dual_ble_ui_selected,sizeof(c5))&&
+        !memcmp(&proof,&dual_ble_ui_selected_provenance,sizeof(proof)));
+    /* An old accidental S3 intent cannot rearm a stopped monitor detail. */
+    ble_discovery_live->session.enabled=true;dual_ble_live_tick(1200,false);
+    CHECK(companion_requested_mode==-1);
+    ble_discovery_live->session.enabled=false;clean_live();
+}
+
+static void shared_monitor_independent_intent_and_sleep(void)
+{
+    seed_native(CERBERUS_S3_BLE_FILTER_FIND_MY);ble_mode=UI_BLE_MODE_FINDMY_MONITOR;
+    ble_findmy_running=true;CHECK(ble_discovery_monitor_start()==ESP_OK);
+    discovery_native.reject_start=true;ble_discovery_tick(1000U,false);
+    CHECK(!ble_discovery_live->session.enabled&&ble_discovery_live->session.error!=ESP_OK);
+    dual_ble_live_tick(1000U,false);
+    CHECK(companion_requested_mode==CERBERUS_DUAL_BLE_FAMILY&&companion_requested_family==2U);
+    unsigned attempts=discovery_native.start;
+    ble_discovery_tick(2000U,false);CHECK(discovery_native.start==attempts);
+    ble_findmy_running=false;dual_ble_live_tick(2000U,false);CHECK(companion_requested_mode==-1);
+    discovery_native.reject_start=false;ble_findmy_running=true;
+    CHECK(ble_discovery_monitor_start()==ESP_OK);clock_ms=2100;ble_discovery_tick(2100U,false);
+    CHECK(discovery_native.start==attempts+1U);
+    ble_findmy_running=false;
+    for(unsigned i=0;i<10U&&!cerberus_ble_discovery_session_released(&ble_discovery_live->session);++i){
+        clock_ms=2400+(int64_t)i*250;ble_discovery_tick((uint64_t)clock_ms,true);dual_ble_live_tick((uint64_t)clock_ms,true);
+    }
+    CHECK(cerberus_ble_discovery_session_released(&ble_discovery_live->session)&&companion_requested_mode==-1);
+    attempts=discovery_native.start;ble_discovery_tick(6000U,false);dual_ble_live_tick(6000U,false);
+    CHECK(discovery_native.start==attempts&&!ble_discovery_live->session.enabled&&companion_requested_mode==-1);
+    clean_live();
+}
+
 int main(int argc,char **argv)
 {
     CHECK(argc==2);
@@ -1108,6 +1240,8 @@ int main(int argc,char **argv)
     fox_barrier_reentry_and_foreign_owner();
     fox_stop_retains_cleanup_and_clock();
     fox_back_sleep_and_pending_stop();
+    shared_monitor_acquisition_and_frozen_selection();
+    shared_monitor_independent_intent_and_sleep();
     printf("Ordinary BLE live UI: %u checks passed; active updates, frozen painted selection, scoped cleanup and C5 independence\n",live_checks);
     return 0;
 }

@@ -2,6 +2,11 @@
 
 ## Current local checkpoint
 
+[Rev114](DUAL_RADIO_REV114.md) is the local dedicated Find My Monitor candidate.
+It reuses the shared discovery owners, retains separate S3/C5 evidence and
+keeps Stop/Back/sleep and saved-result navigation on the existing release paths.
+It has not replaced the installed rev113 baseline; physical acceptance is pending.
+
 [Rev113](DUAL_RADIO_REV113.md) adds compact C5 response-result transfer with
 full-format fallback for older peers. The matched update is installed with
 verified writes, paired boot and mounted SD; physical feature and performance

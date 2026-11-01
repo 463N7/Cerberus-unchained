@@ -6,7 +6,9 @@
 #define cerberus_s3_ble_scanner_get_status fixture_base_get_status
 #define cerberus_s3_ble_scanner_stop fixture_base_stop
 #define draw_detail_page fixture_base_draw_detail_page
+#define CERBERUS_FINDMY_MONITOR_DEFER_IMPLEMENTATION 1
 #include "s3_findmy_monitor_ui_check.c"
+#undef CERBERUS_FINDMY_MONITOR_DEFER_IMPLEMENTATION
 #undef draw_detail_page
 #undef cerberus_s3_ble_scanner_get_status
 #undef cerberus_s3_ble_scanner_stop
@@ -171,6 +173,13 @@ static esp_err_t ble_fox_hunt_barrier_error;
 static uint32_t ble_fox_hunt_start_requested_ms;
 static cerberus_c5_ble_result_t ble_fox_hunt_target;
 static bool companion_released=true;
+static bool ble_findmy_monitor_requested(void);
+static bool ble_findmy_monitor_available(void);
+static void ble_findmy_monitor_open(void);
+static void ble_findmy_monitor_return(void);
+static void ble_findmy_request_stop(bool exit,bool select);
+static void ble_findmy_monitor_tap(uint16_t x,uint16_t y);
+static void ble_select_frozen_live(const cerberus_findmy_monitor_record_t *record);
 static cerberus_dual_ble_scan_t companion_store;
 static unsigned companion_syncs,companion_retries,companion_exchanges;
 static int companion_requested_mode;
@@ -179,6 +188,7 @@ static uint64_t companion_sync_clock;
 #include "discovery_companion_impl.h"
 static void dual_ble_ui_retry(void){++companion_retries;}
 static bool dual_ble_ui_released(void){return companion_released;}
+static void dual_ble_ui_cancel(void){companion_requested_mode=dual_ble_ui_mode=-1;}
 static void dual_ble_ui_sync(int mode,const uint8_t *address,uint8_t type,uint64_t now)
 {assert(mode>=-1&&mode<=CERBERUS_DUAL_BLE_ANALYZER);companion_requested_mode=dual_ble_ui_mode=mode;companion_sync_clock=now;++companion_syncs;
  if(mode==CERBERUS_DUAL_BLE_TRACK){assert(address);memcpy(dual_ble_ui_target,address,6);dual_ble_ui_type=type;}
@@ -302,6 +312,9 @@ static bool ble_discovery_unified(void){return false;}
 static uint8_t ble_discovery_combined_order(void){assert(!"unified order in legacy fixture");return 0;}
 static bool ble_discovery_build_unified_row(unsigned row,size_t position,uint64_t now)
 {(void)row;(void)position;(void)now;assert(!"unified row in legacy fixture");return false;}
+static esp_err_t ble_discovery_monitor_start(void){return ESP_ERR_NO_MEM;}
+static bool ble_discovery_monitor_freeze_selection(unsigned row){(void)row;return false;}
+static bool ble_discovery_monitor_apply_selection(void){return false;}
 #endif
 static bool dual_ble_live_enabled(void)
 {return ble_discovery_live&&ble_discovery_live->session.enabled;}
@@ -312,20 +325,25 @@ static const char *view_error_name(esp_err_t error)
 #define esp_err_to_name view_error_name
 #include "ble_analyzer_dual_ui.h"
 #include "discovery_routes_impl.h"
+#include "findmy_monitor_ui_impl.h"
 #undef esp_err_to_name
 
 static void seed_list(void)
 {
     (void)dual_ble_live_tick;
+    (void)dual_ble_ui_cancel;
+    (void)draw_ble_findmy_monitor;
     ble_analyzer_s3_details=true;analyzer_wifi_busy=false;
     (void)draw_live_scan; /* Also compiled for the separate ordinary-live entry fixture. */
     (void)actual_c5_footer_tap;(void)actual_c5_footer_draw;
     (void)dual_ble_ui_select_frozen;
     memset(&companion_store,0,sizeof(companion_store));dual_ble_ui_store=&companion_store;
     companion_syncs=companion_retries=companion_exchanges=archive_save_calls=0;
-    companion_released=true;dual_ble_ui_detail=dual_ble_ui_receive_info=dual_ble_ui_from_unified=false;
+    companion_released=true;dual_ble_ui_detail=dual_ble_ui_receive_info=dual_ble_ui_from_unified=dual_ble_ui_from_monitor=false;
     dual_ble_ui_error=ESP_OK;dual_ble_ui_response_requests=dual_ble_ui_response_mode=dual_ble_ui_response_tab=false;
     reset();memset(observations,0,sizeof(observations));memset(&store,0,sizeof(store));
+    ble_findmy_running=ble_findmy_stopping=ble_findmy_exit_pending=ble_findmy_select_pending=false;
+    ble_findmy_available=ble_findmy_paint_valid=ble_findmy_legacy_pending=false;
     memset(live_records,0,sizeof(live_records));memset(live_ble_focus_bits,0,sizeof(live_ble_focus_bits));
     memset(live_page,0,sizeof(live_page));sentinel_scan_session_init(&session);
     session.completed=true;session.desired=SENTINEL_SCAN_BLE;ble_mode=UI_BLE_MODE_LIST;
@@ -1686,7 +1704,7 @@ int main(int argc,char **argv)
     assert(strstr(drawn,"ADV 3082 / RSP 3083 / HINTS"));
     cerberus_findmy_monitor_record_t expected=observations[2];
     ++observations[2].generation;handle_ble_tap(20,200);assert(ble_mode==UI_BLE_MODE_LIST);observations[2]=expected;
-    handle_ble_tap(20,200);assert(ble_mode==UI_BLE_MODE_FINDMY_MONITOR&&ble_findmy_stopping);
+    handle_ble_tap(20,200);assert(ble_mode==UI_BLE_MODE_DETAIL&&!ble_findmy_stopping);
     tick(8200);assert(ble_mode==UI_BLE_MODE_DETAIL&&ble_selected_raw_frozen&&ble_selected_scan_index==2);
     assert(!memcmp(&ble_findmy_selected,&expected,sizeof(expected)));
     assert(ble_selected_sound_profile==CERBERUS_FINDMY_PROFILE_NONE);

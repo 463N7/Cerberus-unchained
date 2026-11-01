@@ -39,7 +39,7 @@ def scoped(text):
         body = end
         while body < len(text) and text[body].isspace(): body += 1
         if body == len(text) or text[body] != '{': continue
-        page = re.match(r'current_page == (UI_PAGE_\w+)', condition)
+        page = re.match(r'(?:!ui_capability_blocked && )?current_page == (UI_PAGE_\w+)', condition)
         mode = re.match(r'(?:current_page == UI_PAGE_WIFI && )?wifi_mode == (UI_WIFI_MODE_\w+)', condition)
         unrelated = bool(page and page[1] != 'UI_PAGE_WIFI')
         unrelated |= bool(mode and mode[1] not in ('UI_WIFI_MODE_TARGET','UI_WIFI_MODE_OBSERVED_CLIENTS','UI_WIFI_MODE_LIST'))

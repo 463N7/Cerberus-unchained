@@ -1,8 +1,14 @@
 #define main inherited_monitor_suite
 #define cerberus_display_fill_rect companion_original_fill_rect
+#define CERBERUS_FINDMY_MONITOR_DEFER_IMPLEMENTATION
 #include "s3_findmy_monitor_ui_check.c"
+#undef CERBERUS_FINDMY_MONITOR_DEFER_IMPLEMENTATION
 #undef cerberus_display_fill_rect
 #undef main
+/* The inherited scaffold supplies display/evidence helpers only. Actual
+   monitor ownership and Fox navigation run in the shared discovery fixture. */
+static void ble_findmy_monitor_tick(uint32_t now,bool asleep)
+{ (void)now;(void)asleep;assert(!"unexpected monitor-owner call in companion fixture"); }
 static unsigned companion_fail_fill_after;
 static bool companion_fail_final_control;
 esp_err_t cerberus_display_fill_rect(uint16_t x,uint16_t y,uint16_t w,uint16_t h,uint16_t color)
@@ -819,6 +825,108 @@ static void check_response_details(const char *prefix)
     assert(companion_exchanges==exchanges&&starts==radio_starts&&stops==radio_stops&&companion_allocations==allocations);
 }
 
+static void check_monitor_frozen_origin(const char *prefix)
+{
+    const uint8_t findmy[]={3,3,0x44,0xfd};
+    cerberus_dual_ble_row_t row;
+    const cerberus_dual_ble_provenance_t proof={.boot_id=UINT64_C(0x123456789),
+        .epoch=UINT64_C(0x987654321),.generation=0,.index=31};
+    clock_ms=60000;
+    fixture_response_row(&row,findmy,sizeof(findmy),2,(uint64_t)clock_ms);
+    strcpy(row.name,"Frozen Find My observation");row.address_type=2;
+    assert(cerberus_dual_ble_response_present(&row,&proof));
+    unsigned exchanges=companion_exchanges,radio_starts=starts,radio_stops=stops;
+    unsigned allocations=companion_allocations;
+    cerberus_c5_ble_result_t s3_before=ble_selected_result;
+    dual_ble_ui_response_requests=true;
+    dual_ble_ui_select_frozen_from(&row,&proof,true);
+    assert(dual_ble_ui_from_monitor&&dual_ble_ui_from_unified&&dual_ble_ui_detail);
+    paint_list();
+    assert(strstr(drawn,"BACK TO MONITOR")&&!strstr(drawn,"START BOTH RECEIVERS"));
+    assert(dual_ble_ui_tap(20,65)==DUAL_BLE_UI_BACK_MONITOR);
+    assert(dual_ble_ui_tap(20,330)==DUAL_BLE_UI_BACK_MONITOR);
+    assert(dual_ble_ui_tap(160,390)==DUAL_BLE_UI_BACK_MONITOR);
+    assert(dual_ble_ui_tap(200,330)==DUAL_BLE_UI_FOX);
+    cerberus_c5_ble_result_t target;assert(dual_ble_ui_selected_peer(&target));
+    assert(target.address_type==2&&!memcmp(target.address,row.address,6));
+    assert(!target.flags&&!target.uuid_length);
+    /* A new publication, same address with another type, and a new clock
+       cannot replace either selected packet or its full source proof. */
+    dual_ble_ui_store->rows[0]=row;dual_ble_ui_store->rows[0].address_type=1;
+    memset(&dual_ble_ui_store->rows[0].response,0,sizeof(row.response));
+    dual_ble_ui_store->published_epoch=3;dual_ble_ui_store->published_boot_id=4;
+    dual_ble_ui_store->published_generation=1;clock_ms+=500;
+    assert(dual_ble_ui_tap(200,185)==DUAL_BLE_UI_REDRAW);
+    assert(dual_ble_ui_tap(250,210)==DUAL_BLE_UI_REDRAW);paint_list();
+    assert(strstr(drawn,"C5 MATCHED RESPONSE")&&strstr(drawn,"FIND MY"));
+    assert(!memcmp(&row,&dual_ble_ui_selected,sizeof(row)));
+    assert(!memcmp(&proof,&dual_ble_ui_selected_provenance,sizeof(proof)));
+    assert(dual_ble_ui_selected_peer(&target)&&target.address_type==2);
+    save(prefix,"monitor-frozen-response");
+    companion_fail_final_control=true;assert(dual_ble_ui_draw(false)==ESP_FAIL);
+    assert(!dual_ble_ui_painted_count&&!dual_ble_ui_hint_pages);
+    assert(dual_ble_ui_tap(20,65)==DUAL_BLE_UI_BACK_MONITOR); /* Recovery stays available. */
+    assert(!memcmp(&s3_before,&ble_selected_result,sizeof(s3_before)));
+    assert(companion_exchanges==exchanges&&starts==radio_starts&&stops==radio_stops&&
+        companion_allocations==allocations&&dual_ble_ui_response_requests);
+    /* Ordinary list and companion entry explicitly establish their own
+       return destination; they cannot inherit a prior monitor selection. */
+    dual_ble_ui_select_frozen(&row,&proof);
+    assert(!dual_ble_ui_from_monitor&&dual_ble_ui_tap(20,65)==DUAL_BLE_UI_BACK_S3);
+    dual_ble_ui_select_frozen_from(&row,&proof,true);dual_ble_ui_open(false);
+    assert(!dual_ble_ui_from_monitor&&!dual_ble_ui_from_unified);
+    dual_ble_ui_response_requests=false;
+}
+
+static void check_monitor_pending_cancel(void)
+{
+    assert(!dual_ble_ui_store);dual_ble_ui_mode=-1;dual_ble_ui_family=0;
+    dual_ble_ui_attempted=dual_ble_ui_response_mode=false;
+    dual_ble_ui_response_requests=true;
+    family_peer_enabled=family_peer_supported=family_peer_response_supported=true;
+    family_peer_attached=family_peer_owned=family_peer_hold_stop=false;
+    family_peer_starts=family_peer_releases=family_peer_stop_requests=family_peer_lost_release=0;
+    family_peer_next_job=1;
+    unsigned calls=companion_exchanges;
+    family_tick(2,70000); /* Queued INFO has not claimed or started a C5 job. */
+    assert(dual_ble_ui_store&&dual_ble_ui_store->enabled&&dual_ble_ui_released()&&!family_peer_starts);
+    assert(companion_exchanges==calls);
+    clock_ms=70001;dual_ble_ui_cancel();
+    assert(dual_ble_ui_released()&&!family_peer_attached&&!family_peer_stop_requests);
+    assert(companion_exchanges==calls&&dual_ble_ui_mode==-1&&dual_ble_ui_family==0&&
+        !dual_ble_ui_attempted&&!dual_ble_ui_response_mode);
+    for(uint64_t now=70250;now<84000;now+=250){
+        clock_ms=(int64_t)now;dual_ble_ui_sync(-1,NULL,0,now);
+    }
+    assert(!family_peer_starts&&companion_exchanges==calls&&dual_ble_ui_response_requests);
+    /* Explicit restart keeps the preference and family binding. Held Stop
+       retains ownership beyond the UI deadline; release never auto-rearms. */
+    family_tick(2,84000);family_tick(2,84001);
+    assert(family_peer_starts==1&&family_peer_start.mode==CERBERUS_DUAL_BLE_RESPONSE_FAMILY&&
+        family_peer_start.reserved==2);
+    family_peer_hold_stop=true;
+    calls=companion_exchanges;dual_ble_ui_cancel();
+    assert(companion_exchanges==calls&&!family_peer_stop_requests&&family_peer_attached&&
+        dual_ble_ui_response_requests); /* Intent cancellation does no transport. */
+    for(uint64_t now=84250;now<98000;now+=250){
+        clock_ms=(int64_t)now;dual_ble_ui_sync(-1,NULL,0,now);
+        unsigned exchanges=companion_exchanges;
+        uint64_t retry_at=dual_ble_ui_store->next_poll_ms;
+        dual_ble_ui_cancel();dual_ble_ui_cancel();
+        assert(companion_exchanges==exchanges&&dual_ble_ui_store->next_poll_ms==retry_at);
+    }
+    assert(!dual_ble_ui_released()&&family_peer_attached&&family_peer_starts==1);
+    family_peer_hold_stop=false;
+    for(uint64_t now=98000;now<101000&&!dual_ble_ui_released();now+=250){
+        clock_ms=(int64_t)now;dual_ble_ui_sync(-1,NULL,0,now);
+    }
+    assert(dual_ble_ui_released()&&!family_peer_attached&&family_peer_starts==1&&family_peer_releases==1);
+    calls=companion_exchanges;clock_ms=102000;dual_ble_ui_sync(-1,NULL,0,102000);
+    assert(companion_exchanges==calls&&family_peer_starts==1&&dual_ble_ui_response_requests);
+    family_peer_enabled=false;heap_caps_free(dual_ble_ui_store);dual_ble_ui_store=NULL;
+    dual_ble_ui_response_requests=dual_ble_ui_response_mode=false;
+}
+
 static void check_response_mode_lifecycle(const char *prefix)
 {
     assert(!dual_ble_ui_store);dual_ble_ui_mode=-1;dual_ble_ui_family=0;
@@ -858,6 +966,7 @@ static void check_response_mode_lifecycle(const char *prefix)
 
 int main(int argc,char **argv)
 {
+    (void)esp_err_to_name; /* Shared monitor scaffold; companion formats numeric errors. */
     check_list_order();
     assert(argc==2);clock_ms=100;dual_ble_ui_sync(-1,NULL,0,100);
     assert(!dual_ble_ui_store&&dual_ble_ui_released());
@@ -909,9 +1018,11 @@ int main(int argc,char **argv)
     check_family_hints(argv[1]);
     check_full_original_hints(argv[1]);
     check_response_details(argv[1]);
+    check_monitor_frozen_origin(argv[1]);
     heap_caps_free(dual_ble_ui_store);dual_ble_ui_store=NULL;
     check_focused_lifecycle(argv[1]);
     check_response_mode_lifecycle(argv[1]);
+    check_monitor_pending_cancel();
     puts("Dual BLE UI: frozen typed rows, raw/receive/hints tabs, all family evidence, separate Fox receivers and ages, per-job rollover, independent source errors, pending isolation and cached rendering without RF/allocation passed");
     return 0;
 }

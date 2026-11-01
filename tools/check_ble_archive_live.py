@@ -36,6 +36,10 @@ def block(needle):
     block('if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5) {') +
     '\nreturn ESP_OK;\n}\nstatic void archive_root_footer_tap(uint16_t x,uint16_t y) {\n' +
     block('if (!ui_capability_blocked && current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5 &&') +
+    '\n}\nstatic esp_err_t archive_monitor_footer_draw(void) {\nconst char *back_label="BLE LIST";\n' +
+    block('if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FINDMY_MONITOR) {\n        ESP_RETURN_ON_ERROR(draw_button') +
+    '\nreturn ESP_OK;\n}\nstatic void archive_monitor_footer_tap(uint16_t x,uint16_t y) {\n' +
+    block('if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FINDMY_MONITOR) {\n                if (x >= 164U') +
     '\n}\n', encoding='utf-8')
 exe = out / ('ble-archive-live-check.exe' if os.name == 'nt' else 'ble-archive-live-check')
 env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(out / 'zig-global'), ZIG_LOCAL_CACHE_DIR=str(out / 'zig-local'))

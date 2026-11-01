@@ -1,4 +1,4 @@
-/* Private ordinary-list integration. UI task owns this on-demand PSRAM store;
+/* Private shared-discovery integration. UI task owns this on-demand PSRAM store;
  * producer callbacks only touch the separately locked scanner snapshot. */
 #include "s3_ble_discovery_inventory.h"
 #include "s3_ble_discovery_session.h"
@@ -33,16 +33,16 @@ typedef struct {
     uint8_t painted_source[4], built_count;
     uint64_t order_s3_epoch, order_s3_revision, order_c5_boot, order_c5_epoch;
     uint32_t order_c5_snapshots, order_s3_mask, order_c5_mask;
-    uint32_t c5_classifiable, c5_oui_only;
+    uint32_t c5_classifiable, c5_oui_only, monitor_s3_valid;
     uint8_t c5_family_bits[CERBERUS_DUAL_BLE_CAPACITY];
     uint8_t c5_response_bits[CERBERUS_DUAL_BLE_CAPACITY];
-    bool c5_family_cache_valid;
+    bool c5_family_cache_valid, monitor_s3_cache_valid;
     uint8_t order_s3_count, order_c5_count, order_count, order_sort, order_source, order_family;
     bool order_valid;
     live_scan_record_t presentation;
     uint64_t last_draw_ms;
     uint16_t binding_overflows, producer_replacements;
-    uint8_t painted_count;
+    uint8_t painted_count, selected_source;
     uint8_t destination; /* 1: tools, 2: Find My monitor, after release only. */
     bool selection_pending, visible, dirty;
 } ble_discovery_live_store_t;
@@ -52,10 +52,22 @@ static esp_err_t ble_discovery_open_error;
 static void live_make_view(void);
 static esp_err_t live_paint(bool full);
 
+static bool ble_discovery_monitor_page(void)
+{
+    return !ui_capability_blocked && current_page == UI_PAGE_BLE &&
+        ble_mode == UI_BLE_MODE_FINDMY_MONITOR && !ble_attack_selecting;
+}
+
+static cerberus_s3_ble_filter_t ble_discovery_family(void)
+{
+    return ble_discovery_monitor_page() ? CERBERUS_S3_BLE_FILTER_FIND_MY : ble_filter;
+}
+
 static bool ble_discovery_page(void)
 {
     return !ui_capability_blocked && current_page == UI_PAGE_BLE &&
-        (ble_mode == UI_BLE_MODE_LIST || ble_mode == UI_BLE_MODE_C5) && !ble_attack_selecting;
+        (ble_mode == UI_BLE_MODE_LIST || ble_mode == UI_BLE_MODE_C5 ||
+         ble_mode == UI_BLE_MODE_FINDMY_MONITOR) && !ble_attack_selecting;
 }
 
 static bool ble_discovery_presenting(void)
@@ -199,8 +211,8 @@ static bool ble_discovery_acquire(void)
         return false;
     }
     ble_discovery_open_error = ESP_OK;
-    cerberus_ble_discovery_session_init(&ble_discovery_live->session, (uint8_t)ble_filter);
-    (void)cerberus_s3_ble_discovery_inventory_init(&ble_discovery_live->inventory, ble_filter);
+    cerberus_ble_discovery_session_init(&ble_discovery_live->session, (uint8_t)ble_discovery_family());
+    (void)cerberus_s3_ble_discovery_inventory_init(&ble_discovery_live->inventory, ble_discovery_family());
     ble_discovery_live->ops = (cerberus_ble_discovery_ops_t){
         .context = ble_discovery_live, .start = ble_discovery_start,
         .poll = ble_discovery_poll, .copy = ble_discovery_copy,
@@ -208,7 +220,70 @@ static bool ble_discovery_acquire(void)
     ble_discovery_live->presentation.valid = true;
     /* Entering Scan is an explicit discovery request; later Back/Stop does not
      * silently rearm the retained list. Family changes preserve that intent. */
-    (void)cerberus_ble_discovery_session_start(&ble_discovery_live->session);
+    if (!ble_discovery_monitor_page())
+        (void)cerberus_ble_discovery_session_start(&ble_discovery_live->session);
+    return true;
+}
+
+/* Monitor intent is controlled separately by its page. Allocation and return
+ * to retained results must never implicitly arm either receiver. */
+static esp_err_t ble_discovery_monitor_start(void)
+{
+    if (!ble_discovery_monitor_page()) return ESP_ERR_INVALID_STATE;
+    ble_discovery_open_error = ESP_OK;
+    if (!ble_discovery_acquire()) return ble_discovery_open_error;
+    ble_discovery_live_store_t *store = ble_discovery_live;
+    store->selection_pending = false;
+    store->selected_source = store->destination = store->painted_count = 0U;
+    (void)cerberus_ble_discovery_session_select(&store->session, CERBERUS_S3_BLE_FILTER_FIND_MY);
+    (void)cerberus_ble_discovery_session_start(&store->session);
+    store->dirty = true;
+    return ESP_OK;
+}
+
+/* Freeze the last successfully painted proof before requesting owner release.
+ * Existing selected slots stay independent of subsequent bank replacement. */
+static bool ble_discovery_monitor_freeze_selection(unsigned row)
+{
+    ble_discovery_live_store_t *store = ble_discovery_live;
+    if (!ble_discovery_monitor_page() || !store || row >= store->painted_count || row >= 4U)
+        return false;
+    uint8_t source = store->painted_source[row];
+    if (source == CERBERUS_BLE_DISCOVERY_LIST_S3)
+        store->selected = store->painted[row];
+    else if (source == CERBERUS_BLE_DISCOVERY_LIST_C5)
+        dual_ble_ui_select_frozen_from(&store->painted_c5[row], &store->painted_c5_provenance[row], true);
+    else return false;
+    store->selected_source = source;
+    store->painted_count = 0U;
+    store->selection_pending = false;
+    store->destination = 0U;
+    cerberus_ble_discovery_session_stop(&store->session);
+    return true;
+}
+
+static bool ble_discovery_monitor_apply_selection(void)
+{
+    ble_discovery_live_store_t *store = ble_discovery_live;
+    if (!ble_discovery_monitor_page() || !store ||
+        !cerberus_ble_discovery_session_released(&store->session) || !dual_ble_ui_released())
+        return false;
+    if (store->selected_source == CERBERUS_BLE_DISCOVERY_LIST_C5) {
+        ble_mode = UI_BLE_MODE_C5;
+    } else if (store->selected_source == CERBERUS_BLE_DISCOVERY_LIST_S3) {
+        const cerberus_s3_ble_discovery_record_t *proof = &store->selected.record;
+        cerberus_findmy_monitor_record_t frozen = {
+            .peer = proof->peer, .advertisement = proof->advertisement,
+            .focus = proof->focus, .generation = proof->generation,
+            .index = proof->index, .observed_ms = proof->observed_ms};
+        ble_select_frozen_live(&frozen);
+        ble_selected_from_monitor = true;
+        ble_selected_original_time64_valid = true;
+        ble_selected_scan_epoch = store->selected.epoch;
+        ble_selected_original_ms64 = store->selected.original_source_ms;
+        ble_selected_source_ceiling_ms64 = store->selected.source_now_ms;
+    } else return false;
+    store->selected_source = 0U;
     return true;
 }
 
@@ -259,12 +334,14 @@ static void ble_discovery_tick(uint64_t now_ms, bool asleep)
         store->selection_pending = false;
         store->destination = 0U;
         cerberus_ble_discovery_session_stop(&store->session);
-    } else if (store->session.requested_family != (uint8_t)ble_filter) {
+    } else if (store->session.requested_family != (uint8_t)ble_discovery_family()) {
         store->selection_pending = false;
         store->destination = 0U;
-        (void)cerberus_ble_discovery_session_select(&store->session, (uint8_t)ble_filter);
+        (void)cerberus_ble_discovery_session_select(&store->session, (uint8_t)ble_discovery_family());
         store->dirty = true;
     }
+    if (ble_discovery_monitor_page() && !ble_findmy_monitor_requested())
+        cerberus_ble_discovery_session_stop(&store->session);
     store->visible = visible;
     /* First drain any legacy Watch sweep. Local discovery does not require a
      * successful C5 poll, and it never adopts a generic scanner's claim. */
@@ -308,8 +385,31 @@ static void ble_discovery_tick(uint64_t now_ms, bool asleep)
     }
 }
 
+/* The monitor horizon follows the actual hint's full source clock. It never
+ * reinterprets a fresh copy time, a 32-bit wrap, or an old category as a hint. */
+static bool ble_discovery_monitor_hint_recent(
+    const cerberus_s3_ble_discovery_entry_t *entry, uint64_t now_ms)
+{
+    if (!entry || !entry->epoch || now_ms < entry->source_now_ms ||
+        entry->source_now_ms < entry->original_source_ms ||
+        entry->source_now_ms - entry->original_source_ms > INT32_MAX) return false;
+    const cerberus_s3_ble_discovery_evidence_t *hints = &entry->record.focus.discovery;
+    const uint32_t observed[2] = {hints->advertisement_observed_ms, hints->scan_response_observed_ms};
+    const uint8_t bits[2] = {hints->findmy_advertisement.bits, hints->findmy_scan_response.bits};
+    for (unsigned i = 0U; i < 2U; ++i) {
+        if (!bits[i]) continue;
+        uint32_t delta = (uint32_t)entry->source_now_ms - observed[i];
+        if (entry->source_now_ms < delta) continue;
+        uint64_t hint_ms = entry->source_now_ms - delta;
+        if (hint_ms >= entry->original_source_ms && hint_ms <= now_ms &&
+            now_ms - hint_ms < CERBERUS_FINDMY_MONITOR_EXPIRE_MS) return true;
+    }
+    return false;
+}
+
 static uint32_t ble_discovery_visible_mask(uint64_t now_ms)
 {
+    const cerberus_s3_ble_filter_t family = ble_discovery_family();
     if (!ble_discovery_live) return 0U;
     uint32_t mask = 0U;
     const cerberus_s3_ble_discovery_inventory_t *inventory = &ble_discovery_live->inventory;
@@ -317,9 +417,12 @@ static uint32_t ble_discovery_visible_mask(uint64_t now_ms)
         const cerberus_s3_ble_discovery_entry_t *entry = &inventory->entries[i];
         uint8_t ignored;
         if (!cerberus_s3_ble_focus_page(&entry->record.focus.category_bits, 1U,
-                ble_filter, 0U, &ignored, 1U)) continue;
-        if (live_ble_recent_only && cerberus_s3_ble_recent_supported(ble_filter) &&
-            !cerberus_s3_ble_discovery_entry_recent(entry, ble_filter, now_ms)) continue;
+                family, 0U, &ignored, 1U)) continue;
+        if (ble_discovery_monitor_page() &&
+            (!(ble_discovery_live->monitor_s3_valid & (UINT32_C(1) << i)) ||
+             !ble_discovery_monitor_hint_recent(entry, now_ms))) continue;
+        if (!ble_discovery_monitor_page() && live_ble_recent_only && cerberus_s3_ble_recent_supported(family) &&
+            !cerberus_s3_ble_discovery_entry_recent(entry, family, now_ms)) continue;
         mask |= UINT32_C(1) << i;
     }
     return mask;
@@ -327,20 +430,40 @@ static uint32_t ble_discovery_visible_mask(uint64_t now_ms)
 
 static uint8_t ble_discovery_combined_order(void)
 {
+    const cerberus_s3_ble_filter_t family = ble_discovery_family();
     ble_discovery_live_store_t *store = ble_discovery_live;
+    if (!store) return 0U;
     const cerberus_s3_ble_discovery_inventory_t *s3 =
-        store->inventory.family == ble_filter ? &store->inventory : NULL;
+        store->inventory.family == family ? &store->inventory : NULL;
     const cerberus_dual_ble_scan_t *c5 = dual_ble_ui_store;
     uint64_t epoch = s3 ? s3->epoch : 0U, revision = s3 ? s3->revision : 0U;
     uint64_t boot = c5 ? c5->published_boot_id : 0U, c5_epoch = c5 ? c5->published_epoch : 0U;
     uint32_t snapshots = c5 ? c5->snapshots : 0U;
     uint8_t s3_count = s3 ? s3->count : 0U;
     uint8_t c5_count = c5 && c5->count <= CERBERUS_DUAL_BLE_CAPACITY ? c5->count : 0U;
+    if (!ble_discovery_monitor_page()) store->monitor_s3_cache_valid = false;
+    else if (!store->monitor_s3_cache_valid || !store->order_valid || revision == UINT64_MAX ||
+        store->order_s3_epoch != epoch || store->order_s3_revision != revision ||
+        store->order_s3_count != s3_count) {
+        store->monitor_s3_valid = 0U;
+        for (uint8_t i = 0U; i < s3_count; ++i) {
+            const cerberus_s3_ble_discovery_entry_t *entry = &s3->entries[i];
+            const cerberus_s3_ble_discovery_record_t *record = &entry->record;
+            if (entry->epoch && (uint32_t)entry->original_source_ms == record->observed_ms &&
+                entry->source_now_ms >= entry->original_source_ms &&
+                entry->source_now_ms - entry->original_source_ms <= INT32_MAX &&
+                cerberus_findmy_monitor_evidence_valid(&record->peer, &record->advertisement,
+                    &record->focus, record->generation, record->observed_ms,
+                    (uint32_t)entry->source_now_ms))
+                store->monitor_s3_valid |= UINT32_C(1) << i;
+        }
+        store->monitor_s3_cache_valid = true;
+    }
     bool c5_changed = !store->order_valid || snapshots == UINT32_MAX ||
         store->order_c5_boot != boot || store->order_c5_epoch != c5_epoch ||
         store->order_c5_snapshots != snapshots || store->order_c5_count != c5_count;
     if (c5_changed) store->c5_family_cache_valid = false;
-    if (ble_filter != CERBERUS_S3_BLE_FILTER_ALL && !store->c5_family_cache_valid) {
+    if (family != CERBERUS_S3_BLE_FILTER_ALL && !store->c5_family_cache_valid) {
         store->c5_classifiable = store->c5_oui_only = 0U;
         memset(store->c5_family_bits, 0, sizeof(store->c5_family_bits));
         memset(store->c5_response_bits, 0, sizeof(store->c5_response_bits));
@@ -363,11 +486,11 @@ static uint8_t ble_discovery_combined_order(void)
     }
     const uint64_t now_ms = (uint64_t)(esp_timer_get_time() / 1000LL);
     uint32_t s3_mask = s3 ? ble_discovery_visible_mask(now_ms) : 0U, c5_mask = 0U;
-    uint8_t wanted = ble_filter == CERBERUS_S3_BLE_FILTER_ALL ? 0U :
-        (uint8_t)(1U << ((unsigned)ble_filter - 1U));
+    uint8_t wanted = family == CERBERUS_S3_BLE_FILTER_ALL ? 0U :
+        (uint8_t)(1U << ((unsigned)family - 1U));
     for (uint8_t i = 0U; i < c5_count; ++i) {
         if (wanted && !((store->c5_family_bits[i] | store->c5_response_bits[i]) & wanted)) continue;
-        if (live_ble_recent_only && cerberus_s3_ble_recent_supported(ble_filter)) {
+        if (!ble_discovery_monitor_page() && live_ble_recent_only && cerberus_s3_ble_recent_supported(family)) {
             uint32_t upper;
             bool recent_adv = (!wanted || (store->c5_family_bits[i] & wanted)) &&
                 cerberus_dual_ble_list_age(&c5->rows[i], now_ms, &upper) && upper <= CERBERUS_DUAL_BLE_RECENT_MS;
@@ -383,7 +506,7 @@ static uint8_t ble_discovery_combined_order(void)
     if (!store->order_valid || c5_changed || revision == UINT64_MAX ||
         store->order_s3_epoch != epoch || store->order_s3_revision != revision ||
         store->order_s3_count != s3_count || store->order_sort != (uint8_t)live_ble_sort ||
-        store->order_source != (uint8_t)store->source_filter || store->order_family != (uint8_t)ble_filter ||
+        store->order_source != (uint8_t)store->source_filter || store->order_family != (uint8_t)family ||
         store->order_s3_mask != s3_mask || store->order_c5_mask != c5_mask) {
         store->order_count = cerberus_ble_discovery_list_order_masked(s3, c5 ? c5->rows : NULL, c5_count,
             store->source_filter,
@@ -395,7 +518,7 @@ static uint8_t ble_discovery_combined_order(void)
         store->order_c5_snapshots = snapshots;
         store->order_s3_count = s3_count; store->order_c5_count = c5_count;
         store->order_sort = (uint8_t)live_ble_sort; store->order_source = (uint8_t)store->source_filter;
-        store->order_family = (uint8_t)ble_filter;
+        store->order_family = (uint8_t)family;
         store->order_s3_mask = s3_mask; store->order_c5_mask = c5_mask;
         store->order_valid = true;
     }
@@ -407,22 +530,23 @@ static uint8_t ble_discovery_combined_order(void)
 static void ble_discovery_s3_family_badge(unsigned row,
     const cerberus_s3_ble_discovery_entry_t *entry, uint64_t now_ms)
 {
+    const cerberus_s3_ble_filter_t family = ble_discovery_family();
     const cerberus_s3_ble_focus_t *focus = &entry->record.focus;
     const cerberus_s3_ble_discovery_evidence_t *hints = &focus->discovery;
     char *out = live_badges[row]; size_t capacity = sizeof(live_badges[row]);
-    if (ble_filter == CERBERUS_S3_BLE_FILTER_FIND_MY)
+    if (family == CERBERUS_S3_BLE_FILTER_FIND_MY)
         cerberus_findmy_hint_sources_line(&hints->findmy_advertisement, &hints->findmy_scan_response, out, capacity);
-    else if (ble_filter == CERBERUS_S3_BLE_FILTER_FLIPPER)
+    else if (family == CERBERUS_S3_BLE_FILTER_FLIPPER)
         cerberus_flipper_hint_sources_line(&hints->flipper_advertisement, &hints->flipper_scan_response, out, capacity);
-    else if (ble_filter == CERBERUS_S3_BLE_FILTER_META_HINT)
+    else if (family == CERBERUS_S3_BLE_FILTER_META_HINT)
         cerberus_meta_hint_sources_line(&hints->meta_advertisement, &hints->meta_scan_response, out, capacity);
-    else if (ble_filter == CERBERUS_S3_BLE_FILTER_IBEACON) {
+    else if (family == CERBERUS_S3_BLE_FILTER_IBEACON) {
         cerberus_ibeacon_source_line(focus->ibeacon_scan_response, cerberus_s3_ble_ibeacon_is_current(focus),
             (uint32_t)now_ms - focus->ibeacon_observed_ms, true, out, capacity);
         ble_hint_age64_line(out, capacity, focus->ibeacon_observed_ms, entry->source_now_ms, (int64_t)now_ms);
-    } else if (ble_filter == CERBERUS_S3_BLE_FILTER_FLOCK)
+    } else if (family == CERBERUS_S3_BLE_FILTER_FLOCK)
         cerberus_flock_sources_line(&hints->flock_advertisement, &hints->flock_scan_response, focus->flock_oui_clue, out, capacity);
-    else if (ble_filter == CERBERUS_S3_BLE_FILTER_HC_NAME_HINT)
+    else if (family == CERBERUS_S3_BLE_FILTER_HC_NAME_HINT)
         cerberus_hc_sources_line(hints->hc_advertisement, hints->hc_scan_response, out, capacity);
 }
 
@@ -430,8 +554,10 @@ static void ble_discovery_s3_family_badge(unsigned row,
  * inventory update cannot change the row authorized by a successful paint. */
 static bool ble_discovery_build_unified_row(unsigned row, size_t position, uint64_t now_ms)
 {
+    const cerberus_s3_ble_filter_t family = ble_discovery_family();
     ble_discovery_live_store_t *store = ble_discovery_live;
-    if (!store || row >= 4U || position >= CERBERUS_BLE_DISCOVERY_LIST_CAPACITY) return false;
+    if (!store || row >= 4U || position >= store->order_count ||
+        position >= CERBERUS_BLE_DISCOVERY_LIST_CAPACITY) return false;
     const cerberus_ble_discovery_list_ref_t ref = store->order[position];
     sentinel_scan_row_t *out = &live_view.rows[row];
     char identifier[24];
@@ -453,7 +579,7 @@ static bool ble_discovery_build_unified_row(unsigned row, size_t position, uint6
             snprintf(live_badges[row], sizeof(live_badges[row]), "S3 PEAK / ADV %llus",
                 (unsigned long long)(age / 1000U));
         else snprintf(live_badges[row], sizeof(live_badges[row]), "S3 PEAK / ADV AGE UNKNOWN");
-        if (ble_filter != CERBERUS_S3_BLE_FILTER_ALL) {
+        if (family != CERBERUS_S3_BLE_FILTER_ALL) {
             snprintf(live_details[row], sizeof(live_details[row]), "S3 PEAK %s T%u%s",
                 identifier, peer->address_type, earlier ? " OLD" : "");
             ble_discovery_s3_family_badge(row, entry, now_ms);
@@ -478,13 +604,13 @@ static bool ble_discovery_build_unified_row(unsigned row, size_t position, uint6
             snprintf(live_badges[row], sizeof(live_badges[row]), "C5 LAST / AGE<=%lus%s",
                 (unsigned long)seconds, age > CERBERUS_DUAL_BLE_RECENT_MS ? " RECENCY?" : "");
         } else snprintf(live_badges[row], sizeof(live_badges[row]), "C5 LAST / ADV AGE UNKNOWN");
-        if (ble_filter != CERBERUS_S3_BLE_FILTER_ALL) {
+        if (family != CERBERUS_S3_BLE_FILTER_ALL) {
             snprintf(live_details[row], sizeof(live_details[row]), "C5 LAST %s T%u", identifier, peer->address_type);
-            uint8_t wanted = (uint8_t)(1U << ((unsigned)ble_filter - 1U));
+            uint8_t wanted = (uint8_t)(1U << ((unsigned)family - 1U));
             bool adv = (store->c5_family_bits[ref.index] & wanted) != 0U;
             bool rsp = (store->c5_response_bits[ref.index] & wanted) != 0U;
             const char *kind = adv && rsp ? "C5 ADV+RSP" : rsp ? "C5 RSP HINT" :
-                ble_filter == CERBERUS_S3_BLE_FILTER_FLOCK &&
+                family == CERBERUS_S3_BLE_FILTER_FLOCK &&
                 (store->c5_oui_only & (UINT32_C(1) << ref.index)) ? "C5 ADDR CLUE" :
                 peer->family.version ? "C5 FULL HINT" : "C5 ADV HINT";
             uint32_t response_age;

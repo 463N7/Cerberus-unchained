@@ -70,7 +70,9 @@ static bool dual_ble_live_prepare_fox(uint32_t now, bool asleep)
 static void dual_ble_live_tap(uint16_t x, uint16_t y)
 {
     int action = dual_ble_ui_tap(x, y);
-    if (action == DUAL_BLE_UI_BACK_S3) {
+    if (action == DUAL_BLE_UI_BACK_MONITOR) {
+        ble_findmy_monitor_return();
+    } else if (action == DUAL_BLE_UI_BACK_S3) {
         ble_mode = UI_BLE_MODE_LIST;
     } else if (action == DUAL_BLE_UI_TOGGLE) {
         if (!ble_discovery_live && !ble_discovery_acquire()) return;
@@ -92,6 +94,12 @@ static void dual_ble_live_tick(uint64_t now, bool asleep)
     bool ordinary = !ui_capability_blocked && !ble_attack_selecting &&
         current_page == UI_PAGE_BLE &&
         (ble_mode == UI_BLE_MODE_LIST || ble_mode == UI_BLE_MODE_C5);
+    bool monitor = !ui_capability_blocked && !ble_attack_selecting &&
+        current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FINDMY_MONITOR;
+    /* A selected monitor row remains an immutable stopped detail, including
+     * after Fox Hunt. Only the monitor's explicit Start can resume discovery.
+     * Its intent is independent of the S3 session's error/cleanup state. */
+    bool monitor_detail = ble_mode == UI_BLE_MODE_C5 && dual_ble_ui_from_monitor;
     /* Old C5/S3 session owners must release before a companion is armed. */
     bool ready = live_session.active == SENTINEL_SCAN_NONE &&
         live_session.pending.kind == SENTINEL_SCAN_COMMAND_NONE &&
@@ -100,7 +108,8 @@ static void dual_ble_live_tick(uint64_t now, bool asleep)
     cerberus_dual_wifi_status_t wifi;
     cerberus_dual_wifi_scan_get_status(&wifi);
     ready = ready && !dual_wifi_ui_busy(&wifi);
-    if (!asleep && ready && ordinary && dual_ble_live_enabled())
+    if (!asleep && ready && ((monitor && ble_findmy_monitor_requested()) ||
+        (ordinary && !monitor_detail && dual_ble_live_enabled())))
         mode = CERBERUS_DUAL_BLE_DISCOVERY;
     else if (!asleep && ready && current_page == UI_PAGE_BLE &&
         ble_mode == UI_BLE_MODE_ANALYZER && ble_analyzer_started &&
@@ -112,7 +121,7 @@ static void dual_ble_live_tick(uint64_t now, bool asleep)
         !ble_fox_hunt_exit_pending)
         mode = CERBERUS_DUAL_BLE_TRACK;
     if (mode == CERBERUS_DUAL_BLE_DISCOVERY)
-        dual_ble_ui_sync_family((uint8_t)ble_filter, now);
+        dual_ble_ui_sync_family(monitor ? CERBERUS_S3_BLE_FILTER_FIND_MY : (uint8_t)ble_filter, now);
     else dual_ble_ui_sync(mode, mode == CERBERUS_DUAL_BLE_TRACK ?
         ble_fox_hunt_target.address : NULL, ble_fox_hunt_target.address_type, now);
     dual_ble_publish_diagnostics(now, asleep);

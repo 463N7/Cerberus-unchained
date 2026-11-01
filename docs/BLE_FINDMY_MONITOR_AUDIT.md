@@ -1,9 +1,11 @@
 # Proposed dual-receiver Find My Monitor
 
-This is a read-only design audit for work after [rev113](DUAL_RADIO_REV113.md).
-The proposed monitor changes are **not implemented or hardware accepted**.
-The rev113 milestone document records its separate build and installation evidence.
-The wider Marauder port remains incomplete.
+This is the design audit recorded after [rev113](DUAL_RADIO_REV113.md), before
+the monitor changes were implemented. The findings below describe that source
+revision. The [rev114 local candidate](DUAL_RADIO_REV114.md) now implements
+the shared monitor path; its validation and remaining physical acceptance are
+recorded separately. Rev113 remains installed. The wider Marauder port remains
+incomplete.
 
 Audited Cerberus source: `67daaf4e8de541eccd51d266057fac33453e6dcc`.
 The pinned Marauder checkout at `../integration/marauder-develop-2026-10-29`

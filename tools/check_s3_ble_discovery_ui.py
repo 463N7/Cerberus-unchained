@@ -43,7 +43,7 @@ def function(source, name):
 # counted boundary, while committed row/provenance getters are linked below.
 companion_parts = between(companion, "enum {", "static uint64_t dual_ble_ui_clock(")
 companion_parts += "\n".join(function(companion, name) for name in (
-    "dual_ble_ui_get_view", "dual_ble_ui_get_analyzer_view", "dual_ble_ui_open", "dual_ble_ui_select_frozen",
+    "dual_ble_ui_get_view", "dual_ble_ui_get_analyzer_view", "dual_ble_ui_open", "dual_ble_ui_select_frozen_from", "dual_ble_ui_select_frozen",
     "dual_ble_ui_selected_peer", "dual_ble_ui_tap"))
 (out / "discovery_companion_impl.h").write_text(companion_parts)
 

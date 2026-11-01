@@ -599,7 +599,7 @@ static void live_make_view(void)
         live_view.total_count = (uint16_t)live_ble_filtered_count;
         if ((size_t)live_page[tool] * 4U >= live_ble_filtered_count) live_page[tool] = 0U;
         snprintf(live_ble_filter_label, sizeof(live_ble_filter_label), "%.15s >", ble_filter_name(ble_filter));
-        live_view.tools_label = ble_filter == CERBERUS_S3_BLE_FILTER_FIND_MY && !ble_attack_selecting ? "S3 MONITOR" : "TOOLS";
+        live_view.tools_label = ble_filter == CERBERUS_S3_BLE_FILTER_FIND_MY && !ble_attack_selecting ? "MONITOR" : "TOOLS";
         live_view.sort_label = live_ble_sort == CERBERUS_S3_BLE_SORT_SIGNAL_DESC ? "SIGNAL >" :
             live_ble_sort == CERBERUS_S3_BLE_SORT_NAME_ASC ? "NAME A-Z >" : unified_ble ? "SOURCE ORDER" : "SCAN ORDER >";
         if (!unified_ble && current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_LIST &&

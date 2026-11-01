@@ -697,21 +697,25 @@ static cerberus_s3_ble_focus_t ble_selected_focus;
 static cerberus_findmy_profile_t ble_selected_sound_profile;
 static uint8_t ble_selected_scan_index;
 static uint32_t ble_selected_scan_ms, ble_sound_selected_scan_ms;
-static cerberus_findmy_monitor_t *ble_findmy_monitor;
 static cerberus_findmy_monitor_record_t ble_findmy_selected;
 static bool ble_selected_from_monitor, ble_selected_raw_frozen;
 static bool ble_selected_original_time64_valid;
 static uint64_t ble_selected_scan_epoch;
 static uint64_t ble_selected_original_ms64;
 static uint64_t ble_selected_source_ceiling_ms64;
-static bool ble_findmy_running, ble_findmy_scan_owned, ble_findmy_stopping;
+static bool ble_findmy_running, ble_findmy_stopping;
 static bool ble_findmy_exit_pending, ble_findmy_select_pending;
-static uint8_t ble_findmy_generation;
-static uint32_t ble_findmy_last_tick, ble_findmy_last_draw, ble_findmy_wait_since;
-static uint32_t ble_findmy_sweeps;
+static uint32_t ble_findmy_last_draw, ble_findmy_wait_since;
 static size_t ble_findmy_page;
 static esp_err_t ble_findmy_error;
 static esp_err_t draw_ble_findmy_monitor(void);
+static void ble_findmy_monitor_open(void);
+static void ble_findmy_monitor_return(void);
+static bool ble_findmy_monitor_available(void);
+static bool ble_findmy_monitor_requested(void);
+static void ble_findmy_request_stop(bool exit, bool select);
+static void ble_findmy_monitor_tap(uint16_t x, uint16_t y);
+static void ble_select_frozen_live(const cerberus_findmy_monitor_record_t *record);
 static cerberus_findmy_queue_t *ble_sound_queue; /* PSRAM only while Beep All is open. */
 static cerberus_findmy_selection_t ble_sound_selection;
 static cerberus_c5_ble_result_t ble_sound_peer;
@@ -8086,13 +8090,13 @@ static esp_err_t draw_detail_page(void)
     } else if (current_page == UI_PAGE_WIFI && wifi_mode != UI_WIFI_MODE_MENU) {
         back_label = "WIFI MENU";
     } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_DETAIL) {
-        back_label = ble_selected_from_monitor && ble_findmy_monitor ? "FIND MY MONITOR" : "BLE LIST";
+        back_label = ble_selected_from_monitor && ble_findmy_monitor_available() ? "FIND MY MONITOR" : "BLE LIST";
     } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FOX_HUNT) {
         back_label = ble_fox_hunt_exit_pending ? "STOPPING" : "STOP AND BACK";
     } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_ANALYZER) {
         back_label = ble_analyzer_exit_pending ? "STOPPING" : "STOP ANALYZER";
     } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FINDMY_MONITOR) {
-        back_label = ble_findmy_stopping ? "RELEASING S3 BLE" : "BLE LIST";
+        back_label = ble_findmy_stopping ? "STOPPING" : "BLE LIST";
     } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_ENVIRONMENT) {
         back_label = "BLE MENU";
     } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_SERVICES) {
@@ -8119,9 +8123,14 @@ static esp_err_t draw_detail_page(void)
     if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_DUAL && !ui_capability_blocked)
         return ESP_OK; /* This view owns both its Back and Stop controls. */
     if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_C5) {
-        ESP_RETURN_ON_ERROR(draw_button(8, UI_BACK_Y, 148, UI_BACK_HEIGHT, "BLE LIST"), TAG, "C5 BLE back");
+        ESP_RETURN_ON_ERROR(draw_button(8, UI_BACK_Y, 148, UI_BACK_HEIGHT,
+            dual_ble_ui_from_monitor ? "FIND MY MONITOR" : "BLE LIST"), TAG, "C5 BLE back");
         return draw_button(164, UI_BACK_Y, 148, UI_BACK_HEIGHT,
             dual_ble_ui_detail ? "SAVE SD" : "SAVE BOTH");
+    }
+    if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FINDMY_MONITOR) {
+        ESP_RETURN_ON_ERROR(draw_button(8, UI_BACK_Y, 148, UI_BACK_HEIGHT, back_label), TAG, "monitor back");
+        return draw_button(164, UI_BACK_Y, 148, UI_BACK_HEIGHT, "SAVE BOTH");
     }
     if (live_is_view()) back_label = tool_parent_page == UI_PAGE_TOOLS ? "DEVICE TOOLS" : "HOME";
     if (learning_tool_active) {
@@ -9271,8 +9280,6 @@ static void ble_sound_open(bool all)
     }
     open_tool_page(UI_PAGE_BLE_SOUND);
 }
-
-#include "s3_findmy_monitor_ui.h"
 
 static void handle_ble_tap(uint16_t x, uint16_t y)
 {
@@ -11253,6 +11260,7 @@ static void handle_scripts_tap(uint16_t x, uint16_t y)
 #include "sentinel_live_ui.h"
 #include "dual_wifi_live_ui.h"
 #include "dual_ble_live_ui.h"
+#include "s3_findmy_monitor_ui.h"
 #include "ble_archive_live_ui.h"
 #include "wardrive_recent_live_ui.h"
 #include "sentinel_watch_ui.h"
@@ -11829,7 +11837,8 @@ static void handle_tap(uint16_t x, uint16_t y)
         y >= UI_BACK_Y && y < UI_BACK_Y + UI_BACK_HEIGHT) {
         if (x >= 164U && x < 312U) ble_archive_save_c5(dual_ble_ui_detail);
         else if (x >= 8U && x < 156U) {
-            ble_mode = UI_BLE_MODE_LIST;
+            if (dual_ble_ui_from_monitor) ble_findmy_monitor_return();
+            else ble_mode = UI_BLE_MODE_LIST;
             ESP_ERROR_CHECK(draw_detail_page());
         }
         return;
@@ -11873,6 +11882,10 @@ static void handle_tap(uint16_t x, uint16_t y)
                 return;
             }
             if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FINDMY_MONITOR) {
+                if (x >= 164U && x < 312U && y < UI_BACK_Y + UI_BACK_HEIGHT) {
+                    ble_archive_save_c5(false);
+                    return;
+                }
                 ble_findmy_request_stop(true, false);
                 ESP_ERROR_CHECK(draw_detail_page());
             } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_FOX_HUNT) {
@@ -12084,8 +12097,8 @@ static void handle_tap(uint16_t x, uint16_t y)
                 wifi_mode = UI_WIFI_MODE_MENU;
                 ESP_ERROR_CHECK(draw_detail_page());
             } else if (current_page == UI_PAGE_BLE && ble_mode == UI_BLE_MODE_DETAIL) {
-                ble_mode = ble_selected_from_monitor && ble_findmy_monitor ?
-                    UI_BLE_MODE_FINDMY_MONITOR : UI_BLE_MODE_LIST;
+                if (ble_selected_from_monitor && ble_findmy_monitor_available()) ble_findmy_monitor_return();
+                else ble_mode = UI_BLE_MODE_LIST;
                 ESP_ERROR_CHECK(draw_detail_page());
             } else if (current_page == UI_PAGE_BLE &&
                 ble_mode == UI_BLE_MODE_ENVIRONMENT) {
@@ -12358,6 +12371,7 @@ void cerberus_ui_run(const cerberus_ui_config_t *config)
             !remote_id_keeps_awake() &&
             !mac_monitor_keeps_awake() &&
             !ble_discovery_keeps_awake() &&
+            !ble_findmy_monitor_requested() &&
             !(current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_DUAL) &&
             !(current_page == UI_PAGE_SCRIPTS && script_running) &&
             now_ms - last_user_activity_ms >= (int64_t)ui_screen_timeout_seconds * 1000LL) {

@@ -9,7 +9,7 @@
 #include "dual_ble_hint_ui.h"
 
 enum { DUAL_BLE_UI_NONE, DUAL_BLE_UI_REDRAW, DUAL_BLE_UI_BACK_S3,
-    DUAL_BLE_UI_TOGGLE, DUAL_BLE_UI_FOX };
+    DUAL_BLE_UI_TOGGLE, DUAL_BLE_UI_FOX, DUAL_BLE_UI_BACK_MONITOR };
 static cerberus_dual_ble_scan_t *dual_ble_ui_store;
 static cerberus_dual_ble_row_t dual_ble_ui_painted[4], dual_ble_ui_selected;
 static cerberus_dual_ble_provenance_t dual_ble_ui_painted_provenance[4], dual_ble_ui_selected_provenance;
@@ -27,7 +27,7 @@ static bool dual_ble_ui_attempted, dual_ble_ui_detail;
 static bool dual_ble_ui_receive_info;
 static bool dual_ble_ui_hints;
 static uint8_t dual_ble_ui_hint_page, dual_ble_ui_hint_pages;
-static bool dual_ble_ui_from_unified;
+static bool dual_ble_ui_from_unified, dual_ble_ui_from_monitor;
 static esp_err_t dual_ble_ui_error;
 
 static uint64_t dual_ble_ui_clock(void *context)
@@ -46,6 +46,24 @@ static void dual_ble_ui_retry(void)
     if (dual_ble_ui_store) cerberus_dual_ble_stop(dual_ble_ui_store);
 }
 
+/* Cancel only our desired session and pending reservation. No exchange or
+ * clock read here: the single global coordinator tick drains any owned job.
+ * Repeated hidden-page cleanup must not reset the controller's retry delay. */
+static void dual_ble_ui_cancel(void)
+{
+    bool changed = dual_ble_ui_mode != -1 || dual_ble_ui_family != 0U ||
+        dual_ble_ui_response_mode;
+    dual_ble_ui_mode = -1;
+    dual_ble_ui_family = 0U;
+    dual_ble_ui_response_mode = false;
+    dual_ble_ui_attempted = false;
+    if (changed) dual_ble_ui_error = ESP_OK;
+    if (dual_ble_ui_store && (changed ||
+        (!dual_ble_ui_store->stop_requested &&
+         (dual_ble_ui_store->enabled || dual_ble_ui_store->start.job_id))))
+        cerberus_dual_ble_stop(dual_ble_ui_store);
+}
+
 /* Family is part of the desired owner binding. Switching it drains the old
  * C5 job before starting another; retained/painted rows stay immutable. Mixed
  * Recon/Wardriving retain their existing radio roles. */
@@ -55,6 +73,11 @@ static void dual_ble_ui_sync_request(int mode, uint8_t family,
     if (mode < -1 || mode > CERBERUS_DUAL_BLE_FAMILY ||
         (mode == CERBERUS_DUAL_BLE_TRACK && (!address || type > 3U)) ||
         (mode == CERBERUS_DUAL_BLE_FAMILY && (!family || family > 6U))) mode = -1;
+    if (mode < 0) {
+        dual_ble_ui_cancel();
+        if (dual_ble_ui_store) cerberus_dual_ble_tick(dual_ble_ui_store, now);
+        return;
+    }
     if (mode != CERBERUS_DUAL_BLE_FAMILY) family = 0U;
     bool response = dual_ble_ui_response_requests &&
         (mode == CERBERUS_DUAL_BLE_DISCOVERY || mode == CERBERUS_DUAL_BLE_FAMILY);
@@ -118,14 +141,15 @@ static inline void dual_ble_ui_get_analyzer_view(cerberus_dual_ble_analyzer_view
 static void dual_ble_ui_open(bool reset_detail)
 {
     dual_ble_ui_from_unified = false;
+    dual_ble_ui_from_monitor = false;
     if (reset_detail) {
         dual_ble_ui_detail = false; dual_ble_ui_receive_info = false; dual_ble_ui_hints = false;
         dual_ble_ui_hint_page = dual_ble_ui_hint_pages = 0U; dual_ble_ui_response_tab = false;
     }
 }
 
-static void dual_ble_ui_select_frozen(const cerberus_dual_ble_row_t *row,
-    const cerberus_dual_ble_provenance_t *provenance)
+static void dual_ble_ui_select_frozen_from(const cerberus_dual_ble_row_t *row,
+    const cerberus_dual_ble_provenance_t *provenance, bool from_monitor)
 {
     /* A UI-owned copy of exactly the displayed source proof. No scanner or
      * clock query may replace its identity, payload or receive metadata. */
@@ -135,7 +159,12 @@ static void dual_ble_ui_select_frozen(const cerberus_dual_ble_row_t *row,
     dual_ble_ui_receive_info = false;
     dual_ble_ui_hints = false; dual_ble_ui_hint_page = dual_ble_ui_hint_pages = 0U; dual_ble_ui_response_tab = false;
     dual_ble_ui_from_unified = true;
+    dual_ble_ui_from_monitor = from_monitor;
 }
+
+static void dual_ble_ui_select_frozen(const cerberus_dual_ble_row_t *row,
+    const cerberus_dual_ble_provenance_t *provenance)
+{ dual_ble_ui_select_frozen_from(row, provenance, false); }
 
 static bool dual_ble_ui_selected_peer(cerberus_c5_ble_result_t *out)
 {
@@ -178,6 +207,7 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
     const uint64_t now = dual_ble_ui_clock(NULL);
     cerberus_dual_ble_view_t view; dual_ble_ui_get_view(&view);
     ESP_RETURN_ON_ERROR(draw_small_button(8, 50, dual_ble_ui_detail ? 304 : 148, 30,
+        dual_ble_ui_from_monitor ? "BACK TO MONITOR" :
         dual_ble_ui_detail ? "BACK TO BLE LIST" : "BACK TO BLE"), TAG, "C5 BLE back");
     if (!dual_ble_ui_detail)
         ESP_RETURN_ON_ERROR(draw_small_button(164, 50, 148, 30,
@@ -253,6 +283,7 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
             }
         }
         ESP_RETURN_ON_ERROR(draw_small_button(8, 316, 148, 38,
+            dual_ble_ui_from_monitor ? "BACK TO MONITOR" :
             dual_ble_ui_from_unified ? "BACK TO BLE LIST" : "BACK TO C5 LIST"), TAG, "C5 BLE list back");
         ESP_RETURN_ON_ERROR(draw_small_button(164, 316, 148, 38, "FOX THIS ADDRESS"), TAG, "C5 BLE fox");
     } else {
@@ -340,6 +371,7 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
         ESP_RETURN_ON_ERROR(draw_centered(360, line, UI_MUTED, 1), TAG, "C5 BLE reader latency");
     }
     ESP_RETURN_ON_ERROR(draw_button(20, 370, 280, 40,
+        dual_ble_ui_from_monitor ? "BACK TO MONITOR" :
         s3_enabled ? "STOP BOTH RECEIVERS" : "START BOTH RECEIVERS"), TAG, "C5 BLE control");
     dual_ble_ui_painted_count = painted_count;
     dual_ble_ui_hint_pages = hint_pages;
@@ -349,14 +381,16 @@ static esp_err_t dual_ble_ui_draw(bool s3_enabled)
 static int dual_ble_ui_tap(uint16_t x, uint16_t y)
 {
     if (y >= 50U && y < 80U) {
-        if (x >= 8U && x < (dual_ble_ui_detail ? 312U : 156U)) return DUAL_BLE_UI_BACK_S3;
+        if (x >= 8U && x < (dual_ble_ui_detail ? 312U : 156U))
+            return dual_ble_ui_from_monitor ? DUAL_BLE_UI_BACK_MONITOR : DUAL_BLE_UI_BACK_S3;
         if (!dual_ble_ui_detail && x >= 164U && x < 312U) {
             dual_ble_ui_response_requests = !dual_ble_ui_response_requests;
             dual_ble_ui_painted_count = 0U;
             return DUAL_BLE_UI_REDRAW;
         }
     }
-    if (x >= 20U && x < 300U && y >= 370U && y < 410U) return DUAL_BLE_UI_TOGGLE;
+    if (x >= 20U && x < 300U && y >= 370U && y < 410U)
+        return dual_ble_ui_from_monitor ? DUAL_BLE_UI_BACK_MONITOR : DUAL_BLE_UI_TOGGLE;
     if (dual_ble_ui_detail) {
         if (y >= 174U && y < 196U) {
             if (x >= 8U && x < 156U) dual_ble_ui_response_tab = false;
@@ -381,6 +415,7 @@ static int dual_ble_ui_tap(uint16_t x, uint16_t y)
         }
         if (y >= 316U && y < 354U) {
             if (x >= 8U && x < 156U) {
+                if (dual_ble_ui_from_monitor) return DUAL_BLE_UI_BACK_MONITOR;
                 if (dual_ble_ui_from_unified) return DUAL_BLE_UI_BACK_S3;
                 dual_ble_ui_detail = false; return DUAL_BLE_UI_REDRAW;
             }
@@ -401,6 +436,7 @@ static int dual_ble_ui_tap(uint16_t x, uint16_t y)
                 dual_ble_ui_selected = dual_ble_ui_painted[row];
                 dual_ble_ui_selected_provenance = dual_ble_ui_painted_provenance[row];
                 dual_ble_ui_detail = true;
+                dual_ble_ui_from_unified = dual_ble_ui_from_monitor = false;
                 dual_ble_ui_receive_info = false;
                 dual_ble_ui_hints = false; dual_ble_ui_hint_page = dual_ble_ui_hint_pages = 0U; dual_ble_ui_response_tab = false;
                 return DUAL_BLE_UI_REDRAW;

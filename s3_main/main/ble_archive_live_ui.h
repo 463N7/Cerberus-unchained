@@ -155,6 +155,11 @@ static void ble_archive_save(unsigned scope)
     if (ble_archive_view && (ble_archive_view->release_pending || ble_archive_view->job_pending)) return;
     ble_archive_enter();
     esp_err_t error = ble_archive_capture(scope);
+    /* Freeze the retained banks at the save clock before clearing acquisition
+     * intent. Even a failed capture must not rearm pending monitor work on Back. */
+    if (ble_archive_return_page == UI_PAGE_BLE &&
+        ble_archive_return_mode == UI_BLE_MODE_FINDMY_MONITOR)
+        ble_findmy_request_stop(false, false);
     if (error == ESP_OK) {
         ble_archive_view->release_pending = true;
         ble_archive_view->release_started_ms = ble_archive_view->incoming.saved_uptime_ms;
