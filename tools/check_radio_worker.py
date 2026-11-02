@@ -77,15 +77,15 @@ for name in ["esp_attr.h", "esp_ieee802154.h", "esp_log.h", "esp_heap_caps.h", "
 dispatcher = (root / "c5_firmware/main/main.c").read_text()
 state = dispatcher[dispatcher.index("static uint8_t current_radio_state(void)"):
                    dispatcher.index("static void build_diagnostic_snapshot(")]
-cases = dispatcher[dispatcher.index("    case CERBERUS_MESH_OBSERVATION_COMMAND_INFO:"):
+cases = dispatcher[dispatcher.index("    case CERBERUS_MESH_LOCATE_COMMAND_INFO:"):
                    dispatcher.index("    case CERBERUS_SPI_COMMAND_IEEE802154_ENERGY_SCAN_START:")]
 (out / "mesh_dispatch.inc").write_text(state +
     "\nstatic void mesh_dispatch(const cerberus_spi_frame_t *request){switch(request->command){\n" +
     cases + "\ndefault:break;}}\n")
-for name in ("radio_worker_check", "radio_receive_continuity_check", "mesh_observation_worker_check"):
+for name in ("radio_worker_check", "radio_receive_continuity_check", "mesh_observation_worker_check", "mesh_locate_worker_check"):
     exe = out / (name + ".exe")
     subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
         "-I", str(out), "-I", str(root / "tools/host_checks/stubs"), "-I", str(root / "shared"),
         "-I", str(root / "c5_firmware/main"), str(root / "tools/host_checks" / (name + ".c")),
-        "-o", str(exe)], check=True)
+        str(root / "shared/mesh_mac.c"), "-o", str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

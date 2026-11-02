@@ -24,6 +24,7 @@ idf_component_register(
         "../../shared/cerberus_watch_capture.c"
         "../../shared/remote_id_channel_plan.c"
         "../../shared/mac_observation.c"
+        "../../shared/mesh_mac.c"
         "../../shared/probe_sniff_core.c"
         "../../shared/sentinel_watch_protocol.c"
     INCLUDE_DIRS

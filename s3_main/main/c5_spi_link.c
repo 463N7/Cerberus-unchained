@@ -2612,3 +2612,4 @@ esp_err_t c5_spi_link_get_ieee802154_activity_scan_result(
 #include "c5_dual_ble_link_impl.h"
 #include "c5_probe_sniff_link_impl.h"
 #include "c5_mesh_link_impl.h"
+#include "c5_mesh_locate_link_impl.h"

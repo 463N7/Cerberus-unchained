@@ -3,19 +3,34 @@
 
 #include <string.h>
 
+/* C5 Locate calls this bounded pure parser from the receive callback. Its
+ * complete call/data closure must remain internal; S3 and host placement stays
+ * unchanged. Native verification checks linked symbols rather than this label. */
+#if defined(ESP_PLATFORM)
+#include "sdkconfig.h"
+#endif
+#if defined(CONFIG_IDF_TARGET_ESP32C5) && CONFIG_IDF_TARGET_ESP32C5
+#include "esp_attr.h"
+#define MESH_MAC_CODE IRAM_ATTR
+#define MESH_MAC_DATA DRAM_ATTR
+#else
+#define MESH_MAC_CODE
+#define MESH_MAC_DATA
+#endif
+
 typedef struct {
     const uint8_t *bytes;
     size_t length;
     size_t offset;
 } reader_t;
 
-static bool overlaps(const void *a, size_t an, const void *b, size_t bn)
+static bool MESH_MAC_CODE overlaps(const void *a, size_t an, const void *b, size_t bn)
 {
     uintptr_t ap = (uintptr_t)a, bp = (uintptr_t)b;
     return ap <= bp ? bp - ap < an : ap - bp < bn;
 }
 
-static bool take(reader_t *r, size_t count, const uint8_t **bytes)
+static bool MESH_MAC_CODE take(reader_t *r, size_t count, const uint8_t **bytes)
 {
     if (r->offset > r->length || count > r->length - r->offset) return false;
     *bytes = r->bytes + r->offset;
@@ -23,14 +38,14 @@ static bool take(reader_t *r, size_t count, const uint8_t **bytes)
     return true;
 }
 
-static uint64_t little_value(const uint8_t *bytes, size_t count)
+static uint64_t MESH_MAC_CODE little_value(const uint8_t *bytes, size_t count)
 {
     uint64_t value = 0;
     for (size_t i = 0; i < count; ++i) value |= (uint64_t)bytes[i] << (i * 8U);
     return value;
 }
 
-static bool read_pan(reader_t *r, mesh_mac_pan_t *pan)
+static bool MESH_MAC_CODE read_pan(reader_t *r, mesh_mac_pan_t *pan)
 {
     const uint8_t *bytes;
     if (!take(r, 2U, &bytes)) return false;
@@ -39,7 +54,7 @@ static bool read_pan(reader_t *r, mesh_mac_pan_t *pan)
     return true;
 }
 
-static bool read_address(reader_t *r, mesh_mac_address_t *address)
+static bool MESH_MAC_CODE read_address(reader_t *r, mesh_mac_address_t *address)
 {
     const uint8_t *bytes;
     size_t size = address->mode == MESH_MAC_ADDRESS_SHORT16 ? 2U : 8U;
@@ -51,7 +66,7 @@ static bool read_address(reader_t *r, mesh_mac_address_t *address)
     return true;
 }
 
-static void pan_presence(const mesh_mac_observation_t *o, bool *destination, bool *source)
+static void MESH_MAC_CODE pan_presence(const mesh_mac_observation_t *o, bool *destination, bool *source)
 {
     bool d = o->destination.mode != MESH_MAC_ADDRESS_NONE;
     bool s = o->source.mode != MESH_MAC_ADDRESS_NONE;
@@ -65,7 +80,7 @@ static void pan_presence(const mesh_mac_observation_t *o, bool *destination, boo
     if (both_extended) *source = false;
 }
 
-static mesh_mac_result_t read_security(reader_t *r, mesh_mac_observation_t *o)
+static mesh_mac_result_t MESH_MAC_CODE read_security(reader_t *r, mesh_mac_observation_t *o)
 {
     const uint8_t *bytes;
     if (!o->security_enabled) return MESH_MAC_HEADER_OK;
@@ -84,17 +99,17 @@ static mesh_mac_result_t read_security(reader_t *r, mesh_mac_observation_t *o)
         if (!take(r, 4U, &bytes)) return MESH_MAC_MALFORMED;
         o->frame_counter = (uint32_t)little_value(bytes, 4U);
     }
-    static const uint8_t key_lengths[4] = {0U, 1U, 5U, 9U};
+    static MESH_MAC_DATA const uint8_t key_lengths[4] = {0U, 1U, 5U, 9U};
     o->key_identifier_length = key_lengths[o->key_id_mode];
     if (!take(r, o->key_identifier_length, &bytes)) return MESH_MAC_MALFORMED;
     memcpy(o->key_identifier, bytes, o->key_identifier_length);
-    static const uint8_t mic_lengths[4] = {0U, 4U, 8U, 16U};
+    static MESH_MAC_DATA const uint8_t mic_lengths[4] = {0U, 4U, 8U, 16U};
     o->mic_length = mic_lengths[o->security_level & 3U];
     if (o->mic_length > r->length - r->offset) return MESH_MAC_MALFORMED;
     return MESH_MAC_HEADER_OK;
 }
 
-static mesh_mac_result_t read_header_ies(reader_t *r, mesh_mac_observation_t *o)
+static mesh_mac_result_t MESH_MAC_CODE read_header_ies(reader_t *r, mesh_mac_observation_t *o)
 {
     if (!o->header_ies_present) return MESH_MAC_HEADER_OK;
     bool read_any = false;
@@ -121,7 +136,7 @@ static mesh_mac_result_t read_header_ies(reader_t *r, mesh_mac_observation_t *o)
     return read_any ? MESH_MAC_HEADER_OK : MESH_MAC_MALFORMED;
 }
 
-mesh_mac_result_t mesh_mac_parse(const uint8_t *bytes, size_t length,
+mesh_mac_result_t MESH_MAC_CODE mesh_mac_parse(const uint8_t *bytes, size_t length,
                                  mesh_mac_observation_t *out)
 {
     if (bytes == NULL || out == NULL) return MESH_MAC_INVALID_ARGUMENT;

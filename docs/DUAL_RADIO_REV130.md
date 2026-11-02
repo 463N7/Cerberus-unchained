@@ -1,5 +1,12 @@
 # Rev130: passive Mesh Detection foundation
 
+**Post-installation navigation finding:** the owner's November 2 check found
+that Scan still displayed Radio Sense and entered the observation tool directly;
+Back then revealed the five-tool menu. This did not satisfy the intended
+menu-first workflow. Rev131 corrects both the visible entry and route, with
+explicit return labels. The requested rev130 Start/Stop/Back/Wi-Fi acceptance
+was not confirmed by this response and remains open.
+
 This development slice adds an original, bounded IEEE 802.15.4 observation
 pipeline for the onboard S3/C5 pair. It builds on the receive continuity fix in
 [rev129](DUAL_RADIO_REV129.md). It needs no GPS or expansion board. The wider

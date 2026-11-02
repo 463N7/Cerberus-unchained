@@ -3,6 +3,7 @@
 /* UI-task-owned, optional PSRAM only. The controller owns exact C5 cleanup;
  * rendering and selection never query a radio or resolve a live row index. */
 #include "mesh_scan.h"
+#include "mesh_locate.h"
 #include "ble_archive_io.h"
 #include "esp_heap_caps.h"
 
@@ -13,13 +14,19 @@ typedef struct {
 } mesh_ui_painted_t;
 typedef struct {
     mesh_scan_t scan;
+    mesh_locate_t *locate;
+    mesh_observation_address_key_t locate_target;
+    uint64_t locate_origin;
     mesh_ui_painted_t painted[MESH_UI_ROWS], selected;
     uint64_t job, last_paint_ms;
     uint8_t mode, channel, group, page, count, painted_count, raw_page;
     bool detail, closing, return_tools, start_pending, save_pending, suppress_old;
     bool job_cancelled;
+    bool locate_view, locate_pending, locate_return;
+    bool locate_save_pending, job_locate;
     esp_err_t error;
     char message[48], saved_name[CERBERUS_STORAGE_NAME_MAX];
+    char locate_message[48], locate_saved_name[CERBERUS_STORAGE_NAME_MAX];
 } mesh_ui_store_t;
 static mesh_ui_store_t *mesh_ui;
 static esp_err_t mesh_ui_open_error;
@@ -31,6 +38,11 @@ static int64_t mesh_ui_clock(void *context)
 { (void)context; return esp_timer_get_time(); }
 static const mesh_scan_transport_t mesh_ui_transport = {
     .exchange = mesh_ui_exchange, .clock_us = mesh_ui_clock};
+static esp_err_t mesh_ui_locate_exchange(void *context, uint8_t command, const void *request,
+    size_t request_size, void *reply, size_t reply_size)
+{ (void)context; return c5_spi_link_mesh_locate_exchange(command, request, request_size, reply, reply_size); }
+static const mesh_scan_transport_t mesh_ui_locate_transport = {
+    .exchange = mesh_ui_locate_exchange, .clock_us = mesh_ui_clock};
 static esp_err_t mesh_ui_button(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
     const char *label, bool enabled)
 {
@@ -39,7 +51,8 @@ static esp_err_t mesh_ui_button(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
 }
 
 static bool mesh_ui_busy(void)
-{ return mesh_ui && !mesh_scan_released(&mesh_ui->scan); }
+{ return mesh_ui && (!mesh_scan_released(&mesh_ui->scan) ||
+    (mesh_ui->locate && !mesh_locate_released(mesh_ui->locate))); }
 static bool mesh_ui_acquire(void)
 {
     if (mesh_ui) return true;
@@ -59,21 +72,58 @@ static void mesh_ui_close(bool tools)
     mesh_ui_store_t *s = mesh_ui;
     s->closing = true; s->return_tools |= tools;
     s->start_pending = s->save_pending = false; s->painted_count = 0U;
+    s->locate_pending = false;
+    s->locate_save_pending = false;
     mesh_scan_close(&s->scan);
+    if (s->locate) mesh_locate_close(s->locate);
     if (s->job && !s->job_cancelled) {
         cerberus_ble_archive_io_cancel(s->job); s->job_cancelled = true;
     }
 }
 static void mesh_ui_back(void)
 {
-    if (mesh_ui && mesh_ui->detail && !mesh_ui->closing) {
+    if (mesh_ui && mesh_ui->locate_view && !mesh_ui->closing) {
+        mesh_ui->locate_pending = false; mesh_ui->locate_return = true;
+        mesh_ui->locate_save_pending = false;
+        if (mesh_ui->job && mesh_ui->job_locate && !mesh_ui->job_cancelled) {
+            cerberus_ble_archive_io_cancel(mesh_ui->job); mesh_ui->job_cancelled = true;
+        }
+        if (mesh_ui->scan.faulted) mesh_scan_close(&mesh_ui->scan);
+        if (mesh_ui->locate) {
+            if (mesh_ui->locate->faulted) mesh_locate_close(mesh_ui->locate);
+            else mesh_locate_stop(mesh_ui->locate);
+        }
+    } else if (mesh_ui && mesh_ui->detail && !mesh_ui->closing) {
         mesh_ui->detail = false; mesh_ui->painted_count = 0U;
     } else mesh_ui_close(true);
+}
+static bool mesh_ui_locate_allowed(const mesh_ui_store_t *s)
+{
+    return s && s->detail && !s->closing && !s->locate_view && !s->start_pending &&
+        !s->save_pending && !s->job && !s->scan.faulted && s->selected.value.session &&
+        s->selected.value.kind == MESH_OBSERVATION_SELECT_ADDRESS &&
+        c5_status.firmware_version >= CERBERUS_MESH_LOCATE_MIN_FIRMWARE;
+}
+static void mesh_ui_locate_start(void)
+{
+    mesh_ui_store_t *s = mesh_ui;
+    if (!mesh_ui_locate_allowed(s) || s->locate) return;
+    /* Allocate before changing survey intent. Failure preserves both the
+     * current survey acquisition and its frozen painted target. */
+    mesh_locate_t *locate = heap_caps_calloc(1U, sizeof(*locate), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!locate) { s->error = ESP_ERR_NO_MEM; return; }
+    mesh_locate_init(locate);
+    s->locate = locate; s->locate_target = s->selected.value.record.address.key;
+    s->locate_origin = s->selected.value.session;
+    s->locate_view = s->locate_pending = true; s->locate_return = false;
+    s->locate_save_pending = false; s->locate_message[0] = s->locate_saved_name[0] = '\0';
+    s->error = ESP_OK; s->painted_count = 0U;
+    if (!mesh_scan_released(&s->scan)) mesh_scan_stop(&s->scan);
 }
 static void mesh_ui_start_stop(void)
 {
     mesh_ui_store_t *s = mesh_ui;
-    if (!s || s->closing || s->job || s->save_pending) return;
+    if (!s || s->closing || s->job || s->save_pending || s->locate_view) return;
     if (s->start_pending) { s->start_pending = false; return; }
     if (!mesh_scan_released(&s->scan)) {
         if (s->scan.faulted) mesh_scan_close(&s->scan);
@@ -103,9 +153,20 @@ static void mesh_ui_tick(uint64_t now_ms, bool visible)
             (uint16_t)(UINT16_C(1) << (s->channel - 11U)), 250U);
         s->start_pending = false;
     }
-    mesh_scan_tick(&s->scan, now_ms, &mesh_ui_transport);
+    bool survey_work = !mesh_scan_released(&s->scan);
+    if (survey_work) mesh_scan_tick(&s->scan, now_ms, &mesh_ui_transport);
     if (s->scan.accepted && s->scan.model.session &&
         (s->scan.model.session == s->scan.request.session_id || s->scan.frozen)) s->suppress_old = false;
+    /* Only one wire owner is ticked per UI pass, including the handoff pass. */
+    if (s->locate_pending && !s->closing && !s->locate_return && mesh_scan_released(&s->scan)) {
+        s->locate_pending = false;
+        s->error = s->scan.frozen && s->scan.final_valid && !s->scan.faulted ?
+            mesh_locate_begin(s->locate, &s->locate_target, s->locate_origin) : ESP_ERR_INVALID_STATE;
+    } else if (s->locate_pending && s->scan.faulted) {
+        s->locate_pending = false; s->error = s->scan.fault_error;
+    }
+    if (s->locate && !survey_work && !mesh_locate_released(s->locate))
+        mesh_locate_tick(s->locate, now_ms, &mesh_ui_locate_transport);
     if (s->save_pending && !s->closing) {
         if (s->scan.faulted) { s->save_pending = false; s->error = s->scan.fault_error; }
         else if (mesh_scan_released(&s->scan)) {
@@ -113,8 +174,20 @@ static void mesh_ui_tick(uint64_t now_ms, bool visible)
             s->error = s->scan.frozen && s->scan.final_valid && !s->suppress_old ?
                 cerberus_ble_archive_io_save_mesh(&s->scan, &s->job) : ESP_ERR_INVALID_STATE;
             if (s->error == ESP_OK) {
-                s->job_cancelled = false;
+                s->job_cancelled = s->job_locate = false;
                 snprintf(s->message, sizeof(s->message), "SAVING FROZEN REPORT");
+            }
+        }
+    }
+    if (s->locate_save_pending && !s->closing && s->locate) {
+        if (s->locate->faulted) { s->locate_save_pending = false; s->error = s->locate->fault_error; }
+        else if (mesh_locate_released(s->locate)) {
+            s->locate_save_pending = false;
+            s->error = s->locate->frozen && s->locate->final_valid ?
+                cerberus_ble_archive_io_save_mesh_locate(s->locate, &s->job) : ESP_ERR_INVALID_STATE;
+            if (s->error == ESP_OK) {
+                s->job_cancelled = false; s->job_locate = true;
+                snprintf(s->locate_message, sizeof(s->locate_message), "SAVING LOCATE EVIDENCE");
             }
         }
     }
@@ -126,20 +199,29 @@ static void mesh_ui_tick(uint64_t now_ms, bool visible)
             cerberus_ble_archive_io_release(s->job); s->job = 0U;
         } else if (!status.worker_active) {
             s->error = status.error;
-            if (!s->closing && status.state == CERBERUS_BLE_ARCHIVE_IO_COMPLETE &&
-                status.operation == CERBERUS_BLE_ARCHIVE_IO_SAVE_MESH &&
-                status.format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_MESH_REPORT) {
-                snprintf(s->saved_name, sizeof(s->saved_name), "%s", status.file_name);
-                snprintf(s->message, sizeof(s->message), "SAVED %.31s", status.file_name);
-            } else if (!s->closing) {
+            char *name = s->job_locate ? s->locate_saved_name : s->saved_name;
+            char *message = s->job_locate ? s->locate_message : s->message;
+            bool publish = !s->closing && !(s->job_locate && s->locate_return);
+            if (publish && status.state == CERBERUS_BLE_ARCHIVE_IO_COMPLETE &&
+                status.operation == (s->job_locate ? CERBERUS_BLE_ARCHIVE_IO_SAVE_MESH_LOCATE : CERBERUS_BLE_ARCHIVE_IO_SAVE_MESH) &&
+                status.format == (s->job_locate ? CERBERUS_BLE_ARCHIVE_IO_FORMAT_MESH_LOCATE_REPORT : CERBERUS_BLE_ARCHIVE_IO_FORMAT_MESH_REPORT)) {
+                snprintf(name, sizeof(s->saved_name), "%s", status.file_name);
+                snprintf(message, sizeof(s->message), "SAVED %.31s", status.file_name);
+            } else if (publish) {
                 if (s->error == ESP_OK) s->error = ESP_ERR_INVALID_RESPONSE;
-                snprintf(s->message, sizeof(s->message), "REPORT SAVE FAILED");
+                snprintf(message, sizeof(s->message), "REPORT SAVE FAILED");
             }
             cerberus_ble_archive_io_release(s->job); s->job = 0U;
         }
     }
-    if (s->closing && mesh_scan_released(&s->scan) && !s->job) {
+    if (s->locate_return && mesh_scan_released(&s->scan) &&
+        mesh_locate_released(s->locate) && !s->job) {
+        heap_caps_free(s->locate); s->locate = NULL;
+        s->locate_return = s->locate_view = false; s->detail = true;
+    }
+    if (s->closing && mesh_scan_released(&s->scan) && mesh_locate_released(s->locate) && !s->job) {
         bool tools = s->return_tools && visible;
+        heap_caps_free(s->locate);
         heap_caps_free(s); mesh_ui = NULL;
         if (tools) ieee802154_mode = UI_IEEE802154_MODE_MENU;
         if (visible) ESP_ERROR_CHECK(draw_detail_page());
@@ -186,6 +268,14 @@ static esp_err_t mesh_ui_detail_draw(const mesh_ui_store_t *s)
     const mesh_ui_painted_t *p = &s->selected;
     const mesh_observation_seen_t *seen = mesh_ui_seen(p);
     char line[64], a[24], b[24];
+    bool address_detail = p->value.kind == MESH_OBSERVATION_SELECT_ADDRESS;
+    if (address_detail)
+        ESP_RETURN_ON_ERROR(mesh_ui_button(8, 376, 148, 36, "LOCATE",
+            mesh_ui_locate_allowed(s)), TAG, "mesh locate action");
+    if (s->error != ESP_OK) {
+        snprintf(line, sizeof(line), "ERROR: %.35s", esp_err_to_name(s->error));
+        ESP_RETURN_ON_ERROR(draw_centered(340, line, UI_BAD, 1), TAG, "mesh detail error");
+    }
     ESP_RETURN_ON_ERROR(draw_centered(54, "FROZEN SELECTED OBSERVATION", UI_MUTED, 1), TAG, "mesh detail scope");
     if (p->value.kind == MESH_OBSERVATION_SELECT_PAN) {
         mesh_ui_pan(&p->value.record.pan.key, line, sizeof(line));
@@ -255,7 +345,116 @@ static esp_err_t mesh_ui_detail_draw(const mesh_ui_store_t *s)
     }
     snprintf(line, sizeof(line), "RAW PAGE %u / %u", s->raw_page + 1U, (raw->length + 63U) / 64U);
     ESP_RETURN_ON_ERROR(draw_centered(353, line, UI_MUTED, 1), TAG, "mesh raw page");
-    return raw->length > 64U ? draw_small_button(80, 376, 160, 36, "NEXT RAW PAGE") : ESP_OK;
+    return raw->length > 64U ? draw_small_button(address_detail ? 164U : 80U, 376,
+        address_detail ? 148U : 160U, 36, "NEXT RAW PAGE") : ESP_OK;
+}
+
+static void mesh_ui_locate_toggle(void)
+{
+    mesh_ui_store_t *s = mesh_ui;
+    if (!s || !s->locate || s->closing || s->locate_return || s->job || s->locate_save_pending) return;
+    if (s->locate_pending) { s->locate_pending = false; return; }
+    if (s->scan.faulted && !mesh_scan_released(&s->scan)) { mesh_scan_close(&s->scan); return; }
+    if (!mesh_locate_released(s->locate)) {
+        if (s->locate->faulted) mesh_locate_close(s->locate);
+        else mesh_locate_stop(s->locate);
+    } else if (mesh_scan_released(&s->scan) && s->scan.frozen && !s->scan.faulted) {
+        s->error = mesh_locate_begin(s->locate, &s->locate_target, s->locate_origin);
+        if (s->error == ESP_OK) s->locate_saved_name[0] = s->locate_message[0] = '\0';
+    }
+}
+static void mesh_ui_locate_save(void)
+{
+    mesh_ui_store_t *s = mesh_ui;
+    if (!s || !s->locate || s->closing || s->locate_pending || s->locate_return ||
+        s->job || s->locate_save_pending || s->locate->faulted) return;
+    if (s->locate_saved_name[0]) {
+        char name[CERBERUS_STORAGE_NAME_MAX]; memcpy(name, s->locate_saved_name, sizeof(name));
+        mesh_ui_close(false); current_page = UI_PAGE_FILES;
+        snprintf(file_path, sizeof(file_path), "%s", CERBERUS_STORAGE_MESH_REPORT_PATH);
+        open_text_file(name);
+    } else if (s->locate->accepted || s->locate->frozen) {
+        s->locate_save_pending = true; s->error = ESP_OK; mesh_locate_stop(s->locate);
+    }
+}
+static esp_err_t mesh_ui_locate_draw(const mesh_ui_store_t *s)
+{
+    const mesh_locate_t *l = s->locate;
+    if (!l) return draw_centered(180, "LOCATE VIEW UNAVAILABLE", UI_BAD, 1);
+    bool held = !mesh_locate_released(l);
+    const char *state = s->closing || s->locate_return ? "STOPPING / RETURN TO SURVEY" :
+        s->scan.faulted || l->faulted ? "FAULT / CLOSE REQUIRED" :
+        s->locate_pending ? "STOPPING SURVEY / PRESERVING EVIDENCE" :
+        l->stop_requested && held ? "STOPPING SELECTED-ADDRESS LOCATE" :
+        l->have_control && (l->remote.flags & CERBERUS_MESH_LOCATE_RX_ACTIVE) ? "C5 RECEIVING / SELECTED SOURCE" :
+        held ? "STARTING SELECTED-ADDRESS LOCATE" : l->frozen ? "LOCATE STOPPED / RETAINED EVIDENCE" : "LOCATE IDLE / TAP START";
+    ESP_RETURN_ON_ERROR(draw_centered(52, state, UI_MUTED, 1), TAG, "locate state");
+    char line[64]; mesh_ui_address(&s->locate_target, line, sizeof(line));
+    ESP_RETURN_ON_ERROR(draw_centered(76, line, UI_TEXT, 2), TAG, "locate target");
+    mesh_ui_pan(&s->locate_target.pan, line, sizeof(line));
+    ESP_RETURN_ON_ERROR(draw_centered(100, line, UI_TEXT, 1), TAG, "locate PAN");
+    ESP_RETURN_ON_ERROR(draw_centered(116, s->locate_target.pan.known ?
+        "HEADER MATCH / NOT AUTHENTICATED IDENTITY" : "UNKNOWN PAN / AMBIGUOUS ADDRESS CONTEXT",
+        s->locate_target.pan.known ? UI_MUTED : UI_BAD, 1), TAG, "locate ambiguity");
+    const cerberus_mesh_locate_projection_t *p = &l->snapshot;
+    bool matched = l->has_snapshot && p->match_sequence;
+    if (matched && (p->flags & CERBERUS_MESH_LOCATE_RSSI_VALID))
+        snprintf(line, sizeof(line), "%d DBM", p->rssi);
+    else snprintf(line, sizeof(line), "RSSI --");
+    ESP_RETURN_ON_ERROR(draw_centered(141, line, UI_TEXT, 3), TAG, "locate RSSI");
+    if (matched && (p->flags & CERBERUS_MESH_LOCATE_LQI_VALID))
+        snprintf(line, sizeof(line), "SOURCE LQI %u / MATCH SEQ %lu", p->lqi, (unsigned long)p->match_sequence);
+    else snprintf(line, sizeof(line), "%s", matched ? "SOURCE LQI UNKNOWN" : "NOT YET HEARD AS SOURCE");
+    ESP_RETURN_ON_ERROR(draw_centered(171, line, UI_MUTED, 1), TAG, "locate LQI");
+    uint64_t age = 0U;
+    bool age_valid = mesh_locate_age_upper(l, esp_timer_get_time(), &age);
+    bool stale = age_valid && p->copied_us >= p->last_match_us && p->copied_us - p->last_match_us > UINT64_C(3000000);
+    if (age_valid) {
+        uint64_t unit = age < UINT64_C(1000000000) ? 1000U : 1000000U;
+        snprintf(line, sizeof(line), "SOURCE AGE <= %llu %s", (unsigned long long)(age / unit + (age % unit != 0U)),
+            unit == 1000U ? "MS" : "S");
+    }
+    else snprintf(line, sizeof(line), "SOURCE AGE UNKNOWN / NOT DELIVERY AGE");
+    ESP_RETURN_ON_ERROR(draw_centered(190, line, stale ? UI_BAD : UI_MUTED, 1), TAG, "locate source age");
+    snprintf(line, sizeof(line), "MATCHES %lu / DELIVERED SAMPLES %lu",
+        (unsigned long)(l->has_snapshot ? p->matches : 0U), (unsigned long)l->samples);
+    ESP_RETURN_ON_ERROR(draw_centered(209, line, UI_GOOD, 1), TAG, "locate counts");
+    ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(36, 235, 264, 66, UI_PANEL), TAG, "locate graph");
+    ESP_RETURN_ON_ERROR(cerberus_display_draw_text(8, 235, "-20", UI_MUTED, UI_BACKGROUND, 1), TAG, "locate graph maximum");
+    ESP_RETURN_ON_ERROR(cerberus_display_draw_text(8, 294, "-100", UI_MUTED, UI_BACKGROUND, 1), TAG, "locate graph minimum");
+    for (uint8_t i = 0U; i < l->history_count; ++i) {
+        mesh_locate_sample_t sample;
+        if (!mesh_locate_history_get(l, i, &sample)) return ESP_ERR_INVALID_RESPONSE;
+        uint16_t x = (uint16_t)(40U + (MESH_LOCATE_HISTORY - l->history_count + i) * 8U);
+        if (sample.flags & CERBERUS_MESH_LOCATE_RSSI_VALID) {
+            int value = sample.rssi < -100 ? -100 : sample.rssi > -20 ? -20 : sample.rssi;
+            uint16_t height = (uint16_t)(1U + (unsigned)(value + 100) * 60U / 80U);
+            ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(x, (uint16_t)(300U - height), 5, height, UI_GOOD), TAG, "locate sample");
+        } else ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(x, 299, 5, 1, UI_BAD), TAG, "locate missing signal");
+    }
+    ESP_RETURN_ON_ERROR(draw_centered(314, "SOURCE RSSI / LAST 32 DELIVERED SAMPLES", UI_MUTED, 1), TAG, "locate graph scope");
+    snprintf(line, sizeof(line), "COALESCED MATCHES %lu / NOT RF LOSS", (unsigned long)l->coalesced_matches);
+    ESP_RETURN_ON_ERROR(draw_centered(331, line, UI_MUTED, 1), TAG, "locate coalescing");
+    snprintf(line, sizeof(line), "SURVEY %016llX PRESERVED", (unsigned long long)s->locate_origin);
+    ESP_RETURN_ON_ERROR(draw_centered(348, line, UI_MUTED, 1), TAG, "locate origin");
+    esp_err_t error = s->error != ESP_OK ? s->error : l->error;
+    if (error != ESP_OK) snprintf(line, sizeof(line), "ERROR: %.35s", esp_err_to_name(error));
+    else if (s->job || s->locate_save_pending) snprintf(line, sizeof(line), "%s",
+        s->job ? "SD WRITING / PLEASE WAIT" : "STOPPING FOR FINAL LOCATE REPORT");
+    else if (s->locate_message[0]) snprintf(line, sizeof(line), "%s", s->locate_message);
+    else if (stale) snprintf(line, sizeof(line), "LAST SOURCE SAMPLE IS STALE");
+    else if (age_valid && age > UINT64_C(3000000)) snprintf(line, sizeof(line), "FRESHNESS UNCONFIRMED / AGE IS A BOUND");
+    else snprintf(line, sizeof(line), "FIXED CHANNEL / NO DISTANCE OR BEARING");
+    ESP_RETURN_ON_ERROR(draw_centered(365, line, error != ESP_OK ? UI_BAD : UI_MUTED, 1), TAG, "locate error");
+    bool survey_fault = s->scan.faulted && !mesh_scan_released(&s->scan);
+    bool can_start = mesh_scan_released(&s->scan) && s->scan.frozen && s->scan.final_valid && !s->scan.faulted;
+    ESP_RETURN_ON_ERROR(mesh_ui_button(8, 382, 148, 36, survey_fault ? "CLOSE SURVEY" : l->faulted && held ? "CLOSE" :
+        s->locate_pending || held ? "STOP" : "START LOCATE", !s->closing && !s->locate_return && !s->job &&
+        !s->locate_save_pending && (survey_fault || s->locate_pending || held || can_start)), TAG, "locate start stop");
+    return mesh_ui_button(164, 382, 148, 36, s->job || s->locate_save_pending ? "SAVING" :
+        s->locate_saved_name[0] ? "OPEN CSV" : held ? "STOP & SAVE" : "SAVE LOCATE",
+        !s->closing && !s->locate_return && !s->locate_pending && !s->job && !s->locate_save_pending &&
+        !l->faulted && (l->accepted || l->frozen));
 }
 
 static esp_err_t mesh_ui_draw(void)
@@ -267,6 +466,7 @@ static esp_err_t mesh_ui_draw(void)
     ESP_RETURN_ON_ERROR(draw_button(8, 430, 304, 42, s && s->closing ? "CLOSING" : "BACK"), TAG, "mesh back");
     if (!s) return draw_centered(182, mesh_ui_open_error == ESP_ERR_NO_MEM ?
         "NO PSRAM / BACK TO TOOLS" : "MESH VIEW UNAVAILABLE", UI_BAD, 1);
+    if (s->locate_view) return mesh_ui_locate_draw(s);
     if (s->detail) return mesh_ui_detail_draw(s);
     bool held = !mesh_scan_released(&s->scan);
     bool settings = !held && !s->start_pending && !s->job && !s->save_pending && !s->closing;
@@ -366,8 +566,15 @@ static void mesh_ui_tap(uint16_t x, uint16_t y)
 {
     mesh_ui_store_t *s = mesh_ui;
     if (!s || s->closing) return;
+    if (s->locate_view) {
+        if (x >= 8U && x < 156U && y >= 382U && y < 418U) mesh_ui_locate_toggle();
+        else if (x >= 164U && x < 312U && y >= 382U && y < 418U) mesh_ui_locate_save();
+        return;
+    }
     if (s->detail) {
-        if (x >= 80U && x < 240U && y >= 376U && y < 412U && s->selected.value.witness_valid &&
+        bool address = s->selected.value.kind == MESH_OBSERVATION_SELECT_ADDRESS;
+        if (address && x >= 8U && x < 156U && y >= 376U && y < 412U) mesh_ui_locate_start();
+        else if (x >= (address ? 164U : 80U) && x < (address ? 312U : 240U) && y >= 376U && y < 412U && s->selected.value.witness_valid &&
             s->selected.value.witness.input.length > 64U && !privacy_addresses_masked()) s->raw_page = (uint8_t)((s->raw_page + 1U) %
                 ((s->selected.value.witness.input.length + 63U) / 64U));
         return;

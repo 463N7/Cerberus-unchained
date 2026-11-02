@@ -21,6 +21,7 @@ static int64_t source_us=1000000;
 static bool allocation_fail,foreign_wifi,foreign_ble,foreign_test,foreign_station;
 static bool enabled,receiving,continuous,auto_ack_rx,auto_ack_tx,release_during_receive;
 static bool callback_inside_receive;
+static void (*locate_receive_hook)(void);
 static unsigned stop_on_take;
 static esp_err_t enable_error,receive_error,sleep_error,idle_error,disable_error;
 static unsigned disable_failures;
@@ -95,6 +96,13 @@ esp_err_t esp_ieee802154_receive(void)
 {
     CHECK(!locked&&!mesh_mux.depth&&!auto_ack_rx&&!auto_ack_tx&&continuous);++receives;
     receiving=receive_error==ESP_OK;
+    if (locate_context) {
+        cerberus_mesh_locate_control_t pending;
+        CHECK(cerberus_mesh_locate_status(locate_session,&pending)==ESP_OK);
+        CHECK(pending.state==CERBERUS_MESH_LOCATE_QUEUED&&!(pending.flags&CERBERUS_MESH_LOCATE_RX_ACTIVE));
+        if (locate_receive_hook) locate_receive_hook();
+        return receive_error;
+    }
     cerberus_mesh_observation_control_t pending;
     CHECK(cerberus_mesh_observation_status(mesh_session,&pending)==ESP_OK);
     CHECK(pending.state==CERBERUS_MESH_OBSERVATION_QUEUED&&!(pending.flags&CERBERUS_MESH_OBSERVATION_RX_ACTIVE));
@@ -121,7 +129,7 @@ bool cerberus_wifi_station_running(void){return foreign_station;}
 
 static void pump(unsigned waits)
 {
-    wait_budget=waits;if(mesh_context&&!notifications)notifications=1U;
+    wait_budget=waits;if((mesh_context||locate_context)&&!notifications)notifications=1U;
     if(!setjmp(yielded))task_fn(NULL);
     CHECK(!locked&&!mesh_mux.depth);
 }

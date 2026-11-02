@@ -46,6 +46,8 @@ idf_component_register(
         "mesh_observation.c"
         "mesh_scan.c"
         "mesh_report.c"
+        "mesh_locate.c"
+        "mesh_locate_report.c"
         "../../shared/mesh_mac.c"
         "../../shared/probe_sniff_core.c"
         "ble_archive_io.c"

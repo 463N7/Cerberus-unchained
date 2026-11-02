@@ -6,6 +6,7 @@
 #include "wifi_marauder.h"
 #include "probe_sniff_model.h"
 #include "mesh_report.h"
+#include "mesh_locate_report.h"
 #include "esp_err.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -38,6 +39,7 @@ typedef enum {
     CERBERUS_BLE_ARCHIVE_IO_EXPORT_SSID_TEXT,
     CERBERUS_BLE_ARCHIVE_IO_SAVE_PROBE,
     CERBERUS_BLE_ARCHIVE_IO_SAVE_MESH,
+    CERBERUS_BLE_ARCHIVE_IO_SAVE_MESH_LOCATE,
 } cerberus_ble_archive_io_operation_t;
 
 typedef enum {
@@ -48,6 +50,7 @@ typedef enum {
     CERBERUS_BLE_ARCHIVE_IO_FORMAT_SSID_TEXT,
     CERBERUS_BLE_ARCHIVE_IO_FORMAT_PROBE_REPORT,
     CERBERUS_BLE_ARCHIVE_IO_FORMAT_MESH_REPORT,
+    CERBERUS_BLE_ARCHIVE_IO_FORMAT_MESH_LOCATE_REPORT,
 } cerberus_ble_archive_io_format_t;
 typedef struct {
     cerberus_ble_archive_io_state_t state;
@@ -129,6 +132,10 @@ esp_err_t cerberus_ble_archive_io_save_probe(const cerberus_probe_sniff_snapshot
  * the same serialized worker. CSV is historical evidence, not a live scan or
  * an authoritative topology. No load or native-map reconstruction is implied. */
 esp_err_t cerberus_ble_archive_io_save_mesh(const mesh_scan_t *scan, uint64_t *job_id);
+/* Source-specific Locate report, using a separate schema and exact-sized PSRAM
+ * arm. Saves a new Mxxxxx.CSV in LOGS through the same serialized storage worker.
+ * The frozen source/history copy completes before returning to the UI. */
+esp_err_t cerberus_ble_archive_io_save_mesh_locate(const mesh_locate_t *locate, uint64_t *job_id);
 void cerberus_ble_archive_io_get_status(cerberus_ble_archive_io_status_t *status);
 /* Copies only a fully validated completed native BLE SAVE or LOAD. JSON jobs
  * require copy_airtag_json and Wi-Fi jobs require their matching typed copy. Getters reject

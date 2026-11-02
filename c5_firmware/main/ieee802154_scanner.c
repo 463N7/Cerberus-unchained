@@ -71,6 +71,8 @@ static uint64_t mesh_epoch,mesh_session;
 static cerberus_mesh_observation_start_t mesh_request;
 enum { MESH_SETUP=0,MESH_TUNE,MESH_DWELL,MESH_CLEANUP,MESH_STOPPED };
 
+#include "ieee802154_locate_impl.h"
+
 static uint32_t IRAM_ATTR mesh_increment(uint32_t value,mesh_observation_context_t *c)
 {
     if(value<UINT32_MAX)++value;
@@ -263,6 +265,7 @@ void IRAM_ATTR esp_ieee802154_receive_done(
     esp_ieee802154_frame_info_t *frame_info)
 {
     BaseType_t higher_priority_task_woken = pdFALSE;
+    locate_receive(frame,frame_info);
     mesh_receive(frame,frame_info);
     if (activity_scan_active && frame != NULL && frame_info != NULL && frame[0] >= 4U &&
         frame_info->channel >= CERBERUS_IEEE802154_FIRST_CHANNEL &&
@@ -335,7 +338,7 @@ static bool another_radio_operation_is_active(void)
 
 static bool mesh_legacy_running_locked(void)
 {
-    return scan_status.state==CERBERUS_IEEE802154_ENERGY_SCAN_RUNNING||
+    return locate_context!=NULL||scan_status.state==CERBERUS_IEEE802154_ENERGY_SCAN_RUNNING||
         beacon_status.state==CERBERUS_IEEE802154_BEACON_SCAN_RUNNING||
         activity_status.state==CERBERUS_IEEE802154_ACTIVITY_SCAN_RUNNING;
 }
@@ -1034,8 +1037,10 @@ static void scanner_task(void *arg)
         bool beacon = beacon_status.state == CERBERUS_IEEE802154_BEACON_SCAN_RUNNING;
         bool activity = activity_status.state == CERBERUS_IEEE802154_ACTIVITY_SCAN_RUNNING;
         bool mesh = mesh_context != NULL;
+        bool locate = locate_context != NULL;
         xSemaphoreGive(scanner_mutex);
-        if (mesh) run_mesh_observation();
+        if (locate) run_mesh_locate();
+        else if (mesh) run_mesh_observation();
         else if (energy) run_energy_scan();
         else if (beacon) run_beacon_scan();
         else if (activity) run_activity_scan();
@@ -1109,7 +1114,7 @@ esp_err_t cerberus_ieee802154_scanner_start(void)
     }
 
     xSemaphoreTake(scanner_mutex, portMAX_DELAY);
-    if (mesh_context != NULL ||
+    if (locate_context != NULL || mesh_context != NULL ||
         scan_status.state == CERBERUS_IEEE802154_ENERGY_SCAN_RUNNING ||
         beacon_status.state == CERBERUS_IEEE802154_BEACON_SCAN_RUNNING ||
         activity_status.state == CERBERUS_IEEE802154_ACTIVITY_SCAN_RUNNING) {
@@ -1134,7 +1139,7 @@ bool cerberus_ieee802154_scanner_is_running(void)
         return false;
     }
     xSemaphoreTake(scanner_mutex, portMAX_DELAY);
-    bool running = mesh_context != NULL ||
+    bool running = locate_context != NULL || mesh_context != NULL ||
         scan_status.state == CERBERUS_IEEE802154_ENERGY_SCAN_RUNNING ||
         beacon_status.state == CERBERUS_IEEE802154_BEACON_SCAN_RUNNING ||
         activity_status.state == CERBERUS_IEEE802154_ACTIVITY_SCAN_RUNNING;
@@ -1201,7 +1206,7 @@ esp_err_t cerberus_ieee802154_beacon_scanner_start(void)
     }
 
     xSemaphoreTake(scanner_mutex, portMAX_DELAY);
-    if (mesh_context != NULL ||
+    if (locate_context != NULL || mesh_context != NULL ||
         scan_status.state == CERBERUS_IEEE802154_ENERGY_SCAN_RUNNING ||
         beacon_status.state == CERBERUS_IEEE802154_BEACON_SCAN_RUNNING ||
         activity_status.state == CERBERUS_IEEE802154_ACTIVITY_SCAN_RUNNING) {
@@ -1280,7 +1285,7 @@ esp_err_t cerberus_ieee802154_activity_scanner_start(void)
     }
 
     xSemaphoreTake(scanner_mutex, portMAX_DELAY);
-    if (mesh_context != NULL ||
+    if (locate_context != NULL || mesh_context != NULL ||
         scan_status.state == CERBERUS_IEEE802154_ENERGY_SCAN_RUNNING ||
         beacon_status.state == CERBERUS_IEEE802154_BEACON_SCAN_RUNNING ||
         activity_status.state == CERBERUS_IEEE802154_ACTIVITY_SCAN_RUNNING) {

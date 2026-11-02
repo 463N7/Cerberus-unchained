@@ -25,6 +25,15 @@ The six focused BLE family workflows were inspected at that pinned revision.
 The additional check establishes the reviewed upstream revision, not feature
 completion or physical acceptance.
 
+### Rechecked on 2026-11-02
+
+The GitHub commit API resolved `develop` to
+`79cc6bcba1db6679baee1dab2b0c1ad5010e6363` again during the Mesh Locate design
+review. The current source inventory remains pinned to that same revision;
+this recheck does not change any feature-completion or hardware-acceptance status.
+The resolved upstream commit is
+[v1.20.0 develop](https://github.com/justcallmekoko/ESP32Marauder/commit/79cc6bcba1db6679baee1dab2b0c1ad5010e6363).
+
 ## Source difference, `develop` versus pinned `master`
 
 | Surface | `develop` | Added | Removed | Changed |

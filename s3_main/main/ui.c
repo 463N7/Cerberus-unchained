@@ -866,7 +866,7 @@ static cerberus_ieee802154_energy_scan_status_payload_t ieee802154_scan_status;
 static cerberus_ieee802154_energy_scan_result_payload_t ieee802154_scan_result;
 static esp_err_t ieee802154_scan_error = ESP_ERR_INVALID_STATE;
 static bool ieee802154_scan_checked;
-static ui_ieee802154_mode_t ieee802154_mode = UI_IEEE802154_MODE_MESH;
+static ui_ieee802154_mode_t ieee802154_mode = UI_IEEE802154_MODE_MENU;
 static cerberus_ieee802154_beacon_scan_status_payload_t ieee802154_beacon_status;
 static cerberus_ieee802154_beacon_scan_result_payload_t
     ieee802154_beacon_results[UI_IEEE802154_BEACON_VISIBLE_ROWS];
@@ -8377,9 +8377,9 @@ static esp_err_t draw_detail_page(void)
     } else if (current_page == UI_PAGE_SCRIPTS &&
         script_mode == UI_SCRIPT_MODE_RUNNING) {
         back_label = script_complete ? "SCRIPT LIST" : "CANCEL SCRIPT";
-    } else if (current_page == UI_PAGE_IEEE802154 &&
-        ieee802154_mode != UI_IEEE802154_MODE_MENU) {
-        back_label = "RADIO MENU";
+    } else if (current_page == UI_PAGE_IEEE802154) {
+        back_label = ieee802154_mode != UI_IEEE802154_MODE_MENU ? "MESH MENU" :
+            tool_parent_page == UI_PAGE_FIELD_MENU ? "BACK TO SCAN" : "BACK";
     }
     if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_DUAL && !ui_capability_blocked)
         return ESP_OK; /* This view owns both its Back and Stop controls. */
@@ -8393,7 +8393,8 @@ static esp_err_t draw_detail_page(void)
         ESP_RETURN_ON_ERROR(draw_button(8, UI_BACK_Y, 148, UI_BACK_HEIGHT, back_label), TAG, "monitor back");
         return draw_button(164, UI_BACK_Y, 148, UI_BACK_HEIGHT, "SAVE BOTH");
     }
-    if (live_is_view()) back_label = tool_parent_page == UI_PAGE_TOOLS ? "DEVICE TOOLS" : "HOME";
+    if (live_is_view() && current_page != UI_PAGE_IEEE802154)
+        back_label = tool_parent_page == UI_PAGE_TOOLS ? "DEVICE TOOLS" : "HOME";
     if (learning_tool_active) {
         return draw_button(12, UI_BACK_Y, 296, UI_BACK_HEIGHT, "RETURN TO LESSON");
     }
@@ -11529,7 +11530,7 @@ static void open_tool_page(ui_page_t page)
         wardrive_last_draw_ms = 0U;
     }
     if (current_page == UI_PAGE_IEEE802154) {
-        mesh_ui_open();
+        ieee802154_mode = UI_IEEE802154_MODE_MENU;
     }
     if (current_page == UI_PAGE_FILES) {
         file_listing_checked = false;

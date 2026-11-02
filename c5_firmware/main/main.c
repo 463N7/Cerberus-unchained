@@ -1058,6 +1058,45 @@ static void prepare_v2_response(const cerberus_spi_frame_t *request)
         }
         break;
     }
+    case CERBERUS_MESH_LOCATE_COMMAND_INFO:
+    case CERBERUS_MESH_LOCATE_COMMAND_START:
+    case CERBERUS_MESH_LOCATE_COMMAND_STATUS:
+    case CERBERUS_MESH_LOCATE_COMMAND_STOP:
+    case CERBERUS_MESH_LOCATE_COMMAND_PEEK:
+    case CERBERUS_MESH_LOCATE_COMMAND_RELEASE: {
+        cerberus_mesh_locate_control_t payload;
+        if (request->command == CERBERUS_MESH_LOCATE_COMMAND_INFO) {
+            if (request->payload_length != 0U) return;
+            cerberus_mesh_locate_info(&payload);
+        } else if (request->command == CERBERUS_MESH_LOCATE_COMMAND_START) {
+            if (request->payload_length != sizeof(cerberus_mesh_locate_start_t)) return;
+            cerberus_mesh_locate_start_t query;
+            memcpy(&query, request->payload, sizeof(query));
+            (void)cerberus_mesh_locate_start(&query, &payload);
+        } else {
+            if (request->payload_length != sizeof(cerberus_mesh_locate_request_t)) return;
+            cerberus_mesh_locate_request_t query;
+            memcpy(&query, request->payload, sizeof(query));
+            if (request->command == CERBERUS_MESH_LOCATE_COMMAND_STATUS)
+                (void)cerberus_mesh_locate_status(query.session_id, &payload);
+            else if (request->command == CERBERUS_MESH_LOCATE_COMMAND_STOP)
+                (void)cerberus_mesh_locate_stop(query.session_id, &payload);
+            else if (request->command == CERBERUS_MESH_LOCATE_COMMAND_PEEK)
+                (void)cerberus_mesh_locate_peek(query.session_id, &payload);
+            else (void)cerberus_mesh_locate_release(query.session_id, &payload);
+        }
+        prepare_frame_response(request->command, request->sequence, &payload, sizeof(payload));
+        return;
+    }
+    case CERBERUS_MESH_LOCATE_COMMAND_READ: {
+        if (request->payload_length != sizeof(cerberus_mesh_locate_read_t)) return;
+        cerberus_mesh_locate_read_t query;
+        cerberus_mesh_locate_chunk_t payload;
+        memcpy(&query, request->payload, sizeof(query));
+        (void)cerberus_mesh_locate_read(&query, &payload);
+        prepare_frame_response(request->command, request->sequence, &payload, sizeof(payload));
+        return;
+    }
     case CERBERUS_MESH_OBSERVATION_COMMAND_INFO:
     case CERBERUS_MESH_OBSERVATION_COMMAND_START:
     case CERBERUS_MESH_OBSERVATION_COMMAND_STATUS:

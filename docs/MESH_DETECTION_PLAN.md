@@ -15,9 +15,11 @@ parsing, exact-session C5 transport and the S3 observation model/controller.
 Interface and SD report integration pass the complete local host/native matrix
 and package checks. The paired rev130 update is installed and passes sampled
 idle boot checks; Mesh feature acceptance on the device remains pending.
-Protocol discovery,
-selected-address tracking, raw capture and historical map reopening remain
-later work; this plan does not imply that the complete CYM workflow is ported.
+The next [rev131 implementation](DUAL_RADIO_REV131.md) corrects menu-first
+navigation and adds passive selected-source tracking with stopped CSV export.
+Its full build and hardware acceptance are pending. Protocol discovery, raw
+capture and historical map reopening remain later work; this plan does not
+imply that the complete CYM workflow is ported.
 
 ## Reference baseline
 

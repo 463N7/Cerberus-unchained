@@ -192,9 +192,34 @@ def validate_console_proof(receipt: dict) -> dict:
     return proof
 
 
+def validate_locate_proof(receipt: dict) -> dict:
+    """Bind the callback placement gate to the final linked C5 and its sources."""
+    proof = receipt.get("native_mesh_locate_iram")
+    if not isinstance(proof, dict) or proof.get("status") != "passed" or proof.get("hardware_validated") is not False:
+        raise ValueError("Missing native Mesh Locate proof; rebuild the matched set")
+    if (proof.get("elf_sha256") != sha256(ROOT / "c5_firmware/.pio/build/c5-onboard/firmware.elf") or
+        proof.get("checker_sha256") != sha256(ROOT / "tools/check_mesh_locate_iram.py")):
+        raise ValueError("Native Mesh Locate proof is stale; rebuild the matched set")
+    expected_sources = {"shared/mesh_mac.c", "shared/mesh_mac.h", "shared/mesh_locate_protocol.h",
+        "c5_firmware/main/ieee802154_locate_impl.h", "c5_firmware/main/ieee802154_scanner.c",
+        "c5_firmware/main/CMakeLists.txt"}
+    sources = proof.get("source_hashes", {})
+    if set(sources) != expected_sources or any(sha256(ROOT / name) != digest for name,digest in sources.items()):
+        raise ValueError("Native Mesh Locate source proof is stale")
+    expected_evidence = {"artifacts/integration/c5-mesh-locate-iram.json",
+        "artifacts/integration/c5-mesh-locate-iram.txt"}
+    evidence = receipt.get("native_mesh_locate_evidence", {})
+    if set(evidence) != expected_evidence or any(sha256(ROOT / name) != digest for name,digest in evidence.items()):
+        raise ValueError("Native Mesh Locate evidence changed or is missing")
+    if json.loads((ROOT / "artifacts/integration/c5-mesh-locate-iram.json").read_text(encoding="utf-8")) != proof:
+        raise ValueError("Native Mesh Locate JSON differs from the matched receipt")
+    return proof
+
+
 def package(output: Path | None = None, *, release: bool = False, accepted_on: str | None = None) -> Path:
     receipt = json.loads(RECEIPT.read_text())
     console_proof = validate_console_proof(receipt)
+    locate_proof = validate_locate_proof(receipt)
     current_source = source_snapshot()
     if current_source != receipt["source"]:
         raise ValueError("Build inputs changed. Run tools/build_unchained.py --target all again")
@@ -243,15 +268,19 @@ def package(output: Path | None = None, *, release: bool = False, accepted_on: s
                 "platformio": receipt["platformio"], "source": current_source, "targets": targets,
                 "native_console_stack": console_proof,
                 "native_console_evidence": {"native-validation/" + Path(name).name: digest
-                    for name, digest in receipt["native_console_evidence"].items()}}
+                    for name, digest in receipt["native_console_evidence"].items()},
+                "native_mesh_locate_iram": locate_proof,
+                "native_mesh_locate_evidence": {"native-validation/" + Path(name).name: digest
+                    for name, digest in receipt["native_mesh_locate_evidence"].items()}}
     proof_directory = destination / "native-validation"
     proof_directory.mkdir()
-    for name, digest in receipt["native_console_evidence"].items():
+    for name, digest in {**receipt["native_console_evidence"], **receipt["native_mesh_locate_evidence"]}.items():
         copy = proof_directory / Path(name).name
         shutil.copy2(ROOT / name, copy)
         if sha256(copy) != digest:
-            raise ValueError("Native console evidence changed while packaging")
+            raise ValueError("Native build evidence changed while packaging")
     validate_console_proof(receipt)
+    validate_locate_proof(receipt)
     (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     shutil.copy2(ROOT / "docs" / "UNCHAINED_BUILD.md", destination / "BUILD_AND_RECOVERY.md")
     # Keep protocol provenance and redistribution notices with binary builds.

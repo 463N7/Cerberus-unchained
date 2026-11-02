@@ -2,6 +2,7 @@
 
 #include "cerberus_protocol.h"
 #include "mesh_observation_protocol.h"
+#include "mesh_locate_protocol.h"
 #include "esp_err.h"
 
 #include <stdbool.h>
@@ -48,6 +49,18 @@ esp_err_t cerberus_mesh_observation_read(const cerberus_mesh_observation_read_t 
     cerberus_mesh_observation_chunk_t *out);
 esp_err_t cerberus_mesh_observation_ack(const cerberus_mesh_observation_ack_t *request,
     cerberus_mesh_observation_control_t *out);
+
+/* Dedicated coalesced selected-source receive mode; the same worker owns SDK
+ * operations and retained cleanup. No raw FIFO or additional radio task. */
+void cerberus_mesh_locate_info(cerberus_mesh_locate_control_t *out);
+esp_err_t cerberus_mesh_locate_start(const cerberus_mesh_locate_start_t *request,
+    cerberus_mesh_locate_control_t *out);
+esp_err_t cerberus_mesh_locate_status(uint64_t session,cerberus_mesh_locate_control_t *out);
+esp_err_t cerberus_mesh_locate_stop(uint64_t session,cerberus_mesh_locate_control_t *out);
+esp_err_t cerberus_mesh_locate_release(uint64_t session,cerberus_mesh_locate_control_t *out);
+esp_err_t cerberus_mesh_locate_peek(uint64_t session,cerberus_mesh_locate_control_t *out);
+esp_err_t cerberus_mesh_locate_read(const cerberus_mesh_locate_read_t *request,
+    cerberus_mesh_locate_chunk_t *out);
 
 #ifdef __cplusplus
 }

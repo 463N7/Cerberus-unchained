@@ -1,6 +1,7 @@
 """Actual Mesh UI/controller/model, isolated framebuffer and route boundaries."""
 from pathlib import Path
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -25,6 +26,21 @@ assert 'if (current_page == UI_PAGE_IEEE802154 && ieee802154_mode == UI_IEEE8021
 assert '#include "mesh_ui.h"' in ui
 begin = ui.index('} else if (current_page == UI_PAGE_IEEE802154 &&\n                ieee802154_mode == UI_IEEE802154_MODE_MESH) {')
 back = ui[begin:].split('{', 1)[1].split('} else if', 1)[0]
+footer = ui[begin:ui.index('            } else if (current_page == UI_PAGE_SCRIPTS', begin)]
+footer = footer.replace('} else if', 'if', 1) + '} else { return_to_launcher(); }'
+begin = ui.index('static void return_to_launcher(void)\n{')
+launcher = ui[begin:ui.index('\nstatic void open_learning_lesson', begin)]
+begin = ui.index('else if (action == CERBERUS_FIELD_RADIO)')
+field = ui[begin:ui.index(';', begin) + 1].replace('else if', 'if', 1)
+begin = ui.index('        tool_parent_page = UI_PAGE_FIELD_MENU;', ui.index('if (current_page == UI_PAGE_FIELD_MENU)', ui.index('static void open_tool_page')))
+field_parent = ui[begin:ui.index('        if (action == CERBERUS_FIELD_RECON)', begin)]
+begin = ui.index('    } else if (current_page == UI_PAGE_IEEE802154) {', ui.index('const char *back_label'))
+footer_label = ui[begin:ui.index('\n    if (current_page == UI_PAGE_WIFI', begin)].replace('} else if', 'if', 1)
+begin = ui.index('    if (live_is_view() && current_page != UI_PAGE_IEEE802154)')
+footer_override = ui[begin:ui.index('    if (learning_tool_active)', begin)]
+footer_draw = 'return draw_button(64, UI_BACK_Y, 192, UI_BACK_HEIGHT, back_label);'
+assert footer_draw in ui
+footer_defines = '\n'.join(re.findall(r'^#define UI_BACK_(?:Y|HEIGHT) .+$', ui, re.M))
 begin = ui.index('        mesh_ui_tick((uint64_t)now_ms,')
 tick = ui[begin:ui.index(';', begin) + 1]
 begin = ui.index('    if (current_page == UI_PAGE_IEEE802154) {', ui.index('static void open_tool_page(ui_page_t page)\n{'))
@@ -32,10 +48,15 @@ entry = ui[begin:].split('{', 1)[1].split('}', 1)[0]
 begin = ui.index('    if (ieee802154_mode == UI_IEEE802154_MODE_MENU) {', ui.index('static void handle_ieee802154_tap('))
 menu = ui[begin:ui.index('\n    if (y < 364U', begin)]
 live = (root / "s3_main/main/sentinel_live_ui.h").read_text()
+begin = live.index('static bool live_is_view(void)')
+live_view = live[begin:live.index('\nstatic void live_status', begin)]
 assert 'const bool defer_c5 = live_wifi_capture_defers_c5() || mesh_ui_busy();' in live
 assert 'if (c5_online && !live_wifi_capture_defers_c5() && !mesh_ui_busy())' in live
 (out / "mesh_routes.h").write_text('static void route_back(void){\n' + back + '}\n'
+    + launcher + '\nstatic void route_footer(void){\n' + footer + '}\n'
+    + live_view + footer_defines + '\nstatic esp_err_t route_draw_footer(void){const char *back_label="BACK";\n' + footer_label + footer_override + footer_draw + '}\n'
     'static void route_entry(void){\n' + entry + '}\n'
+    'static void route_field(cerberus_field_action_t action){\n' + field_parent + field + '}\n'
     'static void route_tick(uint64_t now_ms,bool screen_asleep){\n' + tick + '}\n'
     'static void route_tools(uint16_t x,uint16_t y){\n' + menu + '}\n')
 env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(out / "zig-global"), ZIG_LOCAL_CACHE_DIR=str(out / "zig-local"))
@@ -43,8 +64,10 @@ exe = out / ("mesh-ui.exe" if os.name == "nt" else "mesh-ui")
 subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
     "-I", str(out), "-I", str(root / "tools/host_checks/stubs"), "-I", str(root / "s3_main/main"), "-I", str(root / "shared"),
     str(root / "tools/host_checks/mesh_ui_check.c"), str(root / "s3_main/main/mesh_scan.c"),
+    str(root / "s3_main/main/mesh_locate.c"),
     str(root / "s3_main/main/mesh_observation.c"), str(root / "shared/mesh_mac.c"),
-    str(root / "s3_main/main/sentinel_hub.c"), str(root / "s3_main/main/ui_widgets.c"),
+    str(root / "s3_main/main/sentinel_hub.c"), str(root / "s3_main/main/field_menu.c"),
+    str(root / "s3_main/main/ui_widgets.c"),
     "-o", str(exe)], check=True, env=env)
 subprocess.run([str(exe), str(out)], check=True, env=env)
 

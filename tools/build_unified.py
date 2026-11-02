@@ -221,6 +221,12 @@ def main() -> int:
                 entry["usb_console_stack_error"] = str(error)
         if process.returncode == 0 and name == "onboard":
             try:
+                from check_mesh_locate_iram import verify as verify_locate_iram
+                entry["mesh_locate_iram"] = verify_locate_iram(ROOT)
+            except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as error:
+                entry["status"] = "failed"
+                entry["mesh_locate_iram_error"] = str(error)
+            try:
                 from check_c5_raw_link import verify
                 entry["raw_tx_link"] = verify(ROOT)
             except (RuntimeError, OSError, subprocess.SubprocessError) as error:

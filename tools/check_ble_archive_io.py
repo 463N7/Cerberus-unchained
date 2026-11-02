@@ -108,6 +108,7 @@ for fixture in ("ble_archive_storage_check", "ble_archive_io_check"):
     command.append(str(root / "s3_main/main/wifi_marauder.c"))
     if fixture == "ble_archive_io_check":
         for source in ("s3_main/main/mesh_report.c", "s3_main/main/mesh_scan.c",
+                       "s3_main/main/mesh_locate.c", "s3_main/main/mesh_locate_report.c",
                        "s3_main/main/mesh_observation.c", "shared/mesh_mac.c"):
             command.append(str(root / source))
         command.append(str(root / "s3_main/main/probe_sniff_model.c"))
