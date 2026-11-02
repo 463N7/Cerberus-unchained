@@ -54,7 +54,8 @@ framebuffer = framebuffer.replace("if(!*text)return ESP_OK;", "if(!*text)return 
 (out / "ssid_framebuffer.h").write_text(framebuffer)
 exe = out / "wifi-ssid-detail-check.exe"
 env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(out / "zig-cache"))
-subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1",
+# Expose POSIX strnlen used by the production UI under strict C11 on Linux.
+subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-O1",
     "-Wall", "-Wextra", "-Werror", "-I", str(out), "-I", str(root / "tools/host_checks/stubs"),
     "-I", str(root / "shared"), "-I", str(root / "s3_main/main"),
     str(root / "tools/host_checks/wifi_ssid_detail_check.c"),

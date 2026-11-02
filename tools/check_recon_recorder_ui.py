@@ -65,7 +65,8 @@ while depth:
     "static void recon_test_sleep_attempt(void)\n{\n" + ui[start:end] + "\n}\n", encoding="utf-8")
 exe = out / ("recon-recorder-ui-check.exe" if os.name == "nt" else "recon-recorder-ui-check")
 env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(out / "zig-cache"))
-subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1",
+# Expose POSIX strnlen used by the production UI under strict C11 on Linux.
+subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-O1",
     "-Wall", "-Wextra", "-Werror", "-I", str(out),
     "-I", str(root / "tools/host_checks/stubs"),
     "-I", str(root / "s3_main/main"), "-I", str(root / "shared"),
