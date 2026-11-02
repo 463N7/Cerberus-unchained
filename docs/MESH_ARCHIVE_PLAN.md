@@ -1,13 +1,15 @@
 # Mesh saved observation maps
 
-Development work after installed rev131. This plan is not a completed-feature
-or hardware-acceptance claim. The owner has accepted rev131's menu-first entry
-and Back controls; reception and SD behavior still require their own checks.
+Implemented in the installed rev132 development pair, with host/native/package
+and sampled boot evidence recorded in [the checkpoint](DUAL_RADIO_REV132.md).
+This plan is not a complete parity or hardware-acceptance claim. The owner has
+accepted rev131's menu-first entry and Back controls; reception and SD behavior
+still require their own checks.
 
-The missing outcome is reopening a saved Mesh survey as browsable PAN contexts,
-addresses, directed traffic and retained raw evidence. The existing CSV is an
-external report, not an importable map. A new versioned `.MSH` document will
-preserve complete retained aggregates, final coverage/loss counters and the
+The workflow reopens a saved Mesh survey as browsable PAN contexts, addresses,
+directed traffic and retained raw evidence. The existing CSV is an external
+report, not an importable map. The versioned `.MSH` document preserves
+complete retained aggregates, final coverage/loss counters and the
 first 64 raw witnesses. Replaying those witnesses cannot reconstruct later
 aggregate updates, so the archive must store both explicitly.
 

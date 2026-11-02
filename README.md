@@ -62,19 +62,23 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 ## Development status
 
 Rev132 implements native Mesh saved maps: portable `.MSH` files, asynchronous
-SD save/open and historical observation browsing with CSV export. It is not
-built, packaged or installed yet; focused checks pass. See
-[the current checkpoint](docs/DUAL_RADIO_REV132.md).
+SD save/open and historical observation browsing with CSV export. All 151 host
+suites and five native targets pass on
+1,202 unchanged inputs, and the verified matched development package is now
+installed on both chips. Paired boot, mounted SD and sampled idle checks pass;
+real SD save/reopen and Mesh reception acceptance remain pending. Fixed RAM
+grows by 16 bytes on S3 and is unchanged on C5; the larger archive buffers are
+optional PSRAM allocations. See [the current checkpoint](docs/DUAL_RADIO_REV132.md).
 
 Rev131 corrects the Mesh entry flow: the Scan tile is named Mesh Detection and
 opens the five-tool menu before any individual tool. It also adds passive
 selected-source Locate with a compact C5 filter, independent S3 signal history
 and stopped CSV export. All 150 registered host suites and five native targets
 pass on 1,194 unchanged inputs; the matched development package verifies.
-Rev131 is installed on both chips, with C5 capability 73 online, mounted SD
-and two stable idle boot samples. The owner confirms menu-first navigation and
+Rev131 was installed on both chips before rev132, with C5 capability 73 online,
+mounted SD and two stable idle boot samples. The owner confirms menu-first navigation and
 Back work; real Mesh reception, Locate and SD report acceptance remain pending. See
-[the current checkpoint](docs/DUAL_RADIO_REV131.md) for scope and evidence.
+[the rev131 checkpoint](docs/DUAL_RADIO_REV131.md) for scope and evidence.
 
 Rev130 adds a passive Mesh Detection receive path, typed address model,
 exact-session transfer, PAN/address/traffic views and stopped SD reports.

@@ -1,10 +1,12 @@
 # Rev132: saved Mesh observation maps
 
-Development source following installed rev131. The owner has accepted rev131's
-menu-first Mesh entry and Back controls. Rev132 implements native saved-map
-reopening; final host/native matrix, packaging and physical acceptance are
-pending at this source checkpoint. No complete Mesh/CYM/Marauder parity claim
-is made. The [implementation plan](MESH_ARCHIVE_PLAN.md) records its boundaries.
+The matched rev132 development package passes the complete local host/native
+matrix, resource audit and package verification and is installed on both chips.
+Paired application boot, SD mounting and sampled idle checks pass. The owner has
+accepted rev131's menu-first Mesh entry and Back controls; actual Mesh reception,
+Locate and the new SD save/reopen workflow still require physical acceptance.
+No complete Mesh/CYM/Marauder parity claim is made. The
+[implementation plan](MESH_ARCHIVE_PLAN.md) records its boundaries.
 
 ## User workflow
 
@@ -79,7 +81,72 @@ observations, historical details/privacy, retained-map errors, CSV export,
 Back/sleep cleanup, and the absence of live controls. Host-rendered previews
 are not photographs or touchscreen acceptance.
 
-The registry now has 151 host suites. Full matrix, native resource audit,
-matched package verification and real SD save/reopen remain pending. A build or
-successful flash alone will not establish physical reception, loaded memory,
-storage durability or complete feature parity.
+All 151 registered host suites and five native targets pass on 1,202 unchanged
+inputs at source `6a91b8be6dd291401de4d78de9d96771b81d7733`. The matched package's
+22 checksums, nine images, chip headers, partition layouts and erase bounds
+verify. The first-use correction is covered by actual directory-listing and
+navigation fixtures: only `ENOENT` becomes a missing-directory result, logging
+cannot change its classification, and mount/status/other-directory errors stay
+visible. Empty, repeated and subsequently populated listings retain Back.
+
+The native comparison against rev131 measures:
+
+| Linked or optional allocation | Bytes | Change from rev131 |
+| --- | ---: | --- |
+| S3 fixed data + BSS | 169,436 | +16 |
+| C5 fixed data + BSS | 83,400 | Unchanged |
+| Live Mesh UI in PSRAM | 22,896 | Unchanged |
+| Historical viewer in PSRAM | 22,776 | New, optional |
+| Map save worker in PSRAM | 39,568 | New, optional |
+| Map load worker in PSRAM | 60,032 | New, optional |
+| Historical CSV worker in PSRAM | 119,544 | New, optional |
+
+All previous worker allocation arms remain unchanged. Conservative optional
+overlaps are 82,928 bytes during Save, 105,704 during direct Open, and 142,320
+during historical CSV export. Including the old live UI before its cleanup
+tick raises the last case to 165,216 bytes. These exclude allocator metadata,
+filesystem/SDK allocations and unrelated stores. The archive worker stack is
+still 6,144 bytes; measured codec entry frames are 80 bytes for encode, 64 for
+decode and 64 for field transfer. Entry frames are not a full call-chain bound
+or measured runtime headroom.
+
+The offline audit's first attempt omitted a GCC `$constprop$` helper spelling.
+Its evidence is preserved separately; the corrected final audit includes that
+helper and the new filename-counter scalar. Firmware, ELF hashes and allocation
+measurements did not change. No firmware rebuild was needed for that audit-only
+correction.
+
+## Package and installation record
+
+- Package: `dist/cerberus-unchained-0.1.0-dev.rev132-20261102T222844Z`.
+- Manifest SHA-256: `c17789e7565490e118b08a1aaf074252afcd3fe98bb8d373d42937fce532e805`.
+- Source snapshot SHA-256: `7d7d91db3699319aba5002f6919d98aa44eef4a21d81f502d05f5de464af7530`.
+- Local milestone: `artifacts/rev132-validation/local-milestone.json`, SHA-256
+  `29d2f21b1aca365dd64dc3f5026550ef7bbedb28cb609d717aeaeeaacec07612`.
+- Final native audit: `artifacts/rev132-validation/archive-native-final/native-memory-comparison.json`,
+  SHA-256 `8ad8f0a2a282d8e31c5b2d6de9e29bd6a99d7f9b922db7318793670acf7f560c`.
+- Installation: `artifacts/device-rev132/installation-receipt.json`, SHA-256
+  `c2ef91f48c29b136b7097e591e3c796387745252bb7d0d334cebc8c2529516a9`.
+
+The immutable local milestone describes the pre-install checkpoint; installation
+has its own receipt. Fresh rev131 backups were read and verified through S3
+`0x20b000` and C5 `0x200000`, covering every old/new/bridge erase extent. All nine
+bridge/C5/final-S3 image writes verified. NVS/PHY regions were preserved; no
+blanket erase was used. This is a local development installation, not a public
+binary release or a new PR update.
+
+Two rev132 idle captures 44.597 seconds apart show both uptimes advancing, C5
+boot count remaining one, and SPI exchanges increasing from 210 to 416 without
+growth in the listed error counters. Four initial READY timeouts and four
+legacy fallbacks were already present and remained unchanged; this is not a
+zero-error-startup claim. Both samples report mounted SD, 137,664 internal free
+S3 bytes, a 94,208-byte largest internal block, 1,427,552 free PSRAM bytes and
+53,636 snapshot-free C5 bytes. The observed console stack low-water value falls
+from 2,080 to 1,408 bytes as diagnostics exercise more paths; these idle samples
+do not measure loaded-operation stack or heap bounds.
+
+The next physical check is Scan → Mesh Detection → Mesh Detection → START →
+STOP & SAVE → OPEN MAP, then Back and a normal Wi-Fi scan. An empty map can be
+valid without nearby traffic; it does not prove reception. Real SD save/reopen,
+CSV export, repeated transitions, Locate signal behavior and loaded endurance
+remain pending. No GPS is needed for these Mesh workflows.
