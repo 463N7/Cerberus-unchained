@@ -1,0 +1,216 @@
+/* Production UI + controller + parser, using the existing controller's exact
+ * transport fake. No UI helper is substituted for owner state transitions. */
+#define main controller_suite
+#include "mesh_scan_check.c"
+#undef main
+#include "mesh_framebuffer.h"
+#include "ble_archive_io.h"
+#include "storage.h"
+#include "sentinel_hub.h"
+#define UI_BACKGROUND 0x0042
+#define UI_PANEL 0x08A4
+#define UI_MUTED 0x7CB5
+#define UI_TEXT 0xE77F
+#define UI_GOOD 0x471B
+#define UI_BAD 0xF471
+#define TAG "mesh-ui"
+#define MALLOC_CAP_SPIRAM 4U
+#define MALLOC_CAP_8BIT 2U
+#define ESP_ERROR_CHECK(x) CHECK((x)==ESP_OK)
+typedef enum {UI_PAGE_IEEE802154,UI_PAGE_FILES,UI_PAGE_OTHER} ui_page_t;
+typedef enum {UI_IEEE802154_MODE_MENU,UI_IEEE802154_MODE_ENERGY,UI_IEEE802154_MODE_BEACONS,
+    UI_IEEE802154_MODE_ACTIVITY,UI_IEEE802154_MODE_ASSESSMENT,UI_IEEE802154_MODE_MESH} ui_ieee802154_mode_t;
+static ui_page_t current_page;
+static ui_ieee802154_mode_t ieee802154_mode;
+static bool ieee802154_scan_checked,ieee802154_beacon_checked,ieee802154_activity_checked;
+static bool oom,masked,prior_released=true;
+static unsigned allocations,freed,io_saves,io_cancels,io_releases,file_opens,lessons;
+static uint64_t job_sequence;
+static struct {uint32_t firmware_version;} c5_status={72};
+static char file_path[CERBERUS_STORAGE_PATH_MAX],opened_name[CERBERUS_STORAGE_NAME_MAX];
+static cerberus_ble_archive_io_status_t io;
+static mesh_scan_t io_copy;
+static esp_err_t io_start_error;
+static const cerberus_ui_widget_theme_t theme={.background=UI_BACKGROUND,.panel=UI_PANEL,
+    .text=UI_TEXT,.muted=UI_MUTED,.border=UI_GOOD};
+#define UI_WIDGET_THEME (&theme)
+static bool privacy_addresses_masked(void){return masked;}
+static bool dual_wifi_live_released(void){return prior_released;}
+static int64_t esp_timer_get_time(void){return peer.clock;}
+static void *heap_caps_calloc(size_t n,size_t size,unsigned caps)
+{CHECK(caps==(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));if(oom)return NULL;void*p=calloc(n,size);CHECK(p);++allocations;return p;}
+static void heap_caps_free(void*p){if(p){++freed;free(p);}}
+static const char *esp_err_to_name(esp_err_t error)
+{return error==ESP_ERR_NO_MEM?"ESP_ERR_NO_MEM":error==ESP_ERR_NOT_SUPPORTED?"ESP_ERR_NOT_SUPPORTED":
+ error==ESP_ERR_INVALID_RESPONSE?"ESP_ERR_INVALID_RESPONSE":error==ESP_ERR_TIMEOUT?"ESP_ERR_TIMEOUT":"ESP_FAIL";}
+static esp_err_t draw_centered(uint16_t y,const char*text,uint16_t color,uint8_t scale)
+{CHECK(strlen(text)*6U*scale<=320U);return cerberus_display_draw_text((320U-strlen(text)*6U*scale)/2U,y,text,color,UI_BACKGROUND,scale);}
+static esp_err_t draw_header(const char*text){return draw_centered(20,text,UI_TEXT,2);}
+static esp_err_t draw_button(uint16_t x,uint16_t y,uint16_t w,uint16_t h,const char*text)
+{return cerberus_ui_widget_draw_button((cerberus_ui_rect_t){x,y,w,h},text,2U,true,UI_WIDGET_THEME);}
+static esp_err_t draw_small_button(uint16_t x,uint16_t y,uint16_t w,uint16_t h,const char*text)
+{return cerberus_ui_widget_draw_button((cerberus_ui_rect_t){x,y,w,h},text,1U,true,UI_WIDGET_THEME);}
+esp_err_t c5_spi_link_mesh_exchange(uint8_t cmd,const void*q,size_t qs,void*r,size_t rs)
+{return exchange(&peer,cmd,q,qs,r,rs);}
+esp_err_t cerberus_ble_archive_io_save_mesh(const mesh_scan_t*s,uint64_t*job)
+{++io_saves;*job=0U;if(io_start_error)return io_start_error;
+ CHECK(s->frozen&&mesh_scan_released(s)&&s->final_valid&&!s->faulted);io_copy=*s;
+ io=(cerberus_ble_archive_io_status_t){.job_id=++job_sequence,.operation=CERBERUS_BLE_ARCHIVE_IO_SAVE_MESH,
+    .format=CERBERUS_BLE_ARCHIVE_IO_FORMAT_MESH_REPORT,.state=CERBERUS_BLE_ARCHIVE_IO_SAVING,.worker_active=true};
+ *job=job_sequence;return ESP_OK;}
+void cerberus_ble_archive_io_get_status(cerberus_ble_archive_io_status_t*out){*out=io;}
+void cerberus_ble_archive_io_cancel(uint64_t job){CHECK(job==io.job_id);++io_cancels;}
+void cerberus_ble_archive_io_release(uint64_t job){CHECK(job);++io_releases;}
+static void open_text_file(const char*name){++file_opens;snprintf(opened_name,sizeof(opened_name),"%s",name);}
+static void open_learning_lesson(unsigned id){CHECK(id==4U);++lessons;}
+static esp_err_t draw_detail_page(void);
+#include "mesh_ui.h"
+static esp_err_t draw_detail_page(void)
+{drawn_size=0;drawn[0]=0;return ieee802154_mode==UI_IEEE802154_MODE_MESH?mesh_ui_draw():ESP_OK;}
+#include "mesh_routes.h"
+static void ui_step(unsigned ms,bool asleep)
+{peer.clock+=(int64_t)ms*1000;unsigned before=peer.wire_calls;
+ route_tick((uint64_t)peer.clock/1000U,asleep);CHECK(peer.wire_calls-before<=4U);}
+static void ui_reset(void)
+{CHECK(!mesh_ui);reset();oom=masked=false;prior_released=true;c5_status.firmware_version=72;
+ current_page=UI_PAGE_IEEE802154;ieee802154_mode=UI_IEEE802154_MODE_MENU;fail_after=0;
+ io=(cerberus_ble_archive_io_status_t){0};io_start_error=ESP_OK;opened_name[0]=0;route_entry();}
+static void ui_exit(void)
+{mesh_ui_close(true);for(unsigned i=0;i<1000U&&mesh_ui;++i)ui_step(20,false);CHECK(!mesh_ui&&!peer.bound);}
+static void ui_begin(unsigned count)
+{ui_reset();CHECK(mesh_ui&&!peer.wire_calls&&!mesh_ui_busy());mesh_ui_start_stop();ui_step(0,false);
+ CHECK(peer.starts==1U&&peer.bound&&mesh_ui_busy());
+ for(unsigned i=0;i<count;++i){add_row(0U);row_t*r=&peer.rows[(peer.head+peer.count-1U)%16U];
+    r->bytes[21]=(uint8_t)(i+1U);r->bytes[22]=(uint8_t)(i+2U);}
+ for(unsigned i=0;i<1000U&&mesh_ui->scan.model.counters.records<count;++i)ui_step(20,false);
+ CHECK(mesh_ui->scan.model.counters.records==count);CHECK(draw_detail_page()==ESP_OK);}
+static void ui_freeze(void)
+{mesh_scan_stop(&mesh_ui->scan);for(unsigned i=0;i<1000U&&!mesh_ui->scan.frozen;++i)ui_step(20,false);
+ CHECK(mesh_ui->scan.frozen&&mesh_scan_released(&mesh_ui->scan)&&!peer.bound);}
+static void lifecycle(void)
+{
+ ui_reset();ui_exit();oom=true;current_page=UI_PAGE_IEEE802154;route_entry();CHECK(!mesh_ui&&!peer.wire_calls);
+ CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"NO PSRAM"));route_back();CHECK(ieee802154_mode==UI_IEEE802154_MODE_MENU);oom=false;
+ ui_reset();c5_status.firmware_version=71;mesh_ui_start_stop();ui_step(20,false);
+ CHECK(!peer.starts&&!peer.wire_calls&&mesh_ui->error==ESP_ERR_NOT_SUPPORTED);ui_exit();
+ ui_reset();prior_released=false;mesh_ui_start_stop();ui_step(20,false);
+ CHECK(mesh_ui->start_pending&&!mesh_ui_busy()&&!peer.wire_calls);mesh_ui_tap(20,80);CHECK(mesh_ui->mode==CERBERUS_MESH_OBSERVATION_SWEEP);
+ mesh_ui_start_stop();prior_released=true;ui_step(20,false);CHECK(!peer.starts&&!mesh_ui->start_pending);
+ mesh_ui_start_stop();route_back();ui_step(20,false);CHECK(!mesh_ui&&!peer.starts);
+ ui_begin(4U);CHECK(mesh_ui->painted_count==1U);
+ mesh_ui_tap(130,120);CHECK(draw_detail_page()==ESP_OK&&mesh_ui->painted_count==4U);
+ mesh_ui_painted_t painted=mesh_ui->painted[0];
+ mesh_ui->scan.model.addresses[0].key.value=0xdeadU;mesh_ui_tap(20,155);
+ CHECK(mesh_ui->detail&&!memcmp(&mesh_ui->selected,&painted,sizeof(painted)));
+ unsigned commands=peer.wire_calls;CHECK(draw_detail_page()==ESP_OK&&peer.wire_calls==commands&&strstr(drawn,"SOURCE SEQ"));
+ route_back();CHECK(!mesh_ui->detail);CHECK(draw_detail_page()==ESP_OK);
+ fail_after=calls+8U;CHECK(draw_detail_page()!=ESP_OK&&!mesh_ui->painted_count);mesh_ui_tap(20,155);CHECK(!mesh_ui->detail);fail_after=0;
+ mesh_ui_tap(250,120);CHECK(draw_detail_page()==ESP_OK);painted=mesh_ui->painted[0];
+ mesh_ui->scan.model.addresses[0].key.value=0xbeefU;mesh_ui_tap(20,155);
+ CHECK(mesh_ui->detail&&!memcmp(&mesh_ui->selected,&painted,sizeof(painted)));
+ CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"NOT A ROUTE"));route_back();
+ peer.stop_hold=30U;mesh_ui_start_stop();for(unsigned i=0;i<20U;++i)ui_step(700,false);
+ CHECK(mesh_ui_busy()&&mesh_ui->scan.stop_requested);unsigned starts=peer.starts;mesh_ui_start_stop();CHECK(peer.starts==starts);
+ peer.stop_hold=0;ui_freeze();CHECK(mesh_ui->scan.final_valid);ui_exit();
+ ui_begin(1U);peer.stop_hold=30U;route_back();for(unsigned i=0;i<20U;++i)ui_step(700,true);
+ CHECK(mesh_ui&&mesh_ui->closing&&peer.bound);peer.stop_hold=0;
+ for(unsigned i=0;i<1000U&&mesh_ui;++i)ui_step(20,true);CHECK(!mesh_ui&&ieee802154_mode==UI_IEEE802154_MODE_MESH);
+ ui_begin(1U);current_page=UI_PAGE_OTHER;ui_step(20,false);CHECK(!mesh_ui||mesh_ui->closing);
+ for(unsigned i=0;i<1000U&&mesh_ui;++i)ui_step(20,false);CHECK(!mesh_ui&&current_page==UI_PAGE_OTHER);
+ ui_begin(0U);add_row(0U);mutate_record(peer.rows[peer.head].bytes,1U);
+ for(unsigned i=0;i<1000U&&!mesh_ui->scan.faulted;++i)ui_step(20,false);
+ CHECK(mesh_ui->scan.faulted&&peer.bound);unsigned saves=io_saves;
+ mesh_ui_tap(260,400);CHECK(!mesh_ui->save_pending&&io_saves==saves);
+ CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"CLOSE REQUIRED"));route_back();
+ for(unsigned i=0;i<1000U&&mesh_ui;++i)ui_step(20,false);CHECK(!mesh_ui&&!peer.bound);
+ CHECK(allocations==freed);
+}
+static void saving(void)
+{
+ ui_begin(3U);unsigned saves=io_saves;mesh_ui_tap(260,400);CHECK(mesh_ui->save_pending);
+ for(unsigned i=0;i<1000U&&!mesh_ui->job;++i)ui_step(20,false);
+ CHECK(mesh_ui->job&&io_saves==saves+1U&&!peer.bound&&io_copy.frozen);
+ unsigned starts=peer.starts;mesh_ui_start_stop();mesh_ui_tap(20,80);CHECK(peer.starts==starts&&mesh_ui->mode==CERBERUS_MESH_OBSERVATION_SWEEP);
+ io.state=CERBERUS_BLE_ARCHIVE_IO_ERROR;io.error=ESP_FAIL;io.worker_active=false;ui_step(20,false);
+ CHECK(!mesh_ui->job&&!mesh_ui->saved_name[0]);mesh_ui_tap(260,400);ui_step(20,false);
+ CHECK(mesh_ui->job&&io_saves==saves+2U&&peer.starts==starts);
+ io.worker_active=false;io.state=CERBERUS_BLE_ARCHIVE_IO_COMPLETE;io.format=CERBERUS_BLE_ARCHIVE_IO_FORMAT_WIFI;
+ ui_step(20,false);CHECK(mesh_ui->error==ESP_ERR_INVALID_RESPONSE&&!mesh_ui->saved_name[0]);
+ mesh_ui_tap(260,400);ui_step(20,false);CHECK(mesh_ui->job);
+ io.worker_active=false;io.state=CERBERUS_BLE_ARCHIVE_IO_COMPLETE;snprintf(io.file_name,sizeof(io.file_name),"M00001.CSV");
+ ui_step(20,false);CHECK(!strcmp(mesh_ui->saved_name,"M00001.CSV"));
+ mesh_ui_tap(260,400);CHECK(current_page==UI_PAGE_FILES&&!strcmp(file_path,"/CERBERUS/LOGS")&&!strcmp(opened_name,"M00001.CSV"));
+ for(unsigned i=0;i<1000U&&mesh_ui;++i)ui_step(20,false);CHECK(!mesh_ui);
+ ui_begin(1U);mesh_ui_tap(260,400);for(unsigned i=0;i<1000U&&!mesh_ui->job;++i)ui_step(20,false);CHECK(mesh_ui->job);
+ unsigned cancels=io_cancels,opens=file_opens;route_back();CHECK(io_cancels==cancels+1U);
+ for(unsigned i=0;i<20U;++i)ui_step(700,true);CHECK(mesh_ui&&mesh_ui->job&&io_cancels==cancels+1U);
+ io.worker_active=false;io.state=CERBERUS_BLE_ARCHIVE_IO_COMPLETE;ui_step(20,true);
+ CHECK(!mesh_ui&&file_opens==opens&&allocations==freed);
+ ui_begin(1U);ui_freeze();mesh_ui_start_stop();CHECK(mesh_ui->suppress_old);CHECK(draw_detail_page()==ESP_OK&&!mesh_ui->painted_count);
+ prior_released=false;ui_step(20,false);CHECK(!mesh_ui->painted_count);mesh_ui_start_stop();ui_exit();
+}
+static void ppm(const char*folder,const char*name)
+{char path[1024];snprintf(path,sizeof(path),"%s/%s.ppm",folder,name);FILE*f=fopen(path,"wb");CHECK(f);
+ fprintf(f,"P6\n320 480\n255\n");for(size_t i=0;i<320U*480U;++i){unsigned v=screen[i];
+ fputc(((v>>11)&31U)*255U/31U,f);fputc(((v>>5)&63U)*255U/63U,f);fputc((v&31U)*255U/31U,f);}CHECK(!fclose(f));}
+static void large_model(const char *folder)
+{
+ ui_begin(0U);
+ mesh_observation_input_t input={.session=peer.epoch,.length=125U,.flags=7U,.rssi=-128,.lqi=255U};
+ memset(input.mac,0xaa,sizeof(input.mac));input.mac[0]=0x41U;input.mac[1]=0xccU;input.mac[2]=0U;
+ input.mac[3]=0x34U;input.mac[4]=0x12U;
+ for(unsigned i=0;i<80U;++i){
+    input.sequence=i+1U;input.callback_us=UINT64_MAX-10000U+i;input.channel=(uint8_t)(11U+i%16U);
+    le(input.mac+5U,UINT64_C(0xffff000011110000),8U);
+    le(input.mac+13U,UINT64_C(0xabcdef0011223300)+i,8U);
+    CHECK(mesh_observation_ingest(&mesh_ui->scan.model,&input)==MESH_OBSERVATION_OK);
+ }
+ CHECK(mesh_ui->scan.model.pan_count==16U&&mesh_ui->scan.model.address_count==64U&&mesh_ui->scan.model.witness_count==64U);
+ CHECK(mesh_ui->scan.model.counters.address_omissions&&mesh_ui->scan.model.counters.witness_omissions==16U);
+ mesh_ui_tap(130,120);CHECK(draw_detail_page()==ESP_OK&&mesh_ui->count==64U);
+ for(unsigned i=0;i<15U;++i){mesh_ui_tap(90,400);CHECK(draw_detail_page()==ESP_OK);}
+ CHECK(mesh_ui->page==15U&&mesh_ui->painted_count==4U);mesh_ui_tap(90,400);CHECK(mesh_ui->page==15U);
+ ppm(folder,"mesh-last-address-page");mesh_ui_tap(250,120);CHECK(draw_detail_page()==ESP_OK);
+ CHECK(strstr(drawn,"E64 ABCDEF0011223300 -> E64 FFFF000011110000"));ppm(folder,"mesh-eui-traffic");
+ mesh_ui_tap(20,155);CHECK(mesh_ui->detail&&mesh_ui->selected.value.witness_valid);
+ CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"NEXT RAW PAGE")&&strstr(drawn,"18446744073709541"));
+ ppm(folder,"mesh-eui-detail");mesh_ui_tap(120,390);CHECK(mesh_ui->raw_page==1U);
+ CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"RAW PAGE 2 / 2"));ppm(folder,"mesh-raw-last-page");
+ mesh_ui_painted_t frozen=mesh_ui->selected;
+ masked=true;CHECK(draw_detail_page()==ESP_OK&&!strstr(drawn,"ABCDEF")&&!strstr(drawn,"AA AA")&&strstr(drawn,"HIDDEN"));
+ CHECK(!memcmp(&frozen,&mesh_ui->selected,sizeof(frozen)));masked=false;route_back();
+ input.sequence=81U;input.callback_us=UINT64_MAX-9000U;input.channel=11U;
+ le(input.mac+13U,UINT64_C(0xabcdef0011223300),8U);
+ CHECK(mesh_observation_ingest(&mesh_ui->scan.model,&input)==MESH_OBSERVATION_OK);
+ CHECK(draw_detail_page()==ESP_OK);mesh_ui_tap(20,155);
+ CHECK(!mesh_ui->selected.value.witness_valid&&draw_detail_page()==ESP_OK&&strstr(drawn,"NOT RETAINED"));
+ ui_exit();
+}
+static void render(const char*folder)
+{
+ ui_reset();CHECK(draw_detail_page()==ESP_OK);ppm(folder,"mesh-idle");ui_exit();
+ ui_begin(8U);CHECK(draw_detail_page()==ESP_OK);ppm(folder,"mesh-pans");
+ mesh_ui_tap(130,120);CHECK(draw_detail_page()==ESP_OK);ppm(folder,"mesh-addresses");
+ mesh_ui_tap(90,400);CHECK(draw_detail_page()==ESP_OK&&mesh_ui->page==1U);mesh_ui_tap(90,400);
+ CHECK(draw_detail_page()==ESP_OK&&mesh_ui->page==2U);mesh_ui_tap(20,400);CHECK(mesh_ui->page==1U);
+ mesh_ui_tap(250,120);CHECK(draw_detail_page()==ESP_OK);ppm(folder,"mesh-traffic");
+ mesh_ui_tap(20,155);CHECK(draw_detail_page()==ESP_OK);ppm(folder,"mesh-detail");
+ masked=true;CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"MASKED")&&!strstr(drawn,"41 88"));ppm(folder,"mesh-private-detail");masked=false;route_back();
+ peer.stop_hold=5U;mesh_ui_start_stop();ui_step(20,false);CHECK(draw_detail_page()==ESP_OK);ppm(folder,"mesh-stopping");peer.stop_hold=0;ui_freeze();
+ mesh_ui->scan.model.counters.pan_omissions=UINT32_MAX;mesh_ui->scan.model.counters.address_omissions=UINT32_MAX;
+ mesh_ui->scan.model.counters.edge_omissions=UINT32_MAX;mesh_ui->scan.model.counters.witness_omissions=UINT32_MAX;
+ mesh_ui->scan.model.counters.malformed=UINT32_MAX;mesh_ui->scan.model.counters.unsupported=UINT32_MAX;
+ CHECK(draw_detail_page()==ESP_OK);ppm(folder,"mesh-limits");ui_exit();
+ ui_reset();ui_exit();oom=true;route_entry();CHECK(draw_detail_page()==ESP_OK);ppm(folder,"mesh-no-memory");route_back();oom=false;
+ CHECK(cerberus_display_fill_rect(0,0,320,480,UI_BACKGROUND)==ESP_OK&&draw_header("Radio tools")==ESP_OK);
+ CHECK(sentinel_hub_draw(SENTINEL_HUB_RADIO,UI_WIDGET_THEME)==ESP_OK);ppm(folder,"mesh-tools");
+ for(unsigned i=0;i<5U;++i){ieee802154_mode=UI_IEEE802154_MODE_MENU;route_tools(30,(uint16_t)(70U+i*54U));
+    CHECK(ieee802154_mode==(i==0U?UI_IEEE802154_MODE_MESH:i==1U?UI_IEEE802154_MODE_ENERGY:
+        i==2U?UI_IEEE802154_MODE_BEACONS:i==3U?UI_IEEE802154_MODE_ACTIVITY:UI_IEEE802154_MODE_ASSESSMENT));
+    if(i==0U)ui_exit();}
+ ieee802154_mode=UI_IEEE802154_MODE_MENU;route_tools(30,380);CHECK(lessons==1U);
+ CHECK(allocations==freed);
+}
+int main(int argc,char**argv)
+{CHECK(argc==2);lifecycle();saving();render(argv[1]);large_model(argv[1]);
+ printf("Mesh UI: %u checks PASS; workspace %zu / painted %zu bytes\n",checks,sizeof(mesh_ui_store_t),sizeof(mesh_ui_painted_t));return 0;}

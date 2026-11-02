@@ -265,6 +265,7 @@ typedef enum {
     UI_IEEE802154_MODE_BEACONS,
     UI_IEEE802154_MODE_ACTIVITY,
     UI_IEEE802154_MODE_ASSESSMENT,
+    UI_IEEE802154_MODE_MESH,
 } ui_ieee802154_mode_t;
 
 typedef enum {
@@ -357,6 +358,11 @@ static const cerberus_ui_widget_theme_t ui_colors = {
 static esp_err_t draw_detail_page(void);
 static bool wifi_archive_is_file(const char *name);
 static void wifi_archive_open_file(const char *path, const char *name);
+static void mesh_ui_open(void);
+static void mesh_ui_back(void);
+static void mesh_ui_tap(uint16_t x, uint16_t y);
+static esp_err_t mesh_ui_draw(void);
+static bool mesh_ui_busy(void);
 static void probe_sniff_open(void);
 static void probe_sniff_back(void);
 static void probe_sniff_tap(uint16_t x, uint16_t y);
@@ -482,7 +488,7 @@ static const ui_menu_item_t menu_items[] = {
     {"Wardriving", UI_PAGE_WARDRIVE},
     {"Remote ID", UI_PAGE_REMOTE_ID},
     {"MAC Monitor", UI_PAGE_MAC_MONITOR},
-    {"Radio Sense", UI_PAGE_IEEE802154},
+    {"Mesh Detection", UI_PAGE_IEEE802154},
     {"SD files", UI_PAGE_FILES},
     {"QR maker", UI_PAGE_QR},
     {"Local web", UI_PAGE_WEB},
@@ -860,7 +866,7 @@ static cerberus_ieee802154_energy_scan_status_payload_t ieee802154_scan_status;
 static cerberus_ieee802154_energy_scan_result_payload_t ieee802154_scan_result;
 static esp_err_t ieee802154_scan_error = ESP_ERR_INVALID_STATE;
 static bool ieee802154_scan_checked;
-static ui_ieee802154_mode_t ieee802154_mode = UI_IEEE802154_MODE_ENERGY;
+static ui_ieee802154_mode_t ieee802154_mode = UI_IEEE802154_MODE_MESH;
 static cerberus_ieee802154_beacon_scan_status_payload_t ieee802154_beacon_status;
 static cerberus_ieee802154_beacon_scan_result_payload_t
     ieee802154_beacon_results[UI_IEEE802154_BEACON_VISIBLE_ROWS];
@@ -8167,6 +8173,7 @@ static esp_err_t draw_wardrive(void)
 
 static esp_err_t draw_detail_page(void)
 {
+    if (current_page == UI_PAGE_IEEE802154 && ieee802154_mode == UI_IEEE802154_MODE_MESH) return mesh_ui_draw();
     if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_PROBE_SNIFF) return probe_sniff_draw();
     if (wardrive_gps_view_is_open()) return wardrive_gps_view_draw();
     if (wardrive_recent_is_open()) return wardrive_recent_draw();
@@ -8935,20 +8942,25 @@ static void handle_settings_tap(uint16_t x, uint16_t y)
 
 static void handle_ieee802154_tap(uint16_t x, uint16_t y)
 {
+    if (ieee802154_mode == UI_IEEE802154_MODE_MESH) {
+        mesh_ui_tap(x, y); ESP_ERROR_CHECK(draw_detail_page()); return;
+    }
     if (live_is_view()) { handle_live_scan_tap(x, y); return; }
     if (ieee802154_mode == UI_IEEE802154_MODE_MENU) {
         int item = sentinel_hub_hit_test(SENTINEL_HUB_RADIO, x, y);
         if (item == 6) { open_learning_lesson(4); return; }
         if (item == 0) {
+            mesh_ui_open();
+        } else if (item == 1) {
             ieee802154_mode = UI_IEEE802154_MODE_ENERGY;
             ieee802154_scan_checked = false;
-        } else if (item == 1) {
+        } else if (item == 2) {
             ieee802154_mode = UI_IEEE802154_MODE_BEACONS;
             ieee802154_beacon_checked = false;
-        } else if (item == 2) {
+        } else if (item == 3) {
             ieee802154_mode = UI_IEEE802154_MODE_ACTIVITY;
             ieee802154_activity_checked = false;
-        } else if (item == 3) {
+        } else if (item == 4) {
             ieee802154_mode = UI_IEEE802154_MODE_ASSESSMENT;
         } else {
             return;
@@ -11450,6 +11462,7 @@ static void handle_scripts_tap(uint16_t x, uint16_t y)
 #include "sentinel_live_ui.h"
 #include "dual_wifi_live_ui.h"
 #include "probe_sniff_ui.h"
+#include "mesh_ui.h"
 #include "wifi_archive_live_ui.h"
 #include "wifi_interchange_live_ui.h"
 #include "dual_ble_live_ui.h"
@@ -11516,7 +11529,7 @@ static void open_tool_page(ui_page_t page)
         wardrive_last_draw_ms = 0U;
     }
     if (current_page == UI_PAGE_IEEE802154) {
-        ieee802154_mode = UI_IEEE802154_MODE_ENERGY;
+        mesh_ui_open();
     }
     if (current_page == UI_PAGE_FILES) {
         file_listing_checked = false;
@@ -12331,6 +12344,9 @@ static void handle_tap(uint16_t x, uint16_t y)
                 ble_mode = UI_BLE_MODE_MENU;
                 ESP_ERROR_CHECK(draw_detail_page());
             } else if (current_page == UI_PAGE_IEEE802154 &&
+                ieee802154_mode == UI_IEEE802154_MODE_MESH) {
+                mesh_ui_back(); ESP_ERROR_CHECK(draw_detail_page());
+            } else if (current_page == UI_PAGE_IEEE802154 &&
                 ieee802154_mode != UI_IEEE802154_MODE_MENU) {
                 ieee802154_mode = UI_IEEE802154_MODE_MENU;
                 ESP_ERROR_CHECK(draw_detail_page());
@@ -12524,6 +12540,8 @@ void cerberus_ui_run(const cerberus_ui_config_t *config)
              wifi_mode != UI_WIFI_MODE_PACKET_MONITOR || screen_asleep)) {
             (void)packet_monitor_stop_ui();
         }
+        mesh_ui_tick((uint64_t)now_ms, current_page == UI_PAGE_IEEE802154 &&
+            ieee802154_mode == UI_IEEE802154_MODE_MESH && !screen_asleep);
         probe_sniff_tick((uint64_t)now_ms, current_page == UI_PAGE_WIFI &&
             wifi_mode == UI_WIFI_MODE_PROBE_SNIFF && !screen_asleep);
         bool channels_visible = current_page == UI_PAGE_WIFI &&

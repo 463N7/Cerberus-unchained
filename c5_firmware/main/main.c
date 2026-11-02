@@ -43,17 +43,11 @@ static uint8_t current_radio_state(void)
     cerberus_wifi_defense_status_payload_t wifi_defense;
     cerberus_ble_scan_status_payload_t ble_status;
     cerberus_ble_connection_status_payload_t connection_status;
-    cerberus_ieee802154_energy_scan_status_payload_t energy_status;
-    cerberus_ieee802154_beacon_scan_status_payload_t beacon_status;
-    cerberus_ieee802154_activity_scan_status_payload_t activity_status;
     cerberus_wifi_scanner_get_status(&wifi_status);
     cerberus_wifi_connection_get_status(&wifi_connection);
     cerberus_wifi_defense_survey_get_status(&wifi_defense);
     cerberus_ble_scanner_get_status(&ble_status);
     cerberus_ble_connection_get_status(&connection_status);
-    cerberus_ieee802154_scanner_get_status(&energy_status);
-    cerberus_ieee802154_beacon_scanner_get_status(&beacon_status);
-    cerberus_ieee802154_activity_scanner_get_status(&activity_status);
 
     uint8_t state = 0U;
     if (cerberus_c5_test_running()) state |= CERBERUS_C5_RADIO_TEST;
@@ -75,9 +69,7 @@ static uint8_t current_radio_state(void)
         connection_status.state == CERBERUS_BLE_CONNECTION_DISCONNECTING) {
         state |= CERBERUS_C5_RADIO_BLE_CONNECTION;
     }
-    if (energy_status.state == CERBERUS_IEEE802154_ENERGY_SCAN_RUNNING ||
-        beacon_status.state == CERBERUS_IEEE802154_BEACON_SCAN_RUNNING ||
-        activity_status.state == CERBERUS_IEEE802154_ACTIVITY_SCAN_RUNNING) {
+    if (cerberus_ieee802154_scanner_is_running()) {
         state |= CERBERUS_C5_RADIO_IEEE802154_SCAN;
     }
     return state;
@@ -1064,6 +1056,60 @@ static void prepare_v2_response(const cerberus_spi_frame_t *request)
                 &payload,
                 sizeof(payload));
         }
+        break;
+    }
+    case CERBERUS_MESH_OBSERVATION_COMMAND_INFO:
+    case CERBERUS_MESH_OBSERVATION_COMMAND_START:
+    case CERBERUS_MESH_OBSERVATION_COMMAND_STATUS:
+    case CERBERUS_MESH_OBSERVATION_COMMAND_STOP:
+    case CERBERUS_MESH_OBSERVATION_COMMAND_RELEASE: {
+        cerberus_mesh_observation_control_t payload;
+        if(request->command==CERBERUS_MESH_OBSERVATION_COMMAND_INFO){
+            if(request->payload_length!=0U)return;
+            cerberus_mesh_observation_info(&payload);
+        }else if(request->command==CERBERUS_MESH_OBSERVATION_COMMAND_START){
+            if(request->payload_length!=sizeof(cerberus_mesh_observation_start_t))return;
+            cerberus_mesh_observation_start_t query;
+            memcpy(&query,request->payload,sizeof(query));
+            (void)cerberus_mesh_observation_start(&query,&payload);
+        }else{
+            if(request->payload_length!=sizeof(cerberus_mesh_observation_request_t))return;
+            cerberus_mesh_observation_request_t query;
+            memcpy(&query,request->payload,sizeof(query));
+            if(request->command==CERBERUS_MESH_OBSERVATION_COMMAND_STATUS)
+                (void)cerberus_mesh_observation_status(query.session_id,&payload);
+            else if(request->command==CERBERUS_MESH_OBSERVATION_COMMAND_STOP)
+                (void)cerberus_mesh_observation_stop(query.session_id,&payload);
+            else (void)cerberus_mesh_observation_release(query.session_id,&payload);
+        }
+        prepare_frame_response((cerberus_spi_command_t)request->command,request->sequence,&payload,sizeof(payload));
+        break;
+    }
+    case CERBERUS_MESH_OBSERVATION_COMMAND_PEEK: {
+        if(request->payload_length!=sizeof(cerberus_mesh_observation_peek_t))return;
+        cerberus_mesh_observation_peek_t query;
+        cerberus_mesh_observation_control_t payload;
+        memcpy(&query,request->payload,sizeof(query));
+        (void)cerberus_mesh_observation_peek(&query,&payload);
+        prepare_frame_response((cerberus_spi_command_t)request->command,request->sequence,&payload,sizeof(payload));
+        break;
+    }
+    case CERBERUS_MESH_OBSERVATION_COMMAND_READ: {
+        if(request->payload_length!=sizeof(cerberus_mesh_observation_read_t))return;
+        cerberus_mesh_observation_read_t query;
+        cerberus_mesh_observation_chunk_t payload;
+        memcpy(&query,request->payload,sizeof(query));
+        (void)cerberus_mesh_observation_read(&query,&payload);
+        prepare_frame_response((cerberus_spi_command_t)request->command,request->sequence,&payload,sizeof(payload));
+        break;
+    }
+    case CERBERUS_MESH_OBSERVATION_COMMAND_ACK: {
+        if(request->payload_length!=sizeof(cerberus_mesh_observation_ack_t))return;
+        cerberus_mesh_observation_ack_t query;
+        cerberus_mesh_observation_control_t payload;
+        memcpy(&query,request->payload,sizeof(query));
+        (void)cerberus_mesh_observation_ack(&query,&payload);
+        prepare_frame_response((cerberus_spi_command_t)request->command,request->sequence,&payload,sizeof(payload));
         break;
     }
     case CERBERUS_SPI_COMMAND_IEEE802154_ENERGY_SCAN_START:

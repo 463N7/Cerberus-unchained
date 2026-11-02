@@ -5,6 +5,7 @@
 #include "watch_receive_timing.h"
 #include "wifi_probe_observation.h"
 #include "probe_sniff_core.h"
+#include "mesh_observation_protocol.h"
 #include "s3_wifi_relation.h"
 #include "esp_err.h"
 #include <stdbool.h>
@@ -271,6 +272,11 @@ esp_err_t c5_spi_link_probe_sniff_control(uint8_t command,
     const cerberus_probe_sniff_start_t *request, cerberus_probe_sniff_control_t *reply);
 esp_err_t c5_spi_link_probe_sniff_read(const cerberus_probe_sniff_read_t *request,
     cerberus_probe_sniff_chunk_t *reply);
+/* Capability72 scoped passive Mesh transport. Exactly one bounded command,
+ * with INFO/START capability refresh. No mutation retry; the controller handles
+ * uncertain delivery, ownership and semantic validation. Reply is always22B. */
+esp_err_t c5_spi_link_mesh_exchange(uint8_t command, const void *request,
+    size_t request_length, void *reply, size_t reply_length);
 esp_err_t c5_spi_link_wifi_packet_monitor_start(uint8_t channel,
     cerberus_wifi_packet_monitor_status_payload_t *status);
 esp_err_t c5_spi_link_wifi_packet_monitor_stop(uint8_t generation,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the 139 registered host suites through the passive 802.15.4 continuity checkpoint.
+"""Run the 146 registered host suites through the passive Mesh receive foundation.
 
 The checked-in synthetic fixtures need no board, radio, or private captures.
 Generated fixtures, native executables, previews, logs, and the result receipt
@@ -30,6 +30,13 @@ CHECKS = (
     'check_s3_ble_host_memory.py',
     'check_radio.py',
     'check_radio_worker.py',
+    'check_mesh_mac.py',
+    'check_mesh_observation.py',
+    'check_mesh_link.py',
+    'check_mesh_scan.py',
+    'check_mesh_bridge.py',
+    'check_mesh_report.py',
+    'check_mesh_ui.py',
     'check_s3_ble_attack.py',
     'check_c5_ble_lifecycle.py',
     'check_channel_survey_lifecycle.py',
@@ -171,8 +178,8 @@ SERIAL_CHECKS = (
 
 def registered_checks() -> tuple[str, ...]:
     names = (*CHECKS, *SERIAL_CHECKS)
-    if len(names) != 139 or len(set(names)) != 139:
-        raise ValueError("Expected 139 unique suites; do not silently skip a suite")
+    if len(names) != 146 or len(set(names)) != 146:
+        raise ValueError("Expected 146 unique suites; do not silently skip a suite")
     return names
 
 
@@ -191,7 +198,7 @@ def selected_checks(shard_index: int | None = None,
         return names
     if (type(shard_index) is not int or type(shard_count) is not int or
             not 1 <= shard_count <= len(names) or not 0 <= shard_index < shard_count):
-        raise ValueError("Supply both --shard-index and --shard-count; index is zero-based and count is 1..139")
+        raise ValueError("Supply both --shard-index and --shard-count; index is zero-based and count is 1..146")
     return names[shard_index::shard_count]
 
 
@@ -303,7 +310,7 @@ def main() -> int:
     changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
     receipt = {
         "format": 1,
-        "suite_set": "rev129",
+        "suite_set": "rev130",
         "recorded_utc": datetime.now(timezone.utc).isoformat(),
         "status": "passed" if not changed and head == head_after and
             (args.shard_count is None or clean_after) and

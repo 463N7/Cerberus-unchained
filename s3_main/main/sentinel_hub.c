@@ -26,6 +26,7 @@ static const hub_item_t ble_items[] = {
     {"Bluetooth Analyzer", "LIVE ADVERTISING RATE + EVIDENCE"},
 };
 static const hub_item_t radio_items[] = {
+    {"Mesh Detection", "PASSIVE PAN / ADDRESS / TRAFFIC MAP"},
     {"Channel energy", "EXPLORE THE 2.4 GHZ AIRSPACE"},
     {"Zigbee beacons", "OBSERVED CLASSIC ZIGBEE BEACONS"},
     {"Frame activity", "PASSIVE 802.15.4 FRAME COUNTS"},
@@ -48,7 +49,7 @@ static const hub_item_t *items_for(sentinel_hub_t hub, size_t *count)
 
 static uint16_t item_y(sentinel_hub_t hub, size_t index)
 {
-    return hub == SENTINEL_HUB_BLE ? (uint16_t)(67U + index * 54U) :
+    return hub != SENTINEL_HUB_WIFI ? (uint16_t)(67U + index * 54U) :
         (uint16_t)(70U + index * (hub == SENTINEL_HUB_WIFI ? 40U : 66U));
 }
 
@@ -67,7 +68,7 @@ esp_err_t sentinel_hub_draw(sentinel_hub_t hub, const cerberus_ui_widget_theme_t
     for (size_t i = 0; i < count; ++i) {
         uint16_t y = item_y(hub, i);
         uint16_t height = hub == SENTINEL_HUB_WIFI ? 36U :
-            (hub == SENTINEL_HUB_BLE ? 48U : 54U);
+            48U;
         ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(12, y, 296, height,
             theme->panel), "hub", "panel");
         ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(12, y, 3, height,
@@ -79,9 +80,9 @@ esp_err_t sentinel_hub_draw(sentinel_hub_t hub, const cerberus_ui_widget_theme_t
     }
     if (hub != SENTINEL_HUB_WIFI) {
         ESP_RETURN_ON_ERROR(cerberus_display_draw_text(24,
-            hub == SENTINEL_HUB_BLE ? 342U : 335U,
+            342U,
             hub == SENTINEL_HUB_BLE ? "RSSI SHOWS A TREND, NOT EXACT DISTANCE" :
-                                     "ENERGY ALONE DOES NOT IDENTIFY A DEVICE",
+                                     "OBSERVATIONS DO NOT PROVE ROUTING",
             theme->muted, theme->background, 1), "hub", "note");
     }
     if (hub == SENTINEL_HUB_WIFI) {
@@ -120,7 +121,7 @@ int sentinel_hub_hit_test(sentinel_hub_t hub, uint16_t x, uint16_t y)
     for (size_t i = 0; i < count; ++i) {
         uint16_t top = item_y(hub, i);
         uint16_t height = hub == SENTINEL_HUB_WIFI ? 36U :
-            (hub == SENTINEL_HUB_BLE ? 48U : 54U);
+            48U;
         if (y >= top && y < top + height)
             return hub == SENTINEL_HUB_WIFI && i >= 3U ? (i == 3U ? 10 : (int)i - 1) : (int)i;
     }

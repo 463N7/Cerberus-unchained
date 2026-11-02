@@ -87,7 +87,7 @@ static int wrapped_stat(const char *path,struct stat *item)
 {
     if(event(STAT)){errno=EIO;return -1;}
     const char *leaf=strrchr(path,'/');
-    if(collide_all&&leaf&&strlen(leaf)==11&&(leaf[1]=='B'||leaf[1]=='A'||leaf[1]=='W'||leaf[1]=='P'||leaf[1]=='S')){memset(item,0,sizeof(*item));item->st_mode=S_IFREG;return 0;}
+    if(collide_all&&leaf&&strlen(leaf)==11&&(leaf[1]=='B'||leaf[1]=='A'||leaf[1]=='W'||leaf[1]=='P'||leaf[1]=='S'||leaf[1]=='M')){memset(item,0,sizeof(*item));item->st_mode=S_IFREG;return 0;}
     int result=stat(path,item);
     if(result==0&&S_ISREG(item->st_mode))item->st_size+=stat_size_delta;
     return result;
@@ -437,10 +437,12 @@ static void check_full_wifi_document(void)
 
 #include "wifi_interchange_storage_check.h"
 #include "probe_report_storage_check.h"
+#include "mesh_report_storage_check.h"
 
 int main(void)
 {
     check_probe_report_storage();
+    check_mesh_report_storage();
     check_wifi_interchange_storage();
     check_full_v6_document();
     check_json_storage();

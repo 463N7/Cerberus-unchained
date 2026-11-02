@@ -29,8 +29,8 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source version: `0.1.0-dev.rev129`, targeting onboard
-C5 protocol firmware revision 71. No Unchained binary release is selected yet.**
+**Current source version: `0.1.0-dev.rev130` (in development), targeting onboard
+C5 protocol firmware revision 72. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
 
@@ -60,6 +60,14 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev130 adds a passive Mesh Detection receive path, typed address model,
+exact-session transfer, PAN/address/traffic views and stopped SD reports.
+Focused integration checks pass; complete regression and native validation are
+in progress. The last verified local package is rev129; the installed baseline
+remains rev126. See [the Mesh foundation](docs/DUAL_RADIO_REV130.md) for its
+observation scope and remaining work. An in-progress source version is not a
+feature-parity or physical-acceptance claim.
 
 Rev129 corrects receive continuity in the existing passive 802.15.4 Beacon and
 Activity sweeps: the receiver remains awake after each frame until the channel

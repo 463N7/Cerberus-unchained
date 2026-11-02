@@ -111,7 +111,7 @@ static void tick(uint32_t now, bool asleep)
 { clock_ms = now; clock_extra_us = 0; live_scan_tick(now, asleep); }
 static void seed(void)
 {
-    reset(); sentinel_scan_session_init(&live_session);
+    mesh_test_busy=false; reset(); sentinel_scan_session_init(&live_session);
     sentinel_scan_session_init(&live_ble_session); live_ble_session_initialized = true;
     owned_polls = full_polls = foreign_polls = connection_polls = 0;
     ble_starts = ble_stops = other_starts = 0;
@@ -239,6 +239,10 @@ static void capture_and_ble(void)
 int main(void)
 {
     owned_status_and_clock(); stop_and_navigation(); admission_and_ambiguous_start(); capture_and_ble();
+    seed(); mesh_test_busy=true; (void)live_observe(1000);
+    CHECK(!owned_polls&&!full_polls&&!foreign_polls&&!connection_polls);
+    tick(2000,false); CHECK(!start_commands&&!stop_commands&&!owned_polls);
+    mesh_test_busy=false; (void)live_observe(2001); CHECK(owned_polls==1U);
     reset();
     printf("Owned Wi-Fi polling: %u checks; actual observer/capture/scheduler, bounded status dispatch, Stop/navigation/recovery, fresh admission, immutable publication and independent BLE: pass\n",checks);
     return 0;

@@ -10,8 +10,11 @@ The receive prerequisite now has a verified local
 [rev129 candidate](DUAL_RADIO_REV129.md): 139 host suites and five native targets
 pass, including the sustained 802.15.4 regression. Physical reception acceptance
 remains open. Mesh Detection itself is not in that candidate or on the installed
-device. The next implementation starts with typed MAC parsing, then exact-session
-C5 transport, the S3 observation model, interface and historical storage.
+device. The [rev130 implementation](DUAL_RADIO_REV130.md) now contains typed MAC
+parsing, exact-session C5 transport and the S3 observation model/controller.
+Interface and SD report integration are under validation. Protocol discovery,
+selected-address tracking, raw capture and historical map reopening remain
+later work; this plan does not imply that the complete CYM workflow is ported.
 
 ## Reference baseline
 
@@ -47,15 +50,16 @@ Activity sweeps on channels 11–26. S3 exposes these under Radio Sense, includi
 assessment and diagnostic export. Commands 24–32 are existing wire interfaces.
 IEEE 802.15.4 is enabled in the current C5 SDK configuration; OpenThread is not.
 
-Before adding a new mapping mode:
+Receive prerequisites and design requirements:
 
-1. Resolve the rev128 Linux fixture declaration failure and Windows CI timeout
-   while preserving complete host coverage and all existing checks.
-2. Reproduce and correct receive continuity: the current Beacon/Activity worker
-   starts receive once per channel without enabling receive-when-idle. The
-   actual IDF 6.0.1 driver returns idle after a frame with its default setting.
-   Test multiple frames in one dwell, including unrelated traffic before a
-   valid beacon, passive ACK behavior, channel boundaries and cleanup.
+1. The rev128 Linux fixture declaration failure and Windows CI timeout are
+   resolved in the published CI follow-up: Ubuntu, four Windows shards and the
+   coverage aggregate passed. Complete coverage is retained.
+2. Rev129 corrects receive continuity: the prior Beacon/Activity worker started
+   receive once per channel without enabling receive-when-idle. The actual IDF
+   6.0.1 driver returns idle after a frame with its default setting. The actual
+   worker fixture now covers multiple frames in one dwell, unrelated traffic
+   before a valid beacon, passive ACK behavior, channel boundaries and cleanup.
 3. Design explicit ownership, Stop and loss accounting for the new mode.
    Existing finite sweeps drain naturally on Back/sleep; they have no Stop API.
    Existing Beacon rows merge by network and cannot stand in for node records.
@@ -137,8 +141,9 @@ traffic and repeatable handoffs to Wi-Fi/BLE. No GPS is required for this phase.
 ## First implementation contract
 
 The first useful slice is Networks / Addresses / Observed Traffic, frozen
-inspection and save/reopen. C5 copies bounded raw observations; S3 parses and
-builds the model. Proposed initial caps are 16 optional C5 queue slots, and S3
+inspection and SD reports. Native map reopening follows the report slice; CSV
+text viewing alone is not a reconstructed historical map. C5 copies bounded
+raw observations; S3 parses and builds the model. Initial caps are 16 optional C5 queue slots, and S3
 PSRAM stores for 16 PAN contexts, 64 addresses, 64 edges and 64 witnesses. These
 are design bounds, not native allocation measurements. A destination is only an
 addressed endpoint until heard as a source; RSSI/LQI belong to the received

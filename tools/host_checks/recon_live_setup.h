@@ -38,6 +38,7 @@ static cerberus_wifi_scan_status_payload_t c5_scan;
 static void live_wifi_capture_reset_as(cerberus_wifi_readout_cancel_reason_t reason){(void)reason;}
 static esp_err_t live_wifi_capture_error(void){return ESP_OK;}
 static bool live_wifi_capture_defers_c5(void){return false;}
+static bool mesh_ui_busy(void){return false;}
 static bool live_wifi_capture_tick(uint32_t now,bool allowed,cerberus_wifi_readout_cancel_reason_t reason)
 {(void)now;(void)allowed;(void)reason;return false;}
 static bool live_wifi_capture_begin(uint32_t now)

@@ -8,6 +8,7 @@
 #include <assert.h>
 #include <setjmp.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "fake_worker_platform.h"
 #include "ieee802154_scanner.c"
@@ -25,6 +26,10 @@ static unsigned scenario; /* 1=beacons,2=activity; zero=energy/no synthetic fram
 static const uint8_t *outstanding;
 static cerberus_ieee802154_beacon_scan_result_payload_t queue[8];
 static unsigned queue_head, queue_count;
+void *heap_caps_calloc(size_t n,size_t size,unsigned caps){assert(caps==3U);return calloc(n,size);}
+void heap_caps_free(void *p){free(p);}
+uint32_t esp_random(void){return 0x23456789U;}
+int64_t esp_timer_get_time(void){return (int64_t)ticks*1000;}
 
 static void offer_one_frame(void)
 {

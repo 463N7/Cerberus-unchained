@@ -213,6 +213,10 @@ esp_err_t cerberus_storage_wifi_archive_load(const char *relative_path,
  * retain their existing behavior. No automatic mount or USB/stream takeover. */
 #define CERBERUS_STORAGE_PROBE_REPORT_PATH "/CERBERUS/LOGS"
 #define CERBERUS_STORAGE_PROBE_REPORT_MAX_BYTES 8192U
+#define CERBERUS_STORAGE_MESH_REPORT_PATH "/CERBERUS/LOGS"
+#define CERBERUS_STORAGE_MESH_REPORT_MAX_BYTES 98304U
+esp_err_t cerberus_storage_mesh_report_save(const uint8_t *data, size_t length,
+    char *file_name, size_t capacity);
 /* Requires nonempty data and capacity>=11; input/output buffers are disjoint.
  * Under the firmware-owned mutex, publish P00001.CSV..P99999.CSV only after
  * checked exclusive TMP creation, full write, flush/sync, close and final

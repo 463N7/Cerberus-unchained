@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <setjmp.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "fake_worker_platform.h"
 #include "ieee802154_scanner.c"
@@ -15,6 +16,10 @@ static unsigned mutexes, queues;
 static TickType_t ticks;
 static bool fail_queue, fail_task, fail_enable, fail_channel, fail_sleep, busy_wifi, busy_test;
 static bool inject_overlap, injected,busy_stations;
+void *heap_caps_calloc(size_t n,size_t size,unsigned caps){assert(caps==3U);return calloc(n,size);}
+void heap_caps_free(void *p){free(p);}
+uint32_t esp_random(void){return 0x13456789U;}
+int64_t esp_timer_get_time(void){return (int64_t)ticks*1000;}
 
 SemaphoreHandle_t xSemaphoreCreateMutex(void){++mutexes;return (void *)1;}
 void vSemaphoreDelete(SemaphoreHandle_t h){assert(h&&mutexes);--mutexes;}
