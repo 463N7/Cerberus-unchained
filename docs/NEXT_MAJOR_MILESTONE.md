@@ -1,4 +1,15 @@
-# Next major milestone and requested pause
+# Rev128 pause and resumed priorities
+
+The rev128 milestone and requested PR update were completed at `7248b50`, and
+the goal was paused. The owner resumed the goal on 2026-11-02. The historical
+stopping conditions below describe that completed checkpoint, not a new pause.
+
+Current priorities are to correct the observed CI failures, fix the verified
+802.15.4 receive-continuity defect, and then implement
+[Scan → Mesh Detection](MESH_DETECTION_PLAN.md) as requested. GPS and the six-C5
+backboard are deferred. The broader Marauder feature and dual-processor
+optimization objective remains active and unfinished. Hardware acceptance is
+separate from source and build validation.
 
 The owner requested one more major milestone, followed by an update to existing
 PR #1 in `463N7/Cerberus-unchained`, then a pause of the unfinished broader mission.
