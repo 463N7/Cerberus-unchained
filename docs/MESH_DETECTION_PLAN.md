@@ -9,11 +9,12 @@ This document is a plan and source inventory, not an implemented-feature claim.
 The receive prerequisite now has a verified local
 [rev129 candidate](DUAL_RADIO_REV129.md): 139 host suites and five native targets
 pass, including the sustained 802.15.4 regression. Physical reception acceptance
-remains open. Mesh Detection itself is not in that candidate or on the installed
-device. The [rev130 implementation](DUAL_RADIO_REV130.md) now contains typed MAC
+remains open. Mesh Detection itself is not in the rev129 candidate. The
+[rev130 implementation](DUAL_RADIO_REV130.md) now contains typed MAC
 parsing, exact-session C5 transport and the S3 observation model/controller.
 Interface and SD report integration pass the complete local host/native matrix
-and package checks. They have not been installed or physically accepted.
+and package checks. The paired rev130 update is installed and passes sampled
+idle boot checks; Mesh feature acceptance on the device remains pending.
 Protocol discovery,
 selected-address tracking, raw capture and historical map reopening remain
 later work; this plan does not imply that the complete CYM workflow is ported.

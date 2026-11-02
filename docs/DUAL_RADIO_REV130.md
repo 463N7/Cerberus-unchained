@@ -75,7 +75,7 @@ views, fixed/sweep settings, frozen row details and explicit Stop/Back. A new
 view defaults to sweeping channels 11–26 with a 250 ms dwell.
 Existing Energy, Beacon, Activity and Compare tools remain reachable from the
 same workflow. The focused UI/controller checks and software render previews
-pass; do not infer availability on the installed device. STOP & SAVE requests
+pass; touchscreen behavior still requires physical acceptance. STOP & SAVE requests
 the final report while acquiring; SAVE REPORT saves an already frozen scan.
 OPEN CSV hands a saved file to the existing paged text viewer. That viewer uses
 the existing bounded file-read path, rather than the archive save worker.
@@ -146,19 +146,46 @@ throughput and sustained reception still need physical checks.
 
 The S3 app is 2,044,816 bytes at offset 0x10000. Its write extends beyond the
 first 2 MiB of flash. Historical local installers with a fixed 2 MiB backup
-limit must not be reused unchanged: a new paired installation needs a fresh
-backup covering every erase-rounded write region and the actual installed
-baseline. No installation was attempted by this validation.
+limit must not be reused unchanged: paired installation needs a fresh backup
+covering every erase-rounded write region and the actual installed baseline.
+The subsequent installation used the derived 0x204000-byte S3 backup and a
+0x200000-byte C5 backup, freshly read and fully verified against the device and
+the installed rev126 image segments. Both verified prefixes remain available
+for explicit recovery. Normal writes preserved NVS/PHY and higher flash.
 
-Rev126 remains the last verified installation. Rev130 has not been flashed,
-accepted with real Zigbee/Thread traffic, or published as a firmware release.
-The existing public PR still describes the separately validated rev128 work.
-Physical acceptance must check actual reception, Stop/Back, SD reports and
-repeatable handoffs to Wi-Fi and Bluetooth.
+## Installed checkpoint and remaining acceptance
 
-After a separately verified paired installation, the initial physical sequence
-is an idle entry, a default sweep lasting more than ten seconds, Stop, and a
-second Start/Stop without reset. Repeat fixed channels 11 and 26; check Back
+The paired rev130 update was installed on November 2, 2026. All nine image writes
+(temporary bridge, C5 and final S3) passed their hash verification. The final
+application reports rev130, C5 capability 72 online, buffered display and mounted
+SD. Two idle samples 45.6 seconds apart show advancing S3/C5 uptime and SPI
+exchanges, unchanged C5 boot count, no previous reset fault and no increase in
+the monitored SPI error counters. Four initial READY timeouts/legacy fallbacks
+were present at both boot samples, also observed in the cold rev126 baseline;
+they are not represented as zero errors.
+
+Both candidate idle samples show 137,664 bytes of free S3 internal heap,
+94,208 bytes in the largest internal block and 1,427,552 bytes of free PSRAM.
+C5 snapshot free heap is 56,116 bytes. The ten-task count is unchanged; the
+lowest observed diagnostic-console stack margin is 1,312 bytes. These are
+sampled idle measurements, not loaded Mesh heap/stack or RF performance results.
+
+Installation evidence is retained separately in
+`artifacts/device-rev130/installation-receipt.json` and `idle-comparison.json`.
+The immutable build receipt's `installed: false` records its earlier packaging
+state; the installation receipt records the later verified update and keeps
+`full_feature_acceptance: false`. Fresh backups, identity checks, six identity
+tests, 23 installer-helper tests and independent preparation review passed.
+No firmware release was selected or published. The existing public PR still
+describes the separately validated rev128 work.
+
+Actual Mesh reception, touchscreen Stop/Back, SD reports and repeatable handoffs
+to Wi-Fi and Bluetooth remain unaccepted. A user smoke check has been requested;
+no successful result is assumed.
+
+The next physical sequence is an idle entry, a default sweep lasting more than
+ten seconds, Stop, and a second Start/Stop without reset. Repeat fixed channels
+11 and 26; check Back
 during acquisition and sleep/wake without automatic restart. Save and open a
 CSV twice to confirm distinct filenames, then run ordinary Wi-Fi/BLE and the
 preserved IEEE tools. Zero observations can exercise lifecycle and empty-report

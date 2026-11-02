@@ -65,7 +65,9 @@ Rev130 adds a passive Mesh Detection receive path, typed address model,
 exact-session transfer, PAN/address/traffic views and stopped SD reports.
 All 146 registered host suites and five native targets pass on 1,174 unchanged
 inputs. The matched rev130 development package and native resource audit also
-pass; the installed baseline remains rev126. See
+pass. The paired rev130 update is installed, with C5 capability 72 online,
+mounted SD and two stable idle boot samples. Mesh touchscreen, real reception
+and loaded-operation acceptance remain pending. See
 [the Mesh foundation](docs/DUAL_RADIO_REV130.md) for its observation scope,
 measured allocation costs and remaining work. These software checks do not
 establish physical reception or complete Mesh/Marauder feature parity.
@@ -90,8 +92,8 @@ five native targets and linked resource checks pass on 1,142 unchanged inputs;
 [the rev128 checkpoint](docs/DUAL_RADIO_REV128.md) records the limits and package
 status. The matched local candidate and package verification also pass.
 Fixed data/BSS is unchanged on S3 and grows by 48 bytes on C5; optional
-capture, UI and save allocations are measured separately. Rev126 remains
-installed. This major milestone completed the requested PR #1 update and pause
+capture, UI and save allocations are measured separately. At that checkpoint,
+rev126 remained installed. This major milestone completed the requested PR #1 update and pause
 checkpoint; the owner resumed the unfinished overall port on November 2.
 
 Rev127 corrects Channel Survey ownership when C5 restarts
@@ -100,8 +102,9 @@ renewable ownership lease preserve existing passive metrics while preventing
 stale commands from controlling a replacement survey. All 136 host suites and
 five native targets pass with unchanged inputs. Linked fixed data/BSS grows by
 16 S3 bytes and 88 C5 bytes, with no new task or observation bank. The matched
-local package passes verification. See [rev127](docs/DUAL_RADIO_REV127.md). Installed firmware is
-rev126, with the owner's targeted Recon controls and priority acceptance.
+local package passes verification. See [rev127](docs/DUAL_RADIO_REV127.md). At
+that checkpoint, installed firmware was rev126, with the owner's targeted Recon
+controls and priority acceptance.
 
 Rev126 implements owner feedback on Recon: recognized hints appear first in a
 stable list, Dashboard/Radar are visible main tabs, and category controls say
@@ -112,9 +115,9 @@ resource audit pass. The Recon model/view sizes remain unchanged. The matched
 package is installed with verified paired writes and two successful boot
 captures 53 seconds apart, with no additional listed SPI errors. The owner
 confirmed Dashboard/Radar, Pause/Resume, Back, the ALERT label and stable
-recognized-hint priority. See [rev126](docs/DUAL_RADIO_REV126.md). Installed
-firmware is rev126; broader feature and loaded-performance acceptance remains
-unfinished.
+recognized-hint priority. See [rev126](docs/DUAL_RADIO_REV126.md). That installation
+is superseded by rev130; broader feature and loaded-performance acceptance
+remains unfinished.
 
 Rev125 implements offline Marauder AP JSON and SSID text import, details,
 copy saving and export from native combined S3/C5 Wi-Fi reports. It preserves
