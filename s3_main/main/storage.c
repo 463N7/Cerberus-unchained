@@ -597,9 +597,10 @@ esp_err_t cerberus_storage_list_directory(
 
     DIR *directory = opendir(full_path);
     if (directory == NULL) {
-        ESP_LOGW(TAG, "cannot open %s: errno=%d", full_path, errno);
+        int open_error = errno;
+        ESP_LOGW(TAG, "cannot open %s: errno=%d", full_path, open_error);
         release_storage_mutex();
-        return ESP_ERR_NOT_FOUND;
+        return open_error == ENOENT ? ESP_ERR_NOT_FOUND : ESP_FAIL;
     }
 
     struct dirent *dir_entry;

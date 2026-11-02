@@ -40,6 +40,8 @@ for name in ("CERBERUS_STORAGE_PATH_MAX", "CERBERUS_STORAGE_NAME_MAX",
     constants.append(re.search(r"^#define " + name + r"\s+[^\n]+", header, re.M).group(0))
 end = header.index("} cerberus_storage_owner_t;") + len("} cerberus_storage_owner_t;")
 constants.append(header[header.rindex("typedef enum", 0, end):end])
+end = header.index("} cerberus_storage_entry_t;") + len("} cerberus_storage_entry_t;")
+constants.append(header[header.rindex("typedef struct", 0, end):end])
 (out / "archive_storage_types.h").write_text("\n".join(constants), encoding="utf-8")
 # Reuse the immutable, independently generated v1-v5 compatibility vectors.
 # They are literal historical bytes, not rewritten by the current encoder.
@@ -59,6 +61,8 @@ parts = [function(storage, signature) for signature in (
     "static esp_err_t ensure_storage_mutex(void)\n{",
     "static esp_err_t take_storage_mutex(void)\n{",
     "static void release_storage_mutex(void)\n{",
+    "static int compare_entries(const void *left_ptr, const void *right_ptr)\n{",
+    "esp_err_t cerberus_storage_list_directory(\n",
     "esp_err_t cerberus_storage_unmount(void)\n{",
     "esp_err_t cerberus_storage_reserve_for_usb(void)\n{",
     "static esp_err_t recon_storage_absent(",

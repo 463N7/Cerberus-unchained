@@ -46,6 +46,8 @@ static bool io_copy_fail;
 static unsigned io_loads, io_exports, listings;
 static char io_load_name[CERBERUS_STORAGE_NAME_MAX];
 static unsigned file_mode, file_page_offset;
+static size_t file_entry_count;
+static esp_err_t storage_last_error;
 enum { UI_FILE_MODE_LIST, UI_FILE_MODE_TEXT };
 static esp_err_t refresh_file_listing(bool remount){CHECK(!remount);++listings;return ESP_OK;}
 static mesh_locate_t locate_io_copy;
@@ -551,6 +553,25 @@ static void archive_workflow(const char *folder)
   * from the stopped initial shell without starting a radio. */
  ui_reset();unsigned listed=listings;mesh_ui_tap(270,80);
  CHECK(current_page==UI_PAGE_FILES&&listings==listed+1U&&!strcmp(file_path,"/CERBERUS/MESH"));
+ /* The real empty-list renderer has no selectable fake file. Errors and all
+  * other paths suppress this first-use message; actual refresh logic is tested
+  * separately by the directory-memory fixture against the storage boundary. */
+ drawn_size=0;drawn[0]=0;file_entry_count=0;storage_last_error=ESP_OK;
+ CHECK(cerberus_display_fill_rect(0,0,320,480,UI_BACKGROUND)==ESP_OK);
+ CHECK(draw_header("FILES")==ESP_OK);
+ CHECK(draw_mesh_archive_empty_list()==ESP_OK&&strstr(drawn,"NO SAVED MAPS")&&
+    strstr(drawn,"SAVE A MESH SURVEY TO KEEP IT HERE"));
+ CHECK(route_draw_footer()==ESP_OK);ppm(folder,"mesh-map-empty-saved");
+ drawn_size=0;drawn[0]=0;file_entry_count=1;
+ CHECK(draw_mesh_archive_empty_list()==ESP_OK&&!drawn_size);
+ file_entry_count=0;storage_last_error=ESP_FAIL;
+ CHECK(draw_mesh_archive_empty_list()==ESP_OK&&!drawn_size);
+ storage_last_error=ESP_OK;snprintf(file_path,sizeof(file_path),"/CERBERUS/MESH/CHILD");
+ CHECK(draw_mesh_archive_empty_list()==ESP_OK&&!drawn_size);
+ snprintf(file_path,sizeof(file_path),"%s",CERBERUS_STORAGE_MESH_ARCHIVE_PATH);
+ fail_after=calls+1U;CHECK(draw_mesh_archive_empty_list()==ESP_FAIL);fail_after=0;
+ tool_parent_page=UI_PAGE_FIELD_MENU;listed=listings;route_footer();
+ CHECK(current_page==UI_PAGE_FIELD_MENU&&listings==listed&&!peer.wire_calls);
  ui_step(20,false);CHECK(!mesh_ui&&!peer.wire_calls);
  ui_begin(1U);mesh_ui_tap(270,80);CHECK(current_page==UI_PAGE_IEEE802154&&mesh_ui_busy());ui_exit();
  /* A valid empty failed capture is not displayed as a clean empty network.

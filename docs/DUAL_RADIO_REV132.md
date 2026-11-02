@@ -12,6 +12,9 @@ The existing five-tool Mesh menu stays intact. Inside the Mesh survey, SAVE MAP
 or STOP & SAVE saves a new `.MSH` file, then OPEN MAP opens the historical view.
 SAVED opens `/CERBERUS/MESH` in the existing Files browser when acquisition and
 storage work are released. Files also recognizes copied `.MSH` documents.
+Before the first save creates that directory, SAVED shows an empty-map message.
+Only a missing Mesh directory is treated as empty; mounting and other directory
+errors remain visible. Opening the browser does not create directories.
 
 The historical view offers PAN contexts, addresses, directed observed traffic
 and retained raw-frame details. Its selected rows are frozen copies, and the

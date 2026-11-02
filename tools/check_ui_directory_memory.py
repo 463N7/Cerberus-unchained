@@ -51,7 +51,8 @@ types = [define(name, ui) for name in (
     "UI_FILE_ENTRY_CAPACITY", "UI_FILE_VISIBLE_ROWS", "UI_SCRIPT_ENTRY_CAPACITY",
     "UI_SCRIPT_VISIBLE_ROWS", "UI_SCRIPT_LIST_Y", "UI_SCRIPT_ROW_HEIGHT", "UI_LOG_PATH")]
 types += [define(name, storage) for name in (
-    "CERBERUS_STORAGE_NAME_MAX", "CERBERUS_STORAGE_SCRIPTS_PATH")]
+    "CERBERUS_STORAGE_NAME_MAX", "CERBERUS_STORAGE_SCRIPTS_PATH",
+    "CERBERUS_STORAGE_MESH_ARCHIVE_PATH")]
 types += [define(name, script_header) for name in (
     "CERBERUS_SCRIPT_EXTENSION", "CERBERUS_SCRIPT_MAX_ACTIONS", "CERBERUS_SCRIPT_TEXT_MAX")]
 types += [typedef(name, storage) for name in (

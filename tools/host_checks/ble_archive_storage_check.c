@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
@@ -43,6 +44,8 @@
 #define CERBERUS_STORAGE_MOUNT_PATH "sdcard"
 #define TAG "archive-storage-test"
 #define ESP_LOGI(...) ((void)0)
+/* Logging may change errno; classification must retain opendir's own value. */
+#define ESP_LOGW(...) ((void)(errno=EIO))
 static unsigned checks, cases;
 #define CHECK(x) do {++checks;if(!(x)){fprintf(stderr,"Archive storage %u: %s\n",__LINE__,#x);exit(1);}}while(0)
 #define pdMS_TO_TICKS(x) (x)
@@ -56,6 +59,8 @@ static FILE *sd_wifi_capture_file;
 static struct {bool active;} sd_recon;
 static char sd_operation_source_path[CERBERUS_STORAGE_PATH_MAX+CERBERUS_STORAGE_NAME_MAX];
 static unsigned locks, unlocks, streams, descriptors;
+static unsigned directories, directory_opens;
+static int directory_open_error;
 static unsigned handoff_probes,unmounts;
 static bool probe_handoff;
 esp_err_t cerberus_storage_unmount(void);
@@ -126,6 +131,14 @@ static size_t wrapped_read(void *data,size_t size,size_t count,FILE *stream)
     return fread(data,size,count,stream);
 }
 static int wrapped_getc(FILE *stream){if(event(GETC))return 'X';return fgetc(stream);}
+static DIR *wrapped_opendir(const char *path)
+{
+    CHECK(locked);++directory_opens;
+    if(directory_open_error){errno=directory_open_error;return NULL;}
+    DIR *directory=opendir(path);if(directory)++directories;return directory;
+}
+static int wrapped_closedir(DIR *directory)
+{CHECK(locked&&directories);--directories;return closedir(directory);}
 /* The successful-close hook creates a competing final entry before the final
  * absence gate, proving publication cannot replace it under fault injection. */
 static int close_with_race(FILE *stream)
@@ -146,6 +159,8 @@ static int close_with_race(FILE *stream)
 #define rename wrapped_rename
 #define fread wrapped_read
 #define fgetc wrapped_getc
+#define opendir wrapped_opendir
+#define closedir wrapped_closedir
 #include "archive_storage_impl.h"
 #undef stat
 #undef mkdir
@@ -163,12 +178,14 @@ static int close_with_race(FILE *stream)
 #undef rename
 #undef fread
 #undef fgetc
+#undef opendir
+#undef closedir
 
 static uint8_t payload[CERBERUS_STORAGE_BLE_ARCHIVE_MAX_BYTES],output[CERBERUS_STORAGE_BLE_ARCHIVE_MAX_BYTES];
 static char name[256];
 static void setup(void)
 {
-    CHECK(!locked&&!streams&&!descriptors&&locks==unlocks);
+    CHECK(!locked&&!streams&&!descriptors&&!directories&&locks==unlocks);
     if(cases)CHECK(native_chdir("..")==0);
     char directory[32];snprintf(directory,sizeof(directory),"case%04u",++cases);
     CHECK(native_mkdir(directory)==0&&native_chdir(directory)==0&&native_mkdir("sdcard")==0);
@@ -178,6 +195,7 @@ static void setup(void)
     race_final_path="sdcard/CERBERUS/BLE/B00001.BLE";
     extra_error=no_eof=short_read=collide_all=race_temp=race_final=false;zero_read_at=0;stat_size_delta=0;
     handoff_probes=unmounts=0;probe_handoff=false;
+    directory_opens=0;directory_open_error=0;
     memset(calls,0,sizeof(calls));memset(fault,0,sizeof(fault));name[0]=0;
     for(size_t i=0;i<sizeof(payload);++i)payload[i]=(uint8_t)(i*17U);
 }
@@ -193,7 +211,7 @@ static esp_err_t save(size_t length){return cerberus_storage_ble_archive_save(pa
 static esp_err_t load(size_t *length)
 {memset(output,0xA5,sizeof(output));*length=123;return cerberus_storage_ble_archive_load("/CERBERUS/BLE","B00001.BLE",output,sizeof(output),length);}
 static void failure_output(size_t length){CHECK(length==0);for(size_t i=0;i<sizeof(output);++i)CHECK(output[i]==0);}
-static void clean(void){CHECK(!locked&&!streams&&!descriptors&&locks==unlocks);}
+static void clean(void){CHECK(!locked&&!streams&&!descriptors&&!directories&&locks==unlocks);}
 
 static void check_full_v6_document(void)
 {

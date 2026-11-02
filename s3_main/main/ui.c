@@ -5914,6 +5914,12 @@ static esp_err_t refresh_file_listing(bool remount)
         &file_entries,
         UI_FILE_ENTRY_CAPACITY,
         &file_entry_count);
+    /* Saved Maps is created by the first successful save. Only a missing
+     * directory at this exact path is an empty first-use listing. */
+    if (storage_last_error == ESP_ERR_NOT_FOUND &&
+        strcmp(file_path, CERBERUS_STORAGE_MESH_ARCHIVE_PATH) == 0) {
+        storage_last_error = ESP_OK;
+    }
     if (storage_last_error != ESP_OK) {
         return storage_last_error;
     }
@@ -6224,6 +6230,17 @@ static esp_err_t draw_file_package_info(void)
     return ESP_OK;
 }
 
+static esp_err_t draw_mesh_archive_empty_list(void)
+{
+    if (storage_last_error != ESP_OK || file_entry_count != 0U ||
+        strcmp(file_path, CERBERUS_STORAGE_MESH_ARCHIVE_PATH) != 0) {
+        return ESP_OK;
+    }
+    ESP_RETURN_ON_ERROR(draw_centered(156, "NO SAVED MAPS", UI_MUTED, 2),
+        TAG, "empty maps title failed");
+    return draw_centered(194, "SAVE A MESH SURVEY TO KEEP IT HERE", UI_TEXT, 1);
+}
+
 static esp_err_t draw_files(void)
 {
     char line[64];
@@ -6303,6 +6320,7 @@ static esp_err_t draw_files(void)
                 TAG,
                 "file row failed");
         }
+        ESP_RETURN_ON_ERROR(draw_mesh_archive_empty_list(), TAG, "empty maps failed");
     }
 
     if (file_clipboard_active) {

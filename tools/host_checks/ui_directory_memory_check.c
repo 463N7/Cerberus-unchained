@@ -252,9 +252,55 @@ int main(void)
     assert(allocation_attempts == attempts && allocated_bytes == 21760);
     assert(file_entries == retained_file && mounts > 0 && unmounts > 0 && draws > 0);
 
+    /* First-use Saved Maps can be absent after a successful mount/status.
+     * The storage boundary classifies only ENOENT as NOT_FOUND; neither other
+     * paths nor errors from mount/status are empty-directory evidence. */
+    snprintf(file_path, sizeof(file_path), "%s", CERBERUS_STORAGE_MESH_ARCHIVE_PATH);
+    list_error = ESP_ERR_NOT_FOUND;
+    file_page_offset = 99;
+    assert(refresh_file_listing(false) == ESP_OK && storage_last_error == ESP_OK);
+    assert(file_entry_count == 0 && file_page_offset == 0);
+    assert(file_entries == retained_file && allocation_attempts == attempts);
+    for (unsigned i = 0; i < 3; ++i) {
+        assert(refresh_file_listing(false) == ESP_OK && file_entry_count == 0);
+    }
+    navigate_file_parent();
+    assert(strcmp(file_path, "/CERBERUS") == 0 &&
+        storage_last_error == ESP_ERR_NOT_FOUND && file_entry_count == 0);
+    list_error = ESP_OK;
+    source_count = 0;
+    navigate_file_parent();
+    assert(strcmp(file_path, "/") == 0 && storage_last_error == ESP_OK);
+    snprintf(file_path, sizeof(file_path), "%s", CERBERUS_STORAGE_MESH_ARCHIVE_PATH);
+    const esp_err_t errors[] = {ESP_FAIL, ESP_ERR_NO_MEM, ESP_ERR_INVALID_STATE};
+    for (size_t i = 0; i < sizeof(errors) / sizeof(errors[0]); ++i) {
+        list_error = errors[i];
+        assert(refresh_file_listing(false) == errors[i] && file_entry_count == 0);
+    }
+    list_error = ESP_ERR_NOT_FOUND;
+    unsigned calls_before = list_calls;
+    mount_error = ESP_ERR_NOT_FOUND;
+    assert(refresh_file_listing(false) == ESP_ERR_NOT_FOUND && list_calls == calls_before);
+    mount_error = ESP_OK;
+    status_error = ESP_ERR_NOT_FOUND;
+    assert(refresh_file_listing(false) == ESP_ERR_NOT_FOUND && list_calls == calls_before);
+    status_error = ESP_OK;
+    snprintf(file_path, sizeof(file_path), "/CERBERUS/MESH/CHILD");
+    assert(refresh_file_listing(false) == ESP_ERR_NOT_FOUND && file_entry_count == 0);
+    snprintf(file_path, sizeof(file_path), "/CERBERUS/OTHER");
+    assert(refresh_file_listing(false) == ESP_ERR_NOT_FOUND && file_entry_count == 0);
+    snprintf(file_path, sizeof(file_path), "%s", CERBERUS_STORAGE_MESH_ARCHIVE_PATH);
+    list_error = ESP_OK;
+    source_count = 0;
+    assert(refresh_file_listing(false) == ESP_OK && file_entry_count == 0);
+    row(0, "M00001.MSH", false);
+    assert(refresh_file_listing(false) == ESP_OK && file_entry_count == 1);
+    assert(strcmp(file_entries[0].name, "M00001.MSH") == 0);
+
     /* Harness teardown only: production intentionally never frees these banks. */
     for (unsigned i = 0; i < allocation_successes; ++i) free(allocation_log[i]);
     puts("PASS: missing PSRAM, OOM retry, five producer paths, retained banks, alias-safe navigation,");
     puts("      filtering, copied selections, partial/error counts, remount and 21,760-byte bound.");
+    puts("      First-use Saved Maps: absent/empty/populated, repeat, exact path, SD and listing errors.");
     return 0;
 }

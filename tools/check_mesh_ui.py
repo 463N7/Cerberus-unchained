@@ -58,7 +58,10 @@ file_route = file_route.replace('file_entries[index].name', 'name')
 assert 'if (current_page == UI_PAGE_MESH_ARCHIVE) return mesh_archive_draw();' in ui
 assert 'mesh_archive_tap(x, y);' in ui
 assert '#include "mesh_archive_ui.h"' in ui
-(out / "mesh_routes.h").write_text('static void route_back(void){\n' + back + '}\n'
+begin = ui.index('static esp_err_t draw_mesh_archive_empty_list(void)\n{')
+empty_maps = ui[begin:ui.index('\nstatic esp_err_t draw_files(void)', begin)]
+assert 'ESP_RETURN_ON_ERROR(draw_mesh_archive_empty_list(), TAG, "empty maps failed");' in ui
+(out / "mesh_routes.h").write_text(empty_maps + '\nstatic void route_back(void){\n' + back + '}\n'
     + launcher + '\nstatic void route_footer(void){\n' + footer + '}\n'
     + live_view + footer_defines + '\nstatic esp_err_t route_draw_footer(void){const char *back_label="BACK";\n' + footer_label + footer_override + footer_draw + '}\n'
     'static void route_entry(void){\n' + entry + '}\n'

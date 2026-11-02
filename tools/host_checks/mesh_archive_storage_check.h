@@ -183,8 +183,57 @@ static void check_mesh_archive_storage_aliases(void)
         sizeof(map_storage_output), &length) == ESP_ERR_INVALID_ARG && !length);
     clean();
 }
+static void check_mesh_archive_directory_listing(void)
+{
+    cerberus_storage_entry_t entries[4], before[4];
+    size_t count;
+    setup();
+    memset(entries, 0xa5, sizeof(entries));
+    memcpy(before, entries, sizeof(entries));
+    count = 99U;
+    CHECK(cerberus_storage_list_directory("/CERBERUS/MESH", entries, 4U, &count) == ESP_ERR_NOT_FOUND);
+    CHECK(!count && !memcmp(entries, before, sizeof(entries)) && directory_opens == 1U);
+    CHECK(errno == EIO); /* Logger changed errno after its classification snapshot. */
+    CHECK(!calls[MKDIR] && !calls[OPEN]);
+    struct stat item;
+    CHECK(stat("sdcard/CERBERUS/MESH", &item) != 0 && errno == ENOENT);
+    clean();
+
+    CHECK(native_mkdir("sdcard/CERBERUS/MESH") == 0);
+    count = 99U;
+    CHECK(cerberus_storage_list_directory("/CERBERUS/MESH", entries, 4U, &count) == ESP_OK && !count);
+    CHECK(native_mkdir("sdcard/CERBERUS/MESH/sub") == 0);
+    put("sdcard/CERBERUS/MESH/B.MSH", "BB", 2U);
+    put("sdcard/CERBERUS/MESH/a.MSH", "A", 1U);
+    CHECK(cerberus_storage_list_directory("/CERBERUS/MESH", entries, 4U, &count) == ESP_OK && count == 3U);
+    CHECK(entries[0].is_directory && !strcmp(entries[0].name, "sub") && !entries[0].size_bytes);
+    CHECK(!entries[1].is_directory && !strcmp(entries[1].name, "a.MSH") && entries[1].size_bytes == 1U);
+    CHECK(!entries[2].is_directory && !strcmp(entries[2].name, "B.MSH") && entries[2].size_bytes == 2U);
+    CHECK(cerberus_storage_list_directory("/CERBERUS/MESH", entries, 2U, &count) == ESP_OK && count == 2U);
+    clean();
+
+    const int errors[] = {EIO, EACCES, ENOTDIR, EMFILE, ENOMEM};
+    for (unsigned i = 0U; i < sizeof(errors) / sizeof(errors[0]); ++i) {
+        directory_open_error = errors[i];
+        memcpy(entries, before, sizeof(entries)); count = 99U;
+        CHECK(cerberus_storage_list_directory("/CERBERUS/MESH", entries, 4U, &count) == ESP_FAIL);
+        CHECK(!count && !memcmp(entries, before, sizeof(entries)));
+        clean();
+    }
+    directory_open_error = 0;
+    unsigned opened = directory_opens;
+    sd_mounted = false; count = 99U;
+    CHECK(cerberus_storage_list_directory("/CERBERUS/MESH", entries, 4U, &count) == ESP_ERR_INVALID_STATE);
+    CHECK(!count && directory_opens == opened); clean();
+    sd_mounted = true; fail_lock = true; count = 99U;
+    CHECK(cerberus_storage_list_directory("/CERBERUS/MESH", entries, 4U, &count) == ESP_ERR_TIMEOUT);
+    CHECK(!count && directory_opens == opened); clean();
+    fail_lock = false;
+}
+
 static void check_mesh_archive_storage(void)
 {
+    check_mesh_archive_directory_listing();
     check_mesh_archive_save_storage();
     check_mesh_archive_storage_aliases();
     mesh_archive_setup(); size_t length = 0U;
