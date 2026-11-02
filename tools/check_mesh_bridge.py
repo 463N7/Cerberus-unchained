@@ -2,6 +2,7 @@
 from pathlib import Path
 import ast
 import os
+import re
 import subprocess
 import sys
 
@@ -24,8 +25,10 @@ state = dispatch[dispatch.index("static uint8_t current_radio_state(void)"):
                  dispatch.index("static void build_diagnostic_snapshot(")]
 cases = dispatch[dispatch.index("    case CERBERUS_MESH_OBSERVATION_COMMAND_INFO:"):
                  dispatch.index("    case CERBERUS_SPI_COMMAND_IEEE802154_ENERGY_SCAN_START:")]
+switches = re.findall(r'switch\s*\(\s*\(cerberus_spi_command_t\)request->command\s*\)\s*\{', dispatch)
+assert len(switches) == 1, "Expected the actual typed production command switch"
 (out / "mesh_bridge_dispatch.inc").write_text(state +
-    "\nstatic void mesh_dispatch(const cerberus_spi_frame_t *request){switch(request->command){\n" +
+    "\nstatic void mesh_dispatch(const cerberus_spi_frame_t *request){" + switches[0] + "\n" +
     cases + "\ndefault:break;}}\n")
 link = (root / "s3_main/main/c5_spi_link.c").read_text()
 (out / "mesh_bridge_frame.inc").write_text(link[

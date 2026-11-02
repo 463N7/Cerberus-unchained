@@ -4,6 +4,17 @@
 #include "mesh_bridge_check.c"
 #undef main
 #include "mesh_locate_report.h"
+#define LOCATE_COMMAND_REGISTERED(name) \
+    _Static_assert(CERBERUS_MESH_LOCATE_COMMAND_##name == CERBERUS_SPI_COMMAND_MESH_LOCATE_##name, \
+                   "Locate " #name " must match the central command enum")
+LOCATE_COMMAND_REGISTERED(INFO);
+LOCATE_COMMAND_REGISTERED(START);
+LOCATE_COMMAND_REGISTERED(STATUS);
+LOCATE_COMMAND_REGISTERED(STOP);
+LOCATE_COMMAND_REGISTERED(PEEK);
+LOCATE_COMMAND_REGISTERED(READ);
+LOCATE_COMMAND_REGISTERED(RELEASE);
+#undef LOCATE_COMMAND_REGISTERED
 #define esp_timer_get_time bridge_s3_time
 #include "c5_mesh_locate_link_impl.h"
 #undef esp_timer_get_time
