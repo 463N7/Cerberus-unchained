@@ -64,7 +64,7 @@ parts += [function(ui, signature) for signature in (
     "static esp_err_t export_wifi_baseline(void)",
     "static esp_err_t draw_wifi_baseline(void)")]
 parent = function(ui, "static esp_err_t draw_detail_page(void)")
-start = parent.index("    if (learning_tool_active) {", parent.index("    if (live_is_view()) back_label"))
+start = parent.index("    if (learning_tool_active) {", parent.index("    if (live_is_view()"))
 parts.append('static esp_err_t actual_footer(void)\n{ const char *back_label = "WIFI MENU";\n' + parent[start:])
 tap = function(ui, "static void handle_wifi_tap(uint16_t x, uint16_t y)")
 parts.append("static void actual_body_tap(uint16_t x, uint16_t y)\n{\n" +
