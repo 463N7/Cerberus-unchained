@@ -64,8 +64,9 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 Rev129 corrects receive continuity in the existing passive 802.15.4 Beacon and
 Activity sweeps: the receiver remains awake after each frame until the channel
 dwell ends. The host regression reproduces the previous first-frame-only
-behavior and checks later frames, passive ACK settings and cleanup. See
-[the receive checkpoint](docs/DUAL_RADIO_REV129.md) for validation and limits.
+behavior and checks later frames, passive ACK settings and cleanup. Both
+worker fixtures are registered together in the rev129 139-suite host registry.
+See [the receive checkpoint](docs/DUAL_RADIO_REV129.md) for validation and limits.
 [Mesh Detection](docs/MESH_DETECTION_PLAN.md) is the next planned receive
 workflow; it is not implemented by this fix and requires no GPS.
 

@@ -42,19 +42,23 @@ class SelectionChecks(unittest.TestCase):
 
     def test_four_shards_partition_exact_canonical_registry(self):
         names = runner.registered_checks()
+        self.assertEqual(len(names), 139)
+        self.assertEqual(names.count("check_radio_worker.py"), 1)
+        self.assertIn("check_radio_worker.py", runner.CHECKS)
         parts = [runner.selected_checks(i, 4) for i in range(4)]
-        self.assertEqual([len(part) for part in parts], [35, 35, 34, 34])
+        self.assertEqual([len(part) for part in parts], [35, 35, 35, 34])
         self.assertEqual(set().union(*(set(part) for part in parts)), set(names))
         for index, part in enumerate(parts):
             self.assertEqual(part, tuple(name for ordinal, name in enumerate(names) if ordinal % 4 == index))
-            self.assertEqual(len(set(part) & set(runner.CHECKS)), 28)
+            self.assertEqual(len(set(part) & set(runner.CHECKS)), [29, 28, 28, 28][index])
+            self.assertEqual(len(set(part) & set(runner.SERIAL_CHECKS)), [6, 7, 7, 6][index])
             for other in parts[index + 1:]:
                 self.assertFalse(set(part) & set(other))
         self.assertEqual(runner.selected_checks(), names)
 
     def test_invalid_or_partial_shard_arguments_reject(self):
         for index, count in ((None, 4), (0, None), (-1, 4), (4, 4), (0, 0),
-                             (0, 139), (True, 4), (0, True)):
+                             (0, 140), (True, 4), (0, True)):
             with self.subTest(index=index, count=count), self.assertRaises(ValueError):
                 runner.selected_checks(index, count)
 
@@ -127,7 +131,7 @@ class RunnerChecks(unittest.TestCase):
         status, receipt, commands = self.invoke()
         self.assertEqual(status, 0)
         self.assertEqual(receipt["format"], 1)
-        self.assertEqual(receipt["suite_set"], "rev128")
+        self.assertEqual(receipt["suite_set"], "rev129")
         self.assertEqual(receipt["status"], "passed")
         self.assertEqual(receipt["selection"]["mode"], "full")
         self.assertEqual([c["check"] for c in receipt["checks"]], list(runner.registered_checks()))
@@ -208,13 +212,13 @@ class AggregateChecks(unittest.TestCase):
                 (folder / log_name).write_bytes(content)
                 checks.append({"check": name, "exit_code": 0, "duration_seconds": 1.25,
                     "log": "artifacts/host-checks/" + log_name, "log_sha256": verifier.digest(content)})
-            receipt = {"format": 1, "status": "passed", "suite_set": "rev128", "platform": "win32",
+            receipt = {"format": 1, "status": "passed", "suite_set": "rev129", "platform": "win32",
                 "hardware_validated": False, "source_head": HEAD, "source_head_after": HEAD,
                 "source_clean": True, "source_clean_after": True,
                 "execution": EXECUTION,
                 "inputs_changed": [], "inputs_after": self.inputs, "python_version": "3.13.16",
                 "ziglang_version": "0.14.1", "registry_sha256": runner.registry_sha256(),
-                "registered_suite_count": 138, "checks": checks,
+                "registered_suite_count": 139, "checks": checks,
                 "selection": {"mode": "shard", "shard_index": index, "shard_count": 4,
                     "selected_names": names, "selected_suite_count": len(names)}}
             path = folder / "host-checks.json"
@@ -239,8 +243,8 @@ class AggregateChecks(unittest.TestCase):
     def test_complete_logs_and_shards_pass_in_any_artifact_order(self):
         report = self.verify(list(reversed(self.paths)))
         self.assertEqual(report["status"], "passed")
-        self.assertEqual(report["verified_suite_count"], 138)
-        self.assertEqual(report["suite_seconds_sum"], 138 * 1.25)
+        self.assertEqual(report["verified_suite_count"], 139)
+        self.assertEqual(report["suite_seconds_sum"], 139 * 1.25)
         self.assertEqual([r["shard_index"] for r in report["receipts"]], [0, 1, 2, 3])
         self.assertEqual(report["inputs_sha256"], verifier.canonical_digest(self.inputs))
         for row, path in zip(report["receipts"], self.paths):
@@ -255,11 +259,11 @@ class AggregateChecks(unittest.TestCase):
             self.rejected_change(lambda r, f=field, v=value: r["selection"].update({f: v}))
 
     def test_bad_provenance_status_registry_or_toolchain_rejected(self):
-        changes = {"format": True, "status": "failed", "suite_set": "rev127", "platform": "linux",
+        changes = {"format": True, "status": "failed", "suite_set": "rev128", "platform": "linux",
                    "hardware_validated": True, "source_head": "b" * 40, "source_head_after": "b" * 40,
                    "source_clean": False, "source_clean_after": False,
                    "inputs_changed": ["file.c"], "registry_sha256": "0" * 64,
-                   "registered_suite_count": 137, "ziglang_version": "0.14.0", "python_version": "3.13.17"}
+                   "registered_suite_count": 138, "ziglang_version": "0.14.0", "python_version": "3.13.17"}
         for key, value in changes.items():
             with self.subTest(field=key):
                 self.rejected_change(lambda r, k=key, v=value: r.update({k: v}))

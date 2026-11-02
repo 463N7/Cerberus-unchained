@@ -54,14 +54,16 @@ python tools/check_build_unified.py
 python tools/check_field_kit.py
 ```
 
-The runner covers 138 named suites and uses separate Zig caches. Run it against
-stable sources, separately from firmware builds. See [validation](VALIDATION.md)
+The rev129 runner covers 139 named suites and uses separate Zig caches. The
+registered `check_radio_worker.py` suite runs both the shared 802.15.4 worker
+checks and the receive-continuity regression. Run the suite against stable
+sources, separately from firmware builds. See [validation](VALIDATION.md)
 and [the current contribution and remaining work](CONTRIBUTION_REV93.md). The
 [original rev81 contribution](CONTRIBUTION_REV81.md) remains historical context.
 
 Hosted CI runs the full suite on Ubuntu and four isolated Windows shards. Each
-Windows shard keeps its serial UI fixtures sequential. The aggregate gate
-requires all 138 suites exactly once, matching source/registry/commit hashes,
+Windows shard keeps its serial UI fixtures sequential; the four shards contain
+35, 35, 35 and 34 suites. The aggregate gate requires all 139 suites exactly once, matching source/registry/commit hashes,
 verified log hashes and a single GitHub run attempt. Ancillary build-report,
 SD-resource and shard-regression checks still run on both operating systems.
 

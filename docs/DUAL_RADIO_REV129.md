@@ -29,8 +29,12 @@ also receives all five offered frame classes on each of 16 channels.
 The fixture checks exact buffer return, no callback delivery after shutdown,
 passive ACK settings, retries, first-error precedence across setup/receive/
 cleanup, and unchanged Energy behavior. The existing admission, stale-worker
-notification and tick-wrap tests remain registered in the same host suite.
-Independent source review found no remaining blocker for this narrow fix.
+notification and tick-wrap tests run alongside it in `check_radio_worker.py`.
+That suite is now explicitly registered in the rev129 full host runner, bringing
+the registry to 139 suites (113 parallel and 26 serial). Earlier 138-suite
+receipts did not include this standalone worker suite and remain historical
+evidence; they do not validate the expanded registry. Independent source review
+found no remaining blocker for this narrow fix.
 
 Focused checks pass. Full host and native validation and matched packaging are
 pending for this candidate. Rev126 remains the last verified installation;
