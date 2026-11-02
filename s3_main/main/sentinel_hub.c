@@ -13,6 +13,7 @@ static const hub_item_t wifi_items[] = {
     {"Nearby networks", "2.4 + 5 GHZ AP DISCOVERY"},
     {"Survey summary", "COUNTS, SECURITY AND SCAN HEALTH"},
     {"Channel view", "BEACON / DISCONNECT / PROBE COUNTS"},
+    {"Probe Sniff", "PASSIVE REQUESTS / SAVE EVIDENCE"},
     {"Trusted baseline", "REVIEW YOUR SAVED NETWORKS"},
     {"Activity review", "BOUNDED DEFENSIVE OBSERVATIONS"},
     {"My connection", "CONNECT, INSPECT AND RUN CHECKS"},
@@ -48,7 +49,7 @@ static const hub_item_t *items_for(sentinel_hub_t hub, size_t *count)
 static uint16_t item_y(sentinel_hub_t hub, size_t index)
 {
     return hub == SENTINEL_HUB_BLE ? (uint16_t)(67U + index * 54U) :
-        (uint16_t)(70U + index * (hub == SENTINEL_HUB_WIFI ? 48U : 66U));
+        (uint16_t)(70U + index * (hub == SENTINEL_HUB_WIFI ? 40U : 66U));
 }
 
 esp_err_t sentinel_hub_draw(sentinel_hub_t hub, const cerberus_ui_widget_theme_t *theme)
@@ -65,15 +66,15 @@ esp_err_t sentinel_hub_draw(sentinel_hub_t hub, const cerberus_ui_widget_theme_t
         theme->muted, theme->background, 1), "hub", "subtitle");
     for (size_t i = 0; i < count; ++i) {
         uint16_t y = item_y(hub, i);
-        uint16_t height = hub == SENTINEL_HUB_WIFI ? 42U :
+        uint16_t height = hub == SENTINEL_HUB_WIFI ? 36U :
             (hub == SENTINEL_HUB_BLE ? 48U : 54U);
         ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(12, y, 296, height,
             theme->panel), "hub", "panel");
         ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(12, y, 3, height,
             accent), "hub", "accent");
-        ESP_RETURN_ON_ERROR(cerberus_display_draw_text(24, y + 6, items[i].title,
+        ESP_RETURN_ON_ERROR(cerberus_display_draw_text(24, y + (hub == SENTINEL_HUB_WIFI ? 3U : 6U), items[i].title,
             theme->text, theme->panel, 2), "hub", "title");
-        ESP_RETURN_ON_ERROR(cerberus_display_draw_text(24, y + 28, items[i].description,
+        ESP_RETURN_ON_ERROR(cerberus_display_draw_text(24, y + (hub == SENTINEL_HUB_WIFI ? 23U : 28U), items[i].description,
             theme->muted, theme->panel, 1), "hub", "description");
     }
     if (hub != SENTINEL_HUB_WIFI) {
@@ -118,9 +119,10 @@ int sentinel_hub_hit_test(sentinel_hub_t hub, uint16_t x, uint16_t y)
     (void)items_for(hub, &count);
     for (size_t i = 0; i < count; ++i) {
         uint16_t top = item_y(hub, i);
-        uint16_t height = hub == SENTINEL_HUB_WIFI ? 42U :
+        uint16_t height = hub == SENTINEL_HUB_WIFI ? 36U :
             (hub == SENTINEL_HUB_BLE ? 48U : 54U);
-        if (y >= top && y < top + height) return (int)i;
+        if (y >= top && y < top + height)
+            return hub == SENTINEL_HUB_WIFI && i >= 3U ? (i == 3U ? 10 : (int)i - 1) : (int)i;
     }
     return -1;
 }

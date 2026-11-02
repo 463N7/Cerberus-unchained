@@ -414,8 +414,8 @@ static void archive_maximum_output(void)
 }
 static void archive_format_output(void)
 {
-    const char *names[] = {"BLE", "AIRTAG_JSON", "WIFI_NATIVE", "AP_JSON", "SSID_TEXT", "UNKNOWN"};
-    for (unsigned format = 0; format < 6; ++format) {
+    const char *names[] = {"BLE", "AIRTAG_JSON", "WIFI_NATIVE", "AP_JSON", "SSID_TEXT", "PROBE_REPORT", "UNKNOWN"};
+    for (unsigned format = 0; format < sizeof(names) / sizeof(names[0]); ++format) {
         reset(); start(); archive_reads = 0;
         memset(&archive_status, 0, sizeof(archive_status));
         archive_status.state = CERBERUS_BLE_ARCHIVE_IO_COMPLETE;

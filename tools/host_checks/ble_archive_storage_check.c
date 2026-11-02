@@ -436,9 +436,11 @@ static void check_full_wifi_document(void)
 }
 
 #include "wifi_interchange_storage_check.h"
+#include "probe_report_storage_check.h"
 
 int main(void)
 {
+    check_probe_report_storage();
     check_wifi_interchange_storage();
     check_full_v6_document();
     check_json_storage();

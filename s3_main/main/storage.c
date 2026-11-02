@@ -2664,6 +2664,70 @@ static bool ble_archive_storage_available(void)
         sd_wifi_capture_file == NULL && !wardrive_storage_busy();
 }
 
+/* Dedicated Probe Sniff report storage. The caller supplies an already
+ * validated bounded report, never an arbitrary destination path. */
+static unsigned sd_probe_report_next_index = 1U;
+
+esp_err_t cerberus_storage_probe_report_save(const uint8_t *data, size_t length,
+    char *file_name, size_t capacity)
+{
+    if (file_name != NULL && capacity) file_name[0] = '\0';
+    if (data == NULL || !length || length > CERBERUS_STORAGE_PROBE_REPORT_MAX_BYTES ||
+        file_name == NULL || capacity < 11U) return ESP_ERR_INVALID_ARG;
+    ESP_RETURN_ON_ERROR(take_storage_mutex(), TAG, "Probe report save lock failed");
+    esp_err_t error = ble_archive_storage_available() ? ESP_OK : ESP_ERR_INVALID_STATE;
+    if (error == ESP_OK) error = recon_storage_directory(CERBERUS_STORAGE_MOUNT_PATH "/CERBERUS");
+    if (error == ESP_OK) error = recon_storage_directory(
+        CERBERUS_STORAGE_MOUNT_PATH CERBERUS_STORAGE_PROBE_REPORT_PATH);
+    char temporary[96], final[96], name[11];
+    int descriptor = -1;
+    for (unsigned attempt = 0U; error == ESP_OK && attempt < SD_BLE_ARCHIVE_SEARCH_LIMIT; ++attempt) {
+        unsigned index = sd_probe_report_next_index;
+        sd_probe_report_next_index = index >= SD_BLE_ARCHIVE_FILE_LIMIT ? 1U : index + 1U;
+        int n = snprintf(name, sizeof(name), "P%05u.CSV", index);
+        int f = snprintf(final, sizeof(final), "%s%s/%s", CERBERUS_STORAGE_MOUNT_PATH,
+            CERBERUS_STORAGE_PROBE_REPORT_PATH, name);
+        int t = snprintf(temporary, sizeof(temporary), "%s%s/P%05u.TMP",
+            CERBERUS_STORAGE_MOUNT_PATH, CERBERUS_STORAGE_PROBE_REPORT_PATH, index);
+        if (n != 10 || f < 0 || (size_t)f >= sizeof(final) ||
+            t < 0 || (size_t)t >= sizeof(temporary)) {
+            error = ESP_ERR_INVALID_SIZE;
+            break;
+        }
+        esp_err_t absent = recon_storage_absent(final);
+        if (absent == ESP_ERR_INVALID_STATE) continue;
+        if (absent != ESP_OK) { error = absent; break; }
+        absent = recon_storage_absent(temporary);
+        if (absent == ESP_ERR_INVALID_STATE) continue;
+        if (absent != ESP_OK) { error = absent; break; }
+        descriptor = open(temporary, O_WRONLY | O_CREAT | O_EXCL, 0664);
+        if (descriptor >= 0) {
+            memcpy(file_name, name, sizeof(name));
+            memcpy(file_name + 7U, "TMP", 4U);
+            break;
+        }
+        if (errno != EEXIST) { error = ESP_FAIL; break; }
+    }
+    if (error == ESP_OK && descriptor < 0) error = ESP_ERR_NOT_FOUND;
+    FILE *stream = NULL;
+    if (descriptor >= 0) {
+        stream = fdopen(descriptor, "wb");
+        if (stream == NULL) { (void)close(descriptor); error = ESP_FAIL; }
+    }
+    if (stream != NULL) {
+        if (fwrite(data, 1U, length, stream) != length || ferror(stream)) error = ESP_FAIL;
+        if (!recon_storage_flush(stream)) error = ESP_FAIL;
+        if (fclose(stream) != 0) error = ESP_FAIL;
+    }
+    if (error == ESP_OK) error = recon_storage_absent(final);
+    if (error == ESP_OK && rename(temporary, final) != 0) error = ESP_FAIL;
+    if (error == ESP_OK) memcpy(file_name, name, sizeof(name));
+    /* Keep the exact created TMP and its name on failure; never remove a
+     * collision. Successful rename is publication, not a power-loss guarantee. */
+    release_storage_mutex();
+    return error;
+}
+
 esp_err_t cerberus_storage_ble_archive_save(const uint8_t *data, size_t length,
     char *file_name, size_t capacity)
 {

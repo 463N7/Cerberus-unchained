@@ -9,7 +9,7 @@
 enum { UI_PAGE_WIFI=1, UI_WIFI_MODE_MENU=2, UI_WIFI_MODE_DUAL, UI_WIFI_MODE_MULTISSID,
     UI_WIFI_MODE_PINESCAN, UI_WIFI_MODE_FIELD_SURVEY, UI_WIFI_MODE_STATS, UI_WIFI_MODE_PACKET_MONITOR,
     UI_WIFI_MODE_BASELINE, UI_WIFI_MODE_DEFENSE, UI_WIFI_MODE_CONNECTION, UI_WIFI_MODE_CHANNELS_24,
-    UI_WIFI_MODE_LIST, UI_WIFI_MODE_TARGET };
+    UI_WIFI_MODE_LIST, UI_WIFI_MODE_TARGET, UI_WIFI_MODE_PROBE_SNIFF };
 enum { SENTINEL_GUIDE_OPEN_WIFI=1, SENTINEL_GUIDE_OPEN_WIFI_CHANNELS, SENTINEL_GUIDE_OPEN_WIFI_BASELINE };
 enum { CERBERUS_WIFI_CONNECTION_STAGING=1, CERBERUS_WIFI_CONNECTION_CONNECTED, CERBERUS_WIFI_CONNECTION_CONNECTING };
 #define SENTINEL_HUB_WIFI 1
@@ -26,6 +26,8 @@ static unsigned packet_monitor_channel, packet_monitor_last_poll;
 static char wifi_export_message[10];
 static int wifi_connection_error, wifi_scan_error;
 static unsigned legacy_loads;
+static unsigned probe_opens;
+static void probe_sniff_open(void) { ++probe_opens; wifi_mode=UI_WIFI_MODE_PROBE_SNIFF; }
 static void dual_wifi_live_open(bool start)
 { ++dual_opens; current_page=UI_PAGE_WIFI; wifi_mode=UI_WIFI_MODE_DUAL;
     pending_start=start; dual_wifi_return_to_view=false; }
@@ -49,6 +51,7 @@ static void reset(void)
 {
     current_page=UI_PAGE_WIFI;wifi_mode=UI_WIFI_MODE_MENU;menu_item=0;
     dual_opens=dual_leaves=tap_count=scan_refreshes=surveys=0;
+    probe_opens=0;
     ui_capability_blocked=wifi_attack_selecting=pending_start=wifi_selection_valid=false;
     wifi_connection_status.state=0;
     wifi_channel_current_identity.valid=false;legacy_loads=0;wifi_scan_error=0;
@@ -63,6 +66,9 @@ int main(void)
     reset();root_wifi_tap(10,10);assert(dual_opens==1&&pending_start&&wifi_mode==UI_WIFI_MODE_DUAL);
     root_wifi_tap(20,445);assert(tap_count==1);root_touch(20,445);assert(tap_count==2);
     ui_capability_blocked=true;root_touch(20,445);assert(tap_count==2);
+    reset();menu_item=10;root_wifi_tap(10,10);
+    assert(wifi_mode==UI_WIFI_MODE_PROBE_SNIFF&&probe_opens==1&&!pending_start&&
+        !dual_opens&&!dual_leaves&&!scan_refreshes&&!surveys);
     reset();root_guide(SENTINEL_GUIDE_OPEN_WIFI);
     assert(wifi_mode==UI_WIFI_MODE_DUAL&&pending_start&&dual_opens==1&&!dual_leaves&&!scan_refreshes);
     reset();root_guide(SENTINEL_GUIDE_OPEN_WIFI_CHANNELS);

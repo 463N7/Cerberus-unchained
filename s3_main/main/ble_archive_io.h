@@ -4,6 +4,7 @@
 #include "airtag_json.h"
 #include "wifi_archive.h"
 #include "wifi_marauder.h"
+#include "probe_sniff_model.h"
 #include "esp_err.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -34,6 +35,7 @@ typedef enum {
     CERBERUS_BLE_ARCHIVE_IO_LOAD_SSID_TEXT,
     CERBERUS_BLE_ARCHIVE_IO_SAVE_SSID_TEXT,
     CERBERUS_BLE_ARCHIVE_IO_EXPORT_SSID_TEXT,
+    CERBERUS_BLE_ARCHIVE_IO_SAVE_PROBE,
 } cerberus_ble_archive_io_operation_t;
 
 typedef enum {
@@ -42,6 +44,7 @@ typedef enum {
     CERBERUS_BLE_ARCHIVE_IO_FORMAT_WIFI,
     CERBERUS_BLE_ARCHIVE_IO_FORMAT_AP_JSON,
     CERBERUS_BLE_ARCHIVE_IO_FORMAT_SSID_TEXT,
+    CERBERUS_BLE_ARCHIVE_IO_FORMAT_PROBE_REPORT,
 } cerberus_ble_archive_io_format_t;
 typedef struct {
     cerberus_ble_archive_io_state_t state;
@@ -112,6 +115,12 @@ esp_err_t cerberus_ble_archive_io_export_ssid_text(const cerberus_wifi_archive_t
     uint64_t *job_id);
 esp_err_t cerberus_ble_archive_io_copy_ssid_text(uint64_t job_id,
     cerberus_wifi_marauder_ssid_t *document);
+/* Save a fully fenced stopped Probe Sniff snapshot as a new CSV report under
+ * /CERBERUS/LOGS. The snapshot is validated and copied before returning, then
+ * formatted and written by this same worker. No load/copy-result API or radio
+ * action is implied; status reports the exact job's file outcome. */
+esp_err_t cerberus_ble_archive_io_save_probe(const cerberus_probe_sniff_snapshot_t *snapshot,
+    uint64_t *job_id);
 void cerberus_ble_archive_io_get_status(cerberus_ble_archive_io_status_t *status);
 /* Copies only a fully validated completed native BLE SAVE or LOAD. JSON jobs
  * require copy_airtag_json and Wi-Fi jobs require their matching typed copy. Getters reject

@@ -132,6 +132,8 @@ static int ble_hs_util_ensure_addr(int privacy){CHECK(!privacy);return 0;}
 static void reset_gatt_read_locked(uint8_t state,int32_t error){(void)state;(void)error;CHECK(locked);}
 #include "actual_lifecycle.h"
 #include "dual_ble_service_impl.h"
+/* Separate passive Probe owner; the actual admission body below checks it. */
+static atomic_bool probe_sniff_radio_reserved;
 static atomic_bool mac_radio_reserved,csi_radio_reserved,remote_id_radio_reserved,
     capture_radio_reserved,packet_monitor_radio_reserved;
 static bool cerberus_ieee802154_scanner_is_running(void){return false;}
@@ -392,6 +394,9 @@ static void failure_admission_and_exhaustion(void)
 }
 int main(void)
 {
+    reset_case();atomic_store(&probe_sniff_radio_reserved,true);
+    CHECK(wifi_another_radio_operation_is_active());
+    atomic_store(&probe_sniff_radio_reserved,false);
     stale_timeout_preserves_replacement();
     pending_stop_blocks_replacement(false);pending_stop_blocks_replacement(true);
     reset_pending_start_and_duplicate_stop();timer_arm_failure_all_modes();

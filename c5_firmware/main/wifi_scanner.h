@@ -12,6 +12,12 @@ extern "C" {
 #endif
 
 esp_err_t cerberus_wifi_scanner_init(void);
+void cerberus_wifi_probe_sniff_info(cerberus_probe_sniff_control_t *out);
+esp_err_t cerberus_wifi_probe_sniff_start(const cerberus_probe_sniff_start_t *request,cerberus_probe_sniff_control_t *out);
+esp_err_t cerberus_wifi_probe_sniff_status(uint64_t session,cerberus_probe_sniff_control_t *out);
+esp_err_t cerberus_wifi_probe_sniff_stop(uint64_t session,cerberus_probe_sniff_control_t *out);
+esp_err_t cerberus_wifi_probe_sniff_release(uint64_t session,cerberus_probe_sniff_control_t *out);
+esp_err_t cerberus_wifi_probe_sniff_read(const cerberus_probe_sniff_read_t *request,cerberus_probe_sniff_chunk_t *out);
 esp_err_t cerberus_wifi_mac_start(const cerberus_mac_start_request_t *,cerberus_mac_status_t *);
 esp_err_t cerberus_wifi_mac_get_info(cerberus_mac_info_t *);
 esp_err_t cerberus_wifi_mac_get_status(const cerberus_mac_binding_t *,cerberus_mac_status_t *);

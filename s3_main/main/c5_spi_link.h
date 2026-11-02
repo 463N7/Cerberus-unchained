@@ -4,6 +4,7 @@
 #include "s3_wifi_observation.h"
 #include "watch_receive_timing.h"
 #include "wifi_probe_observation.h"
+#include "probe_sniff_core.h"
 #include "s3_wifi_relation.h"
 #include "esp_err.h"
 #include <stdbool.h>
@@ -262,6 +263,14 @@ esp_err_t c5_spi_link_wifi_channel_survey_session_metrics(uint64_t session_id,
     uint8_t generation, uint8_t band, cerberus_wifi_channel_survey_status_payload_t *out);
 esp_err_t c5_spi_link_wifi_channel_survey_session_result(uint64_t session_id,
     uint8_t generation, uint8_t index, cerberus_wifi_channel_survey_result_payload_t *out);
+/* Capability71 scoped passive Probe Sniff. Control is one command (INFO and
+ * START additionally refresh firmware); read advances exactly one wire part.
+ * Each call has one20ms passive deadline and no mutation retry. ESP_OK control
+ * means validated identity/shape; source error and ownership remain in reply. */
+esp_err_t c5_spi_link_probe_sniff_control(uint8_t command,
+    const cerberus_probe_sniff_start_t *request, cerberus_probe_sniff_control_t *reply);
+esp_err_t c5_spi_link_probe_sniff_read(const cerberus_probe_sniff_read_t *request,
+    cerberus_probe_sniff_chunk_t *reply);
 esp_err_t c5_spi_link_wifi_packet_monitor_start(uint8_t channel,
     cerberus_wifi_packet_monitor_status_payload_t *status);
 esp_err_t c5_spi_link_wifi_packet_monitor_stop(uint8_t generation,

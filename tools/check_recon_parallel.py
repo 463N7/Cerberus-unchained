@@ -40,7 +40,9 @@ parts+="".join(function(live,name) for name in
 (out/"recon_live_tick_impl.h").write_text(function(live,"live_scan_tick"))
 exe=out/"recon-live-check.exe"
 environment=dict(os.environ,ZIG_GLOBAL_CACHE_DIR=str(out/"zig-cache"),ZIG_LOCAL_CACHE_DIR=str(out/"zig-local"))
-subprocess.run([sys.executable,"-m","ziglang","cc","-std=c11","-O1","-Wall","-Wextra","-Werror",
+# This separate translation unit includes sentinel_watch_ui.h through the
+# recorder fixture; expose its POSIX strnlen before any system header.
+subprocess.run([sys.executable,"-m","ziglang","cc","-std=c11","-D_POSIX_C_SOURCE=200809L","-O1","-Wall","-Wextra","-Werror",
     "-I",str(out),"-I",str(root/"artifacts/recon-recorder-ui-checks"),
     "-I",str(root/"tools/host_checks/stubs"),"-I",str(root/"s3_main/main"),"-I",str(root/"shared"),
     str(root/"tools/host_checks/recon_live_check.c"),

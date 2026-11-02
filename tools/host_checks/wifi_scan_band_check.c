@@ -14,6 +14,8 @@ static void *scanner_mutex = (void *)1;
 static unsigned defense_capture_mux;
 static void *scanner_task_handle = (void *)1;
 static bool scanner_ready = true, station_reserved, scan_cancelled;
+/* Separate passive Probe owner; the actual admission body below checks it. */
+static atomic_bool probe_sniff_radio_reserved;
 static atomic_bool mac_radio_reserved, csi_radio_reserved, relation_receiving, channel_survey_radio_reserved;
 static cerberus_wifi_channel_survey_status_payload_t channel_survey_status;
 static cerberus_wifi_scan_status_payload_t scan_status;
@@ -142,6 +144,13 @@ int main(void)
     scan_status.state = CERBERUS_WIFI_SCAN_COMPLETE; scan_session_epoch = UINT64_MAX;
     assert(cerberus_wifi_scanner_start() == ESP_ERR_INVALID_STATE);
     a.session_id = 1U; assert(cerberus_wifi_scanner_start_band(&a, &reply) == ESP_ERR_INVALID_STATE);
+
+    reset(); a.session_id = 101U;
+    atomic_store(&probe_sniff_radio_reserved,true);
+    assert(cerberus_wifi_scanner_start_band(&a,&reply)==ESP_ERR_INVALID_STATE);
+    assert(cerberus_wifi_scanner_start()==ESP_ERR_INVALID_STATE);
+    assert(!notifications && scan_session_epoch==100U);
+    atomic_store(&probe_sniff_radio_reserved,false);
 
     reset(); a.session_id = 101U;
     channel_survey_status.state = CERBERUS_WIFI_CHANNEL_SURVEY_RUNNING;

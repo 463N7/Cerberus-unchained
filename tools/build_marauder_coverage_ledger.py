@@ -166,7 +166,7 @@ def markdown(ledger: dict) -> str:
         lines.append(f"| {row['name']} | {row['status']} | {cell(row['next_gap'])} |")
     lines += ["", "Integrated Wardriving references separate Cerberus firmware through its "
         "[source contract](WARDRIVE_RECENT_SOURCE_CONTRACT.md), not an extra Marauder mode. "
-        "Active engines are unchanged by this receive-side milestone. Earlier active Wi-Fi errors, "
+        "Receive-side validation does not establish active-feature acceptance. Earlier active Wi-Fi errors, "
         "disabled S3 native extended reception, C5 extended-receive hardware acceptance, "
         "physical GPS/expansion validation and full parity remain open.", ""]
     return "\n".join(lines)

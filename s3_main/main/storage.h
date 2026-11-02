@@ -209,6 +209,18 @@ esp_err_t cerberus_storage_wifi_archive_save(const uint8_t *data, size_t length,
     char *file_name, size_t capacity);
 esp_err_t cerberus_storage_wifi_archive_load(const char *relative_path,
     const char *file_name, uint8_t *data, size_t capacity, size_t *length);
+/* Bounded passive Probe Sniff evidence reports; legacy Wi-Fi report callers
+ * retain their existing behavior. No automatic mount or USB/stream takeover. */
+#define CERBERUS_STORAGE_PROBE_REPORT_PATH "/CERBERUS/LOGS"
+#define CERBERUS_STORAGE_PROBE_REPORT_MAX_BYTES 8192U
+/* Requires nonempty data and capacity>=11; input/output buffers are disjoint.
+ * Under the firmware-owned mutex, publish P00001.CSV..P99999.CSV only after
+ * checked exclusive TMP creation, full write, flush/sync, close and final
+ * absence check. Failed created TMP is retained and returned by name. No
+ * existing file is replaced; no power-loss/durable-rename guarantee is made. */
+esp_err_t cerberus_storage_probe_report_save(const uint8_t *data, size_t length,
+    char *file_name, size_t capacity);
+
 /* Offline interchange shares the Wi-Fi directory but has independent names:
  * Pnnnnn.LOG (AP JSON) / Snnnnn.TXT (SSID bytes), each via exclusive .TMP.
  * Inputs accept safe .LOG/.JSON or .LOG/.TXT respectively. Only SSID text

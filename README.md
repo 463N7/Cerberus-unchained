@@ -9,8 +9,28 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev127`, targeting onboard
-C5 protocol firmware revision 70. No Unchained binary release is selected yet.**
+## Credit to JustCallMeKoko and the ESP32 Marauder contributors
+
+**Thank you to [JustCallMeKoko (Just Call Me Koko)](https://github.com/justcallmekoko),
+creator of [ESP32 Marauder](https://github.com/justcallmekoko/ESP32Marauder), and
+the contributors who build and maintain it.** Their original work informs
+Cerberus's Marauder-derived features and compatibility research. Credit for
+that work remains with its authors; Unchained-specific implementations and
+integration are identified separately.
+
+From [@valleytechsolutions](https://github.com/valleytechsolutions):
+“Koko gave me permission to bring this work into Cerberus, and I want to make
+sure he gets his roses. Thank you for sharing your code and making this possible.”
+
+The complete [MIT notice](LICENSES/ESP32Marauder.txt), source-level credits and
+other third-party notices remain in force. See
+[attribution and source provenance](docs/MARAUDER_ATTRIBUTION.md) for the exact
+reference revisions and the distinction between adapted code and independently
+implemented workflows. This acknowledgment does not change any license or
+imply upstream endorsement of Cerberus Unchained.
+
+**Current source version: `0.1.0-dev.rev128`, targeting onboard
+C5 protocol firmware revision 71. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
 
@@ -40,6 +60,18 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev128 adds a dedicated passive Probe Sniff workflow: bounded request,
+transmitter and network-name lists, stable details, incremental transfer and
+explicit stopped-evidence saving to SD. C5 owns passive reception while S3
+validates, groups, presents and saves the observations. All 138 host suites,
+five native targets and linked resource checks pass on 1,142 unchanged inputs;
+[the rev128 checkpoint](docs/DUAL_RADIO_REV128.md) records the limits and package
+status. Fixed data/BSS is unchanged on S3 and grows by 48 bytes on C5; optional
+capture, UI and save allocations are measured separately. Rev126 remains
+installed. The requested stopping point is
+this major milestone, an update to existing Unchained PR #1, then a pause of
+the unfinished overall port.
 
 Rev127 corrects Channel Survey ownership when C5 restarts
 between preflight and Start. The session-bound control/readout and
@@ -128,8 +160,9 @@ full-parity or physical acceptance claim.
 Rev121 implements C5 receive cleanup and Channel Survey handoffs. Independent
 review, all 128 host suites, five native builds, resource measurements and
 matched package verification pass on the retained final inputs.
-The current Channel Survey workflow requires C5 firmware 69, although its
-unchanged wire commands originated in firmware 46. See
+Rev121's Channel Survey workflow required C5 firmware 69. The current scoped
+session workflow requires firmware 70; its earlier wire commands originated
+in firmware 46. See
 [rev121](docs/DUAL_RADIO_REV121.md) for evidence and limits.
 
 Rev120 replaces owner-only shared BLE host release with

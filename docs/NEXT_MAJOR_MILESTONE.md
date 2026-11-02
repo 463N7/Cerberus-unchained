@@ -19,11 +19,11 @@ checked Stop/Back/hidden/sleep cleanup, explicit retention/drop limits, and
 honest channel/time/source evidence. Observed probes are not authenticated
 clients, confirmed associations or proof of physical-device identity.
 
-The rev127 reliability sources remain frozen until their full validation and
-local packaging finish. Prospective rev128 design and isolated staging may
-proceed under `artifacts/rev128-probe-staging`; do not change frozen build/test
-inputs during those checks. Reuse the same worktree and its validated toolchain
-caches after the rev127 checkpoint is committed.
+The rev127 reliability checkpoint has passed its full validation and local
+package verification. Rev128 implements the Probe Sniff workflow in the same
+worktree. Final integrated checks and packaging must bind the same frozen
+source inputs; earlier passing receipts remain historical evidence if a
+subsequent correction changes those inputs.
 
 Before the requested PR, finish the new workflow, focused regression coverage,
 complete host/native checks, memory/resource review, and feasible connected

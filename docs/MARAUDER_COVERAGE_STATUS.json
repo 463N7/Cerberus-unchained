@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "checkpoint": "rev126-source",
-  "scope": "Source/workflow status through rev126. Rev125 AP JSON/SSID text interchange has a validated local package but was not installed. Rev126 addresses owner feedback with stable recognized-first Recon rows, explicit Dashboard/Radar navigation, ALERT category wording and an existing-evidence Meta identifier hint projection. Implementation/build/acceptance are tracked in DUAL_RADIO_REV126.md. The last verified installed pair remains rev124/C5 firmware69; the owner reports its dashboard works but could not find Radar. Paired boot, display buffering and SD mount do not establish full feature acceptance. A read-only GitHub comparison at 2026-11-01 21:37:53 UTC found develop identical to 79cc6bcba1db6679baee1dab2b0c1ad5010e6363. Status assignments remain unchanged; RECEIVE_REMAINING_GAPS.md records remaining scope.",
+  "checkpoint": "rev128-source",
+  "scope": "Source/workflow status through rev128. Rev126 remains the latest verified installed pair, with the owner's targeted acceptance of Recon Dashboard/Radar controls, ALERT wording and stable recognized-hint priority. Rev127 has a verified local package for exact Channel Survey ownership. Rev128 adds the dedicated passive Probe Sniff workflow; its final implementation, build/package and physical acceptance are tracked separately in DUAL_RADIO_REV128.md. The installed rev126 pair includes the earlier AP JSON/SSID text interchange work, but installation does not establish individual feature acceptance. A read-only GitHub comparison at 2026-11-02 00:22:40 UTC found develop identical to 79cc6bcba1db6679baee1dab2b0c1ad5010e6363. All mode and workstream status assignments remain unchanged; RECEIVE_REMAINING_GAPS.md records remaining scope. Full Marauder parity is unfinished.",
   "status_definitions": {
     "partial": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open.",
     "pending": "The distinct upstream workflow has no verified implementation at this checkpoint.",
@@ -66,10 +66,10 @@
       "symbol": "WIFI_SCAN_PROBE",
       "family": "wifi_receive_capture",
       "status": "partial",
-      "cerberus_evidence": "docs/FEATURE_PARITY.md",
-      "next_gap": "Installed fixed-channel probe-request PCAPNG captures all BSSIDs on the selected AP channel; live RF acceptance and upstream sniffer UI remain open.",
-      "s3_role": "S3 controls capture, buffers and writes SD PCAPNG; it graphs C5 samples.",
-      "c5_role": "C5 filters/captures 2.4/5 GHz frames and transports bounded records.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV128.md",
+      "next_gap": "Rev128 adds dedicated passive request/transmitter/network lists, stable details and stopped bounded SD evidence. The separate fixed-channel PCAPNG capture remains available; this CSV is not raw-frame capture. Complete upstream option parity, dense/repeated-use behavior and physical receive/save/reopen acceptance remain open. Requests do not establish association or physical-device identity.",
+      "s3_role": "S3 validates incremental C5 session/projection transfers, groups sampled observations, freezes selection and saves stopped evidence through the existing serialized worker; the separate raw-capture path writes PCAPNG.",
+      "c5_role": "C5 owns passive Probe Request reception, exact session cleanup and a bounded transmitter plus exact requested-SSID inventory; raw capture remains separate.",
       "related_menu_entries": [
         190
       ],
@@ -78,7 +78,15 @@
       ],
       "cerberus_code": [
         "s3_main/main/wifi_capture_session.c",
-        "c5_firmware/main/wifi_capture_service.c"
+        "c5_firmware/main/wifi_capture_service.c",
+        "shared/probe_sniff_core.c",
+        "shared/probe_sniff_protocol.h",
+        "c5_firmware/main/wifi_probe_sniff_service.h",
+        "s3_main/main/probe_sniff_model.c",
+        "s3_main/main/probe_sniff_scan.c",
+        "s3_main/main/probe_sniff_ui.h",
+        "s3_main/main/ble_archive_io.c",
+        "s3_main/main/storage.c"
       ],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open."
     },
@@ -1843,7 +1851,7 @@
         56,
         57
       ],
-      "next_gap": "Native BLE v6 and Wi-Fi .WFI reports retain bounded observations with source labels, frozen selections, filters and stable ordering. Rev123 adds separate offline Marauder Find My JSON interchange; rev124 adds saved combined S3/C5 Wi-Fi AP/SSID views and copy saving. Rev125 AP JSON/SSID text import/view/copy/export is implemented; see WIFI_MARAUDER_INTERCHANGE.md and DUAL_RADIO_REV125.md. Imported records do not populate live discovery or supply current source indexes/generations. Complete raw BLE payload/history retention, manual AP/SSID editing, upstream load-to-live-list behavior, MAC/profile controls and full options parity remain open. Physical live/offline navigation, Stop/Back/sleep/save/reopen, dense retention and sustained-use acceptance remain separate; paired rev124 boot alone does not prove them. Earlier source and acceptance evidence remains in BLE_SD_SNAPSHOTS.md, DUAL_RADIO_REV110.md, DUAL_RADIO_REV123.md and DUAL_RADIO_REV124.md."
+      "next_gap": "Native BLE v6 and Wi-Fi .WFI reports retain bounded observations with source labels, frozen selections, filters and stable ordering. Rev123 adds separate offline Marauder Find My JSON interchange; rev124 adds saved combined S3/C5 Wi-Fi AP/SSID views and copy saving. Rev125 AP JSON/SSID text import/view/copy/export is implemented; see WIFI_MARAUDER_INTERCHANGE.md and DUAL_RADIO_REV125.md. Imported records do not populate live discovery or supply current source indexes/generations. Complete raw BLE payload/history retention, manual AP/SSID editing, upstream load-to-live-list behavior, MAC/profile controls and full options parity remain open. Physical live/offline navigation, Stop/Back/sleep/save/reopen, dense retention and sustained-use acceptance remain separate; paired boot alone does not prove them. Earlier source and acceptance evidence remains in BLE_SD_SNAPSHOTS.md, DUAL_RADIO_REV110.md, DUAL_RADIO_REV123.md and DUAL_RADIO_REV124.md. Current installed baseline is rev126 with targeted Recon acceptance only. Rev128 adds a bounded stopped Probe Sniff CSV report; physical save/reopen acceptance and full-frame retention remain separate from software validation."
     },
     {
       "name": "storage_and_transfer",
@@ -1877,7 +1885,7 @@
         11,
         14
       ],
-      "next_gap": "The serialized PSRAM worker supports bounded native BLE v1-v6, retained Find My JSON and combined Wi-Fi .WFI files, with immutable input, exact job ownership, reader pinning, cancellation and checked temporary-file publication. Rev125 AP JSON/SSID text interchange is implemented with explicit information loss and separate allocation arms; see WIFI_MARAUDER_INTERCHANGE.md and DUAL_RADIO_REV125.md. Existing snapshot formats are not full callback histories; complete raw payloads, broader exports/uploads, manual list editing, upstream load-to-live-list and backup/restore parity remain open. SD save/reopen, interrupted-write and power-loss behavior, loaded heap/stack headroom and prolonged use still need physical acceptance. Installed rev124 has verified image writes, paired boot, buffered display and mounted SD, not complete feature acceptance; historical evidence remains in the rev110/rev123/rev124 checkpoint documents."
+      "next_gap": "The serialized PSRAM worker supports bounded native BLE v1-v6, retained Find My JSON and combined Wi-Fi .WFI files, with immutable input, exact job ownership, reader pinning, cancellation and checked temporary-file publication. Rev125 AP JSON/SSID text interchange is implemented with explicit information loss and separate allocation arms; see WIFI_MARAUDER_INTERCHANGE.md and DUAL_RADIO_REV125.md. Existing snapshot formats are not full callback histories; complete raw payloads, broader exports/uploads, manual list editing, upstream load-to-live-list and backup/restore parity remain open. SD save/reopen, interrupted-write and power-loss behavior, loaded heap/stack headroom and prolonged use still need physical acceptance. Historical rev124 has verified image writes, paired boot, buffered display and mounted SD, not complete feature acceptance; historical evidence remains in the rev110/rev123/rev124 checkpoint documents. Current installed baseline is rev126 with targeted Recon acceptance only. Rev128 adds a bounded stopped Probe Sniff CSV report; physical save/reopen acceptance and full-frame retention remain separate from software validation."
     },
     {
       "name": "settings_and_device_control",

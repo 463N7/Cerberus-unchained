@@ -34,6 +34,8 @@ static cerberus_wifi_connection_status_payload_t connection_status;
 static cerberus_wifi_defense_status_payload_t defense_status;
 static cerberus_ble_scan_status_payload_t ble_status;
 static cerberus_ble_connection_status_payload_t ble_connection;
+/* Separate passive Probe owner; the actual admission body below checks it. */
+static atomic_bool probe_sniff_radio_reserved;
 static atomic_bool mac_radio_reserved,csi_radio_reserved,remote_id_radio_reserved,
     capture_radio_reserved,packet_monitor_radio_reserved;
 /* Same production storage types, with no duplicate result bank. */

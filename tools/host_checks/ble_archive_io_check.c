@@ -161,6 +161,29 @@ static esp_err_t cerberus_storage_ssid_text_load(const char *path,const char *na
     if(storage_error==ESP_OK){memcpy(data,ssid_text_bytes,ssid_text_length);*length=ssid_text_length;}else *length=0;
     storage_active=false;return storage_error;
 }
+static uint8_t probe_bytes[CERBERUS_STORAGE_PROBE_REPORT_MAX_BYTES + 1U];
+static size_t probe_length;
+static unsigned probe_saves,probe_formats;
+static void (*probe_format_hook)(void);
+static esp_err_t cerberus_storage_probe_report_save(const uint8_t *data,size_t length,char *name,size_t capacity)
+{
+    CHECK(!locked&&!storage_active&&length>0&&length<=CERBERUS_STORAGE_PROBE_REPORT_MAX_BYTES&&capacity==256);
+    ++probe_saves;storage_active=true;
+    CHECK(status().worker_active&&status().state==CERBERUS_BLE_ARCHIVE_IO_SAVING);
+    CHECK(status().format==CERBERUS_BLE_ARCHIVE_IO_FORMAT_PROBE_REPORT);
+    if(storage_hook)storage_hook();
+    if(storage_error==ESP_OK){memcpy(probe_bytes,data,length);probe_bytes[length]=0;probe_length=length;strcpy(name,"P00001.CSV");}
+    else if(partial_save)strcpy(name,"P00001.TMP");
+    storage_active=false;return storage_error;
+}
+static bool checked_probe_report(const cerberus_probe_sniff_snapshot_t *snapshot,
+    char *bytes,size_t capacity,size_t *length)
+{
+    CHECK(!locked);++probe_formats;
+    bool okay=cerberus_probe_sniff_report(snapshot,bytes,capacity,length);
+    void(*hook)(void)=probe_format_hook;probe_format_hook=NULL;if(hook)hook();
+    return okay;
+}
 /* Interleave Release and nested readers at the actual large copy. No document
  * bytes may be copied while interrupts are disabled, nor freed while pinned. */
 static void (*copy_hook)(void);
@@ -198,7 +221,9 @@ static cerberus_wifi_marauder_result_t checked_ssid_conversion(const cerberus_wi
 #define cerberus_wifi_marauder_ssid_from_archive checked_ssid_conversion
 #define cerberus_airtag_json_from_archive checked_conversion
 #define memcpy archive_checked_copy
+#define cerberus_probe_sniff_report checked_probe_report
 #include "archive_io_impl.h"
+#undef cerberus_probe_sniff_report
 #undef memcpy
 #undef cerberus_airtag_json_from_archive
 #undef cerberus_wifi_marauder_ap_from_archive
@@ -283,6 +308,7 @@ static void reset(void)
     cerberus_ble_archive_io_release(status().job_id);CHECK(!outstanding&&!archive_io_context);
     free_internal=100000;largest_internal=50000;fail_alloc=fail_task=immediate_task=release_in_alloc=false;
     storage_hook=copy_hook=conversion_hook=NULL;storage_error=ESP_OK;partial_save=false;saves=loads=json_saves=json_loads=wifi_saves=wifi_loads=ap_json_saves=ap_json_loads=ssid_text_saves=ssid_text_loads=0;last_path[0]=last_name[0]=0;
+    probe_saves=probe_formats=0;probe_length=0;probe_format_hook=NULL;
     memset(&output,0xA5,sizeof(output));untouched=output;
 }
 static void run_worker(void)
@@ -641,11 +667,12 @@ static void check_wifi_operations(void)
     CHECK(cerberus_ble_archive_io_save_wifi(NULL,&id)==ESP_ERR_INVALID_ARG&&id==0);
     CHECK(cerberus_ble_archive_io_save_wifi(&wifi_input,NULL)==ESP_ERR_INVALID_ARG);
     CHECK(cerberus_ble_archive_io_copy_wifi(0,NULL)==ESP_ERR_INVALID_ARG);
-    CHECK(archive_io_start((cerberus_ble_archive_io_operation_t)99,NULL,NULL,NULL,NULL,NULL,NULL,NULL,&id)==ESP_ERR_INVALID_ARG&&id==0);
+    CHECK(archive_io_start((cerberus_ble_archive_io_operation_t)99,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,&id)==ESP_ERR_INVALID_ARG&&id==0);
     CHECK(!archive_io_allocation_size((cerberus_ble_archive_io_operation_t)99)&&!outstanding&&!pending_task);
 }
 
 #include "wifi_interchange_io_check.h"
+#include "probe_report_io_check.h"
 
 int main(void)
 {
@@ -770,12 +797,14 @@ int main(void)
     check_json_operations();
     check_wifi_operations();
     check_wifi_interchange_operations();
+    check_probe_operations();
     archive_io_last_job=UINT64_MAX;CHECK(cerberus_ble_archive_io_save(&input,&id)==ESP_ERR_INVALID_STATE&&id==0&&!pending_task);
     CHECK(cerberus_ble_archive_io_save_airtag_json(&json_input,&id)==ESP_ERR_INVALID_STATE&&id==0);
     CHECK(cerberus_ble_archive_io_load_airtag_json("/","x.LOG",&id)==ESP_ERR_INVALID_STATE&&id==0);
     CHECK(cerberus_ble_archive_io_export_airtag_json(&input,&id)==ESP_ERR_INVALID_STATE&&id==0);
     CHECK(cerberus_ble_archive_io_save_wifi(&wifi_input,&id)==ESP_ERR_INVALID_STATE&&id==0);
     CHECK(cerberus_ble_archive_io_load_wifi("/","x.WFI",&id)==ESP_ERR_INVALID_STATE&&id==0);
+    CHECK(cerberus_ble_archive_io_save_probe(&probe_input,&id)==ESP_ERR_INVALID_STATE&&id==0);
     CHECK(!strcmp(cerberus_ble_archive_io_state_name(CERBERUS_BLE_ARCHIVE_IO_CANCELED),"CANCELED"));
     CHECK(!strcmp(cerberus_ble_archive_io_state_name((cerberus_ble_archive_io_state_t)99),"UNKNOWN"));
     cerberus_ble_archive_io_get_status(NULL);cerberus_ble_archive_io_release(0);cerberus_ble_archive_io_cancel(0);

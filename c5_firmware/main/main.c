@@ -388,6 +388,41 @@ static void prepare_v2_response(const cerberus_spi_frame_t *request)
             request->sequence,&error,sizeof(error));
         break;
     }
+    /* BEGIN PROBE SNIFF DISPATCH */
+    case CERBERUS_SPI_COMMAND_WIFI_PROBE_SNIFF_INFO:
+    case CERBERUS_SPI_COMMAND_WIFI_PROBE_SNIFF_START:
+    case CERBERUS_SPI_COMMAND_WIFI_PROBE_SNIFF_STATUS:
+    case CERBERUS_SPI_COMMAND_WIFI_PROBE_SNIFF_STOP:
+    case CERBERUS_SPI_COMMAND_WIFI_PROBE_SNIFF_RELEASE: {
+        cerberus_probe_sniff_control_t payload;
+        if(request->command==CERBERUS_SPI_COMMAND_WIFI_PROBE_SNIFF_INFO){
+            if(request->payload_length!=0U)return;
+            cerberus_wifi_probe_sniff_info(&payload);
+        }else if(request->command==CERBERUS_SPI_COMMAND_WIFI_PROBE_SNIFF_START){
+            if(request->payload_length!=sizeof(cerberus_probe_sniff_start_t))return;
+            cerberus_probe_sniff_start_t query;memcpy(&query,request->payload,sizeof(query));
+            (void)cerberus_wifi_probe_sniff_start(&query,&payload);
+        }else{
+            if(request->payload_length!=sizeof(cerberus_probe_sniff_request_t))return;
+            cerberus_probe_sniff_request_t query;memcpy(&query,request->payload,sizeof(query));
+            if(request->command==CERBERUS_SPI_COMMAND_WIFI_PROBE_SNIFF_STOP)
+                (void)cerberus_wifi_probe_sniff_stop(query.session_id,&payload);
+            else if(request->command==CERBERUS_SPI_COMMAND_WIFI_PROBE_SNIFF_RELEASE)
+                (void)cerberus_wifi_probe_sniff_release(query.session_id,&payload);
+            else (void)cerberus_wifi_probe_sniff_status(query.session_id,&payload);
+        }
+        prepare_frame_response((cerberus_spi_command_t)request->command,request->sequence,&payload,sizeof(payload));
+        break;
+    }
+    case CERBERUS_SPI_COMMAND_WIFI_PROBE_SNIFF_READ: {
+        if(request->payload_length!=sizeof(cerberus_probe_sniff_read_t))return;
+        cerberus_probe_sniff_read_t query;cerberus_probe_sniff_chunk_t payload;
+        memcpy(&query,request->payload,sizeof(query));
+        (void)cerberus_wifi_probe_sniff_read(&query,&payload);
+        prepare_frame_response((cerberus_spi_command_t)request->command,request->sequence,&payload,sizeof(payload));
+        break;
+    }
+    /* END PROBE SNIFF DISPATCH */
     case CERBERUS_SPI_COMMAND_WIFI_RADIO_STATS: {
         if (request->payload_length != 0U) return;
         cerberus_wifi_radio_stats_payload_t payload;

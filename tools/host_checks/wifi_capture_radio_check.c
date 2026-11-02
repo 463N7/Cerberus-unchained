@@ -29,6 +29,8 @@ static int scanner_mutex=1,scanner_task_handle=1;
 static bool scanner_ready=true,station_reserved,locked;
 static cerberus_wifi_scan_status_payload_t scan_status;
 static cerberus_wifi_defense_status_payload_t defense_status;
+/* Separate passive Probe owner; the actual admission body below checks it. */
+static atomic_bool probe_sniff_radio_reserved;
 static atomic_bool capture_radio_reserved;
 static atomic_bool csi_radio_reserved, mac_radio_reserved;
 static unsigned notifications,delay_count;
@@ -268,6 +270,9 @@ int main(void)
     atomic_store(&csi_radio_reserved,true);
     assert(cerberus_wifi_capture_start(&blocked)==ESP_ERR_INVALID_STATE&&!atomic_load(&capture_radio_reserved));
     atomic_store(&csi_radio_reserved,false);
+    atomic_store(&probe_sniff_radio_reserved,true);
+    assert(cerberus_wifi_capture_start(&blocked)==ESP_ERR_INVALID_STATE&&!atomic_load(&capture_radio_reserved));
+    atomic_store(&probe_sniff_radio_reserved,false);
     atomic_store(&mac_radio_reserved,true);
     unsigned prior_preempts=survey_preempts;
     assert(cerberus_wifi_capture_start(&blocked)==ESP_ERR_INVALID_STATE&&!atomic_load(&capture_radio_reserved));

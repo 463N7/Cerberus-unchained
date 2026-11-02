@@ -231,6 +231,7 @@ typedef enum {
     UI_WIFI_MODE_MDNS,
     UI_WIFI_MODE_BASELINE,
     UI_WIFI_MODE_DUAL,
+    UI_WIFI_MODE_PROBE_SNIFF,
 } ui_wifi_mode_t;
 
 typedef cerberus_s3_wifi_ssid_analysis_t ui_wifi_ssid_analysis_t;
@@ -356,6 +357,10 @@ static const cerberus_ui_widget_theme_t ui_colors = {
 static esp_err_t draw_detail_page(void);
 static bool wifi_archive_is_file(const char *name);
 static void wifi_archive_open_file(const char *path, const char *name);
+static void probe_sniff_open(void);
+static void probe_sniff_back(void);
+static void probe_sniff_tap(uint16_t x, uint16_t y);
+static esp_err_t probe_sniff_draw(void);
 static void wifi_archive_save_live(bool selected_only);
 static esp_err_t wifi_archive_draw(void);
 static void wifi_archive_tap(uint16_t x, uint16_t y);
@@ -8162,6 +8167,7 @@ static esp_err_t draw_wardrive(void)
 
 static esp_err_t draw_detail_page(void)
 {
+    if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_PROBE_SNIFF) return probe_sniff_draw();
     if (wardrive_gps_view_is_open()) return wardrive_gps_view_draw();
     if (wardrive_recent_is_open()) return wardrive_recent_draw();
     if (current_page == UI_PAGE_BLE_ARCHIVE) return ble_archive_draw();
@@ -9052,6 +9058,9 @@ static void handle_ieee802154_tap(uint16_t x, uint16_t y)
 
 static void handle_wifi_tap(uint16_t x, uint16_t y)
 {
+    if (wifi_mode == UI_WIFI_MODE_PROBE_SNIFF) {
+        probe_sniff_tap(x, y); ESP_ERROR_CHECK(draw_detail_page()); return;
+    }
     if (wifi_mode == UI_WIFI_MODE_DUAL) { dual_wifi_live_tap(x, y); return; }
     if (wifi_mode == UI_WIFI_MODE_TARGET) {
         wifi_target_handle_tap(x,y); ESP_ERROR_CHECK(draw_current_page()); return;
@@ -9080,6 +9089,7 @@ static void handle_wifi_tap(uint16_t x, uint16_t y)
         int item = sentinel_hub_hit_test(SENTINEL_HUB_WIFI, x, y);
         if (item == 6) { open_learning_lesson(0); return; }
         switch (item) {
+        case 10: probe_sniff_open(); break;
         case 8: multissid_enter(); wifi_mode = UI_WIFI_MODE_MULTISSID; break;
         case 9: pinescan_enter(); wifi_mode = UI_WIFI_MODE_PINESCAN; break;
         case 7: wifi_mode = UI_WIFI_MODE_FIELD_SURVEY; break;
@@ -11439,6 +11449,7 @@ static void handle_scripts_tap(uint16_t x, uint16_t y)
 
 #include "sentinel_live_ui.h"
 #include "dual_wifi_live_ui.h"
+#include "probe_sniff_ui.h"
 #include "wifi_archive_live_ui.h"
 #include "wifi_interchange_live_ui.h"
 #include "dual_ble_live_ui.h"
@@ -12281,6 +12292,8 @@ static void handle_tap(uint16_t x, uint16_t y)
                 wifi_attack_selecting = false;
                 current_page = UI_PAGE_FIELD_MENU;
                 ESP_ERROR_CHECK(draw_current_page());
+            } else if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_PROBE_SNIFF) {
+                probe_sniff_back(); ESP_ERROR_CHECK(draw_detail_page());
             } else if (current_page == UI_PAGE_WIFI &&
                 wifi_mode == UI_WIFI_MODE_PACKET_MONITOR) {
                 if (packet_monitor_stop_ui()) wifi_mode =
@@ -12511,6 +12524,8 @@ void cerberus_ui_run(const cerberus_ui_config_t *config)
              wifi_mode != UI_WIFI_MODE_PACKET_MONITOR || screen_asleep)) {
             (void)packet_monitor_stop_ui();
         }
+        probe_sniff_tick((uint64_t)now_ms, current_page == UI_PAGE_WIFI &&
+            wifi_mode == UI_WIFI_MODE_PROBE_SNIFF && !screen_asleep);
         bool channels_visible = current_page == UI_PAGE_WIFI &&
             (wifi_mode == UI_WIFI_MODE_CHANNELS_24 ||
              wifi_mode == UI_WIFI_MODE_CHANNELS_5) && !screen_asleep &&

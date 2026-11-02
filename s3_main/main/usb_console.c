@@ -772,7 +772,8 @@ static void print_ble_archive(void)
         snapshot.format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_AIRTAG_JSON ? "AIRTAG_JSON" :
         snapshot.format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_WIFI ? "WIFI_NATIVE" :
         snapshot.format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_AP_JSON ? "AP_JSON" :
-        snapshot.format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_SSID_TEXT ? "SSID_TEXT" : "UNKNOWN";
+        snapshot.format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_SSID_TEXT ? "SSID_TEXT" :
+        snapshot.format == CERBERUS_BLE_ARCHIVE_IO_FORMAT_PROBE_REPORT ? "PROBE_REPORT" : "UNKNOWN";
     console_printf("ble_archive_format=%s\r\n", format);
     /* The union belongs to the captured format. Never interpret a different
      * operation's counters as Wi-Fi conversion evidence. */

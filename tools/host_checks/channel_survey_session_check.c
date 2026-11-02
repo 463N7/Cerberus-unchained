@@ -32,6 +32,8 @@ static cerberus_wifi_connection_status_payload_t connection_status;
 static cerberus_wifi_defense_status_payload_t defense_status;
 static cerberus_ble_scan_status_payload_t ble_status;
 static cerberus_ble_connection_status_payload_t ble_connection;
+/* Separate passive Probe owner; the actual admission body below checks it. */
+static atomic_bool probe_sniff_radio_reserved;
 static atomic_bool mac_radio_reserved,csi_radio_reserved,remote_id_radio_reserved,
     capture_radio_reserved,packet_monitor_radio_reserved;
 /* Same production storage types, with no duplicate result bank. */
@@ -347,6 +349,13 @@ static void actual_dispatch(void)
 }
 int main(void)
 {
+    reset();atomic_store(&probe_sniff_radio_reserved,true);
+    cerberus_wifi_channel_survey_session_start_t blocked={101,1};
+    cerberus_wifi_channel_survey_session_status_t blocked_reply;
+    CHECK(cerberus_wifi_channel_survey_session_start(&blocked,&blocked_reply)==ESP_ERR_INVALID_STATE);
+    CHECK(!notifications&&!enable_calls&&!channel_survey_session_id&&ble_other_radio_active());
+    CHECK(cerberus_wifi_channel_survey_start(1)==ESP_ERR_INVALID_STATE&&!notifications);
+    atomic_store(&probe_sniff_radio_reserved,false);
     replay_reset_and_exclusion();lease_expiry_and_cleanup();immutable_projection();generation_alias_and_native_arbiter();actual_dispatch();
     printf("Scoped Channel Survey: %u assertions passed; actual worker/dispatch, reboot rejection, replay, expiry/failed disable, stale control, immutable metrics and exhaustion.\n",checks);
     return 0;

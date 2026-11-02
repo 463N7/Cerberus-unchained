@@ -38,6 +38,8 @@ static cerberus_wifi_scan_status_payload_t scan_status;
 static uint8_t scan_band;
 static uint64_t scan_session_id, scan_session_epoch;
 static cerberus_wifi_channel_survey_status_payload_t channel_survey_status;
+/* Separate passive Probe owner; the actual admission body below checks it. */
+static atomic_bool probe_sniff_radio_reserved;
 static atomic_bool channel_survey_radio_reserved;
 static cerberus_wifi_radio_stats_payload_t radio_stats;
 static cerberus_wifi_defense_status_payload_t defense_status;
@@ -186,6 +188,11 @@ static esp_err_t esp_wifi_scan_start(const wifi_scan_config_t *config,bool block
     return scan_failure?ESP_FAIL:ESP_OK;
 }
 
+/* Dedicated Probe capture is inactive in this legacy consumer fixture. */
+static void probe_sniff_receive(const wifi_promiscuous_pkt_t *p,wifi_promiscuous_pkt_type_t type,int64_t entered)
+{ (void)p;(void)type;(void)entered; }
+static bool probe_sniff_retained(void){return false;}
+static void probe_sniff_worker_tick(void){CHECK(!atomic_load(&probe_sniff_radio_reserved));}
 #include "wifi_scan_observation_impl.h"
 
 static void make_frame(uint8_t channel)

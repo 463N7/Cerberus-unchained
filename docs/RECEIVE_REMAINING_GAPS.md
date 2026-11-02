@@ -8,17 +8,16 @@ behind or intervening commits. The response is retained at
 `artifacts/device-rev117/marauder-develop-check.json`. This is a point-in-time
 source check, not proof of complete porting or physical acceptance.
 
-The source milestones described below are now included in installed
-[rev124/C5 firmware69](DUAL_RADIO_REV124.md). Rev124 adds native saved Wi-Fi
-observations and the Recon field dashboard. Rev125 implements separate offline
-AP JSON/SSID text interchange; its full validation and installation status are
-tracked in [the rev125 checkpoint](DUAL_RADIO_REV125.md); that validated package
-was not installed. [Rev126](DUAL_RADIO_REV126.md) adds stable Recon priorities,
-visible Dashboard/Radar tabs and an existing-evidence Meta identifier projection.
-Its build and physical acceptance are tracked separately. Verified image writes, paired
-application boot, display buffering and SD mount establish the installed
-baseline; physical feature acceptance remains separate. The earlier milestone
-documents retain their original source and installation history.
+The earlier source milestones described below are included in installed
+[rev126/C5 firmware69](DUAL_RADIO_REV126.md), including the saved Wi-Fi and
+offline AP JSON/SSID text work. The owner accepted rev126's Recon view tabs,
+Pause/Resume, Back, ALERT wording and stable recognized-hint priority.
+Installation and that focused acceptance do not establish physical acceptance
+of every included feature. [Rev127](DUAL_RADIO_REV127.md) has a verified local
+package for Channel Survey ownership; it was not installed separately.
+[Rev128](DUAL_RADIO_REV128.md) is the next passive Probe Sniff milestone, with
+its source/build and physical status recorded there. The earlier documents
+retain their original checkpoint and installation history.
 
 ## Receiver ownership
 
@@ -69,16 +68,29 @@ documents retain their original source and installation history.
   admission, with no UI retry after ERROR. Rev121 implements these
   corrections, with focused production-bound regressions and independent
   source review complete. All 128 host suites, five native builds and matched
-  package verification pass; see [the milestone](DUAL_RADIO_REV121.md). The current Survey UI
-  requires C5 firmware 69's checked cleanup acknowledgement, while its wire
-  commands retain their original firmware 46 layout.
-  Existing survey generation8/band and unbound Stop do not prove full
-  cross-reboot or generation-reuse safety. Whole-device and physical acceptance
+  package verification pass; see [the milestone](DUAL_RADIO_REV121.md). That
+  version still used generation8/band and unbound Stop. Rev127 replaces the UI
+  control/readout path with capability70's exact session, immutable projection
+  pins and renewable lease, including ambiguous Start and checked cleanup.
+  Its complete host/native matrix and package pass; see
+  [the rev127 checkpoint](DUAL_RADIO_REV127.md). Whole-device and physical acceptance
   remain open; a single SPI command task is not proof of serialization with
   asynchronous NimBLE callbacks or the survey worker.
 - **MAC Monitor:** its context/job/epoch guards already protect callback,
   start, stop and release paths. This audit found no equivalent reachable
   takeover defect; that is not a claim of complete physical acceptance.
+
+## Passive Probe Sniff
+
+Rev128 adds a dedicated bounded request/transmitter/network inventory with
+stable details and explicit stopped-evidence CSV saving. It retains the first
+32 exact transmitter plus SSID-byte pairs, reports capacity drops and preserves
+wildcard/binary names. C5 receives and S3 validates, groups, presents and saves.
+See [the milestone](DUAL_RADIO_REV128.md) for validation and remaining physical
+acceptance. This report is not raw-frame PCAP, and its observations do not prove
+association or physical-device identity. Full upstream options, dense and warm
+repeated-use acceptance remain open. The existing Wardriving clue-filtered
+probe table and separate PCAP capture path retain their separate roles.
 
 ## GPS Data and NMEA presentation
 

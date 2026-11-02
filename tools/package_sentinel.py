@@ -257,6 +257,7 @@ def package(output: Path | None = None, *, release: bool = False, accepted_on: s
     # Keep protocol provenance and redistribution notices with binary builds.
     for name in ("WATCH_SIGNATURES.md", "WATCH_THIRD_PARTY_NOTICES.md"):
         shutil.copy2(ROOT / "docs" / name, destination / name)
+    shutil.copytree(ROOT / "LICENSES", destination / "LICENSES")
     (destination / "README.txt").write_text(
         f"CERBERUS UNCHAINED {version} — {status.upper()}\n\n"
         "Production N16R2 S3 + onboard C5 (2 MB flash budget).\n"
@@ -266,6 +267,7 @@ def package(output: Path | None = None, *, release: bool = False, accepted_on: s
         "flash_args.txt describes each target's actual image offsets; it is NOT a one-step installer.\n"
         "Use the source project's documented USB bridge workflow for the onboard C5.\n"
         "The current partition maps have a single factory application and no OTA rollback slot.\n"
+        "Retain LICENSES/ and WATCH_THIRD_PARTY_NOTICES.md with this package; their separate notices remain applicable.\n"
         "No hardware has been flashed by creating this package.\n", encoding="utf-8")
     checksums = "".join(f"{sha256(path)}  {path.relative_to(destination).as_posix()}\n"
                         for path in sorted(destination.rglob("*")) if path.is_file())
