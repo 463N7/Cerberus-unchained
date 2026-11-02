@@ -61,9 +61,10 @@ continue after the first 64 raw witnesses.
 - SDK metadata replaces the FCS positions. Retained MAC bytes omit both the SDK
   length byte and RSSI/LQI footer; they are not an RF frame with verified FCS.
 
-This foundation does not classify every encrypted Zigbee/Thread frame, discover
-commissioned Matter fabrics, authenticate devices, join networks, or extract
-authoritative routing tables. Matter commissioning BLE hints would be separate
+This new observation service does not identify Zigbee or Thread protocols,
+discover commissioned Matter fabrics, authenticate devices, join networks, or
+extract authoritative routing tables. The separate legacy Zigbee Beacon tool
+remains available. Matter commissioning BLE hints would be separate
 evidence, not proof of Thread membership. LoRa reception needs additional radio
 hardware.
 
@@ -105,18 +106,65 @@ as well as close callback admission, allowing the S3 final-state fence to retain
 prior evidence with the original radio error. Failed ACK operations return no
 success sequence; successful ACKs still echo the exact retired row.
 
-The complete 146-suite registry and native matrix are being validated. Host
-allocation sizes are measurements of the host ABI, not target-heap or stack
-high-water evidence. The S3 UI workspace is 22,560 host bytes; the selected Mesh
-report worker arm is 119,776, including its 98,305-byte formatter buffer. Existing
-archive operations retain their earlier allocation sizes. The optional C5
-context is 2,624 host bytes, with 144-byte slots. Native measurements follow.
+The complete 146-suite host registry and all five native targets pass at source
+commit `2923db15114a5c5d86d387010261952de28ce055`, with the same 1,174 unchanged
+inputs. The 21 shard-selection/aggregation tests, nine build-report tests and
+standalone field-kit checks also pass. Host checks use Python 3.14.2 and Zig
+0.14.1; native builds use PlatformIO 6.2.0 and IDF 6.0.1. The S3 READY/console
+and C5 link gates pass. These local results are separate from hosted rev128 CI.
+
+The matched development package is
+`dist/cerberus-unchained-0.1.0-dev.rev130-20261102T200433Z`.
+Its three application images match the retained native matrix, all 20 checksum
+entries verify, and read-only web-package verification passes chip headers,
+partitions and image bounds. The Marauder notice remains included. Manifest
+SHA-256 is `3ef4cdd1e125706ab60d12cd67ef98de41e61761894551ecf3d687cd0d59c0d7`.
+Bound evidence is retained in `artifacts/rev130-validation/local-milestone.json`
+and `artifacts/rev130-validation/mesh-native-final/native-memory-comparison.json`.
+The initial host run exposed an old console fixture missing the new report
+format; that fixture was corrected before the complete passing run.
+
+Native ELF measurements, compared with the retained rev129 candidate:
+
+| Resource | Native size or change |
+| --- | ---: |
+| S3 linked fixed data/BSS | 169,436 bytes; +32 bytes |
+| C5 linked fixed data/BSS | 83,360 bytes; +40 bytes |
+| Optional C5 Mesh context, including 16 copied-frame slots | 2,624 bytes |
+| Optional S3 Mesh UI workspace, including model/controller | 22,560 bytes PSRAM |
+| Selected Mesh report worker arm, including copied scan and formatter | 119,776 bytes PSRAM |
+| Simultaneous Mesh UI plus save worker | 142,336 bytes PSRAM |
+
+These sizes exclude allocator overhead and other services. Earlier archive
+arms and legacy IEEE banks retain their prior sizes. The C5 worker remains
+4,096 stack bytes and the archive worker 6,144; there is no new task. Selected
+native entry frames were inspected, including the 880-byte Mesh UI tick,
+320-byte controller tick, 400-byte report append and unchanged 800-byte libc
+formatter frame. These are individual entry frames, not a proven full call
+chain or runtime stack high-water measurement. Runtime headroom, latency,
+throughput and sustained reception still need physical checks.
+
+The S3 app is 2,044,816 bytes at offset 0x10000. Its write extends beyond the
+first 2 MiB of flash. Historical local installers with a fixed 2 MiB backup
+limit must not be reused unchanged: a new paired installation needs a fresh
+backup covering every erase-rounded write region and the actual installed
+baseline. No installation was attempted by this validation.
 
 Rev126 remains the last verified installation. Rev130 has not been flashed,
 accepted with real Zigbee/Thread traffic, or published as a firmware release.
 The existing public PR still describes the separately validated rev128 work.
 Physical acceptance must check actual reception, Stop/Back, SD reports and
 repeatable handoffs to Wi-Fi and Bluetooth.
+
+After a separately verified paired installation, the initial physical sequence
+is an idle entry, a default sweep lasting more than ten seconds, Stop, and a
+second Start/Stop without reset. Repeat fixed channels 11 and 26; check Back
+during acquisition and sleep/wake without automatic restart. Save and open a
+CSV twice to confirm distinct filenames, then run ordinary Wi-Fi/BLE and the
+preserved IEEE tools. Zero observations can exercise lifecycle and empty-report
+handling, but cannot establish RF sensitivity. Known addressed traffic is
+required to verify PAN/EUI attribution, source signal values, traffic edges,
+raw witnesses and populated SD reports. No GPS is required.
 
 No CYM application code was copied. Its pinned workflows informed the plan;
 the existing Cerberus and third-party notices remain in place. This slice does

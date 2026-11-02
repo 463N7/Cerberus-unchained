@@ -12,7 +12,9 @@ pass, including the sustained 802.15.4 regression. Physical reception acceptance
 remains open. Mesh Detection itself is not in that candidate or on the installed
 device. The [rev130 implementation](DUAL_RADIO_REV130.md) now contains typed MAC
 parsing, exact-session C5 transport and the S3 observation model/controller.
-Interface and SD report integration are under validation. Protocol discovery,
+Interface and SD report integration pass the complete local host/native matrix
+and package checks. They have not been installed or physically accepted.
+Protocol discovery,
 selected-address tracking, raw capture and historical map reopening remain
 later work; this plan does not imply that the complete CYM workflow is ported.
 
@@ -46,8 +48,8 @@ bind Locate to the selected network/address. CYM's default observation store is
 ## Current Cerberus foundation and prerequisites
 
 `c5_firmware/main/ieee802154_scanner.c` already provides Energy, Beacon and
-Activity sweeps on channels 11–26. S3 exposes these under Radio Sense, including
-assessment and diagnostic export. Commands 24–32 are existing wire interfaces.
+Activity sweeps on channels 11–26. S3 preserves these in Mesh Detection's Tools
+menu, including assessment and diagnostic export. Commands 24–32 are existing wire interfaces.
 IEEE 802.15.4 is enabled in the current C5 SDK configuration; OpenThread is not.
 
 Receive prerequisites and design requirements:
@@ -149,8 +151,8 @@ are design bounds, not native allocation measurements. A destination is only an
 addressed endpoint until heard as a source; RSSI/LQI belong to the received
 transmitter. Broadcast and addressless ACKs must not create invented peer links.
 
-The existing SPI payload is 22 bytes. A proposed session64/sequence32/part8
-envelope leaves nine bytes per read. A 139-byte raw observation would need 16
+The existing SPI payload is 22 bytes. The implemented session64/sequence32/part8
+envelope leaves nine bytes per read. A 139-byte raw observation needs 16
 reads plus Peek and ACK, before status/retry overhead. Keep Stop/lease work ahead
 of optional readout and expose queue/model losses. Measure actual throughput
 before selecting a compact projection or promising coverage. Preserve one

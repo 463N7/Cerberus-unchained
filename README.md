@@ -63,11 +63,12 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 
 Rev130 adds a passive Mesh Detection receive path, typed address model,
 exact-session transfer, PAN/address/traffic views and stopped SD reports.
-Focused integration checks pass; complete regression and native validation are
-in progress. The last verified local package is rev129; the installed baseline
-remains rev126. See [the Mesh foundation](docs/DUAL_RADIO_REV130.md) for its
-observation scope and remaining work. An in-progress source version is not a
-feature-parity or physical-acceptance claim.
+All 146 registered host suites and five native targets pass on 1,174 unchanged
+inputs. The matched rev130 development package and native resource audit also
+pass; the installed baseline remains rev126. See
+[the Mesh foundation](docs/DUAL_RADIO_REV130.md) for its observation scope,
+measured allocation costs and remaining work. These software checks do not
+establish physical reception or complete Mesh/Marauder feature parity.
 
 Rev129 corrects receive continuity in the existing passive 802.15.4 Beacon and
 Activity sweeps: the receiver remains awake after each frame until the channel
@@ -78,8 +79,8 @@ All 139 host suites and five native targets pass on 1,145 unchanged inputs; the
 matched local package verifies, with unchanged linked fixed RAM on both chips.
 Rev129 has not been installed. See
 [the receive checkpoint](docs/DUAL_RADIO_REV129.md) for validation and limits.
-[Mesh Detection](docs/MESH_DETECTION_PLAN.md) is the next planned receive
-workflow; it is not implemented by this fix and requires no GPS.
+[Mesh Detection](docs/MESH_DETECTION_PLAN.md) builds on that fix in rev130 and
+requires no GPS.
 
 Rev128 adds a dedicated passive Probe Sniff workflow: bounded request,
 transmitter and network-name lists, stable details, incremental transfer and
