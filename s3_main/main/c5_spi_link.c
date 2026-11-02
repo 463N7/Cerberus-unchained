@@ -791,6 +791,185 @@ esp_err_t c5_spi_link_wifi_channel_survey_result(uint8_t generation, uint8_t ind
     return err;
 }
 
+/* Scoped survey commands deliberately bypass exchange_v2_locked's retries.
+ * A lost mutation response is resolved by the caller's exact session query. */
+static esp_err_t survey_session_frame_locked(cerberus_spi_command_t command,
+    const void *payload, size_t size, void *out, size_t out_size, uint32_t deadline)
+{
+    cerberus_spi_frame_t request, response = {0};
+    uint8_t discarded[CERBERUS_SPI_TRANSFER_SIZE] = {0};
+    uint8_t token = ++sequence;
+    if (!cerberus_protocol_prepare_frame(&request, command, token, payload, size))
+        return ESP_ERR_INVALID_ARG;
+    esp_err_t error = spi_request_response_passive(&request, discarded, &response,
+        sizeof(request), deadline);
+    if (error == ESP_OK && (!cerberus_protocol_frame_is_valid(&response) ||
+        response.command != command || response.sequence != token ||
+        response.payload_length != out_size)) error = ESP_ERR_INVALID_RESPONSE;
+    if (error == ESP_OK) memcpy(out, response.payload, out_size);
+    return error;
+}
+
+static esp_err_t survey_session_gate_locked(uint32_t deadline, bool refresh)
+{
+    if (refresh) {
+        cerberus_c5_status_t device = {0};
+        esp_err_t error = get_status_v2_passive_locked(++sequence, deadline, &device);
+        peer_firmware_version = error == ESP_OK ? device.firmware_version : 0U;
+        if (error != ESP_OK) return error;
+    }
+    return peer_firmware_version >= CERBERUS_WIFI_CHANNEL_SURVEY_SESSION_MIN_FIRMWARE
+        ? ESP_OK : ESP_ERR_NOT_SUPPORTED;
+}
+
+static bool survey_session_control_valid(const cerberus_wifi_channel_survey_session_status_t *r,
+    bool info, uint64_t session_id, uint8_t requested_band)
+{
+    if (!r->session_id || (!info && r->session_id != session_id) ||
+        (r->flags & ~(CERBERUS_WIFI_CHANNEL_SURVEY_SESSION_BOUND |
+            CERBERUS_WIFI_CHANNEL_SURVEY_SESSION_RADIO_HELD |
+            CERBERUS_WIFI_CHANNEL_SURVEY_SESSION_CANCELLED))) return false;
+    if (!info && !(r->flags & CERBERUS_WIFI_CHANNEL_SURVEY_SESSION_BOUND)) {
+        return r->error_code != ESP_OK && !r->state && !r->band && !r->generation &&
+            !r->flags && !r->result_count && !r->completed_count &&
+            !r->total_sweeps && !r->dwell_ms;
+    }
+    if (r->state > CERBERUS_WIFI_CHANNEL_SURVEY_ERROR ||
+        r->band > CERBERUS_WIFI_CHANNEL_SURVEY_BAND_5 ||
+        r->result_count > CERBERUS_WIFI_CHANNEL_SURVEY_MAX_RESULTS ||
+        r->completed_count > r->result_count ||
+        r->dwell_ms != CERBERUS_WIFI_CHANNEL_SURVEY_DWELL_MS ||
+        ((r->flags & CERBERUS_WIFI_CHANNEL_SURVEY_SESSION_CANCELLED) &&
+            !(r->flags & CERBERUS_WIFI_CHANNEL_SURVEY_SESSION_BOUND)) ||
+        ((r->flags & CERBERUS_WIFI_CHANNEL_SURVEY_SESSION_BOUND) &&
+            (!r->band || !r->generation)) ||
+        (r->state == CERBERUS_WIFI_CHANNEL_SURVEY_RUNNING &&
+            !(r->flags & CERBERUS_WIFI_CHANNEL_SURVEY_SESSION_RADIO_HELD)) ||
+        (r->state == CERBERUS_WIFI_CHANNEL_SURVEY_IDLE &&
+            (r->flags & CERBERUS_WIFI_CHANNEL_SURVEY_SESSION_RADIO_HELD))) return false;
+    /* A conflicting START may return the retained band's exact error reply. */
+    return !requested_band || r->band == requested_band || r->error_code != ESP_OK;
+}
+
+static esp_err_t survey_session_control(cerberus_spi_command_t command,
+    uint64_t session_id, uint8_t band, cerberus_wifi_channel_survey_session_status_t *reply)
+{
+    if (!reply) return ESP_ERR_INVALID_ARG;
+    memset(reply, 0, sizeof(*reply));
+    bool info = command == CERBERUS_SPI_COMMAND_WIFI_CHANNEL_SURVEY_SESSION_INFO;
+    bool start = command == CERBERUS_SPI_COMMAND_WIFI_CHANNEL_SURVEY_SESSION_START;
+    if ((!info && !session_id) || (start && band != CERBERUS_WIFI_CHANNEL_SURVEY_BAND_24 &&
+        band != CERBERUS_WIFI_CHANNEL_SURVEY_BAND_5)) return ESP_ERR_INVALID_ARG;
+    if (!link_mutex) return ESP_ERR_INVALID_STATE;
+    int64_t begun = esp_timer_get_time();
+    if (begun < 0) return ESP_ERR_INVALID_STATE;
+    uint32_t deadline = (uint32_t)((uint64_t)begun / 1000U) + 20U;
+    if (take_link_mutex(pdMS_TO_TICKS(20)) != pdTRUE) return ESP_ERR_TIMEOUT;
+    esp_err_t error = survey_session_gate_locked(deadline, info || start);
+    cerberus_wifi_channel_survey_session_start_t query = {session_id, band};
+    if (error == ESP_OK) error = survey_session_frame_locked(command,
+        info ? NULL : &query, info ? 0U : start ? sizeof(query) : sizeof(session_id),
+        reply, sizeof(*reply), deadline);
+    give_link_mutex();
+    int64_t ended = esp_timer_get_time();
+    if (error == ESP_OK && (ended < begun || (uint64_t)(ended - begun) >= 20000U))
+        error = ESP_ERR_TIMEOUT;
+    if (error == ESP_OK && !survey_session_control_valid(reply, info, session_id, band))
+        error = ESP_ERR_INVALID_RESPONSE;
+    if (error != ESP_OK) memset(reply, 0, sizeof(*reply));
+    return error;
+}
+
+esp_err_t c5_spi_link_wifi_channel_survey_session_info(cerberus_wifi_channel_survey_session_status_t *reply)
+{ return survey_session_control(CERBERUS_SPI_COMMAND_WIFI_CHANNEL_SURVEY_SESSION_INFO, 0U, 0U, reply); }
+esp_err_t c5_spi_link_wifi_channel_survey_session_start(uint64_t session_id, uint8_t band,
+    cerberus_wifi_channel_survey_session_status_t *reply)
+{ return survey_session_control(CERBERUS_SPI_COMMAND_WIFI_CHANNEL_SURVEY_SESSION_START, session_id, band, reply); }
+esp_err_t c5_spi_link_wifi_channel_survey_session_status(uint64_t session_id,
+    cerberus_wifi_channel_survey_session_status_t *reply)
+{ return survey_session_control(CERBERUS_SPI_COMMAND_WIFI_CHANNEL_SURVEY_SESSION_STATUS, session_id, 0U, reply); }
+esp_err_t c5_spi_link_wifi_channel_survey_session_stop(uint64_t session_id,
+    cerberus_wifi_channel_survey_session_status_t *reply)
+{ return survey_session_control(CERBERUS_SPI_COMMAND_WIFI_CHANNEL_SURVEY_SESSION_STOP, session_id, 0U, reply); }
+
+static esp_err_t survey_session_projection(uint64_t session_id, uint8_t kind,
+    uint8_t index, uint8_t bytes[22])
+{
+    memset(bytes, 0, 22U);
+    if (!session_id || !link_mutex) return ESP_ERR_INVALID_ARG;
+    int64_t begun = esp_timer_get_time();
+    if (begun < 0) return ESP_ERR_INVALID_STATE;
+    uint32_t deadline = (uint32_t)((uint64_t)begun / 1000U) + 20U;
+    if (take_link_mutex(pdMS_TO_TICKS(20)) != pdTRUE) return ESP_ERR_TIMEOUT;
+    esp_err_t error = survey_session_gate_locked(deadline, false);
+    cerberus_wifi_channel_survey_session_read_t request = {
+        .session_id = session_id, .kind = kind, .index = index};
+    for (uint8_t part = 0U; error == ESP_OK && part < 3U; ++part) {
+        request.part = part;
+        cerberus_wifi_channel_survey_session_chunk_t chunk = {0};
+        error = survey_session_frame_locked(CERBERUS_SPI_COMMAND_WIFI_CHANNEL_SURVEY_SESSION_READ,
+            &request, sizeof(request), &chunk, sizeof(chunk), deadline);
+        if (error != ESP_OK) break;
+        if (chunk.session_id != session_id || chunk.part != part) {
+            error = ESP_ERR_INVALID_RESPONSE;
+            break;
+        }
+        if (!chunk.pin) {
+            int32_t remote_error;
+            memcpy(&remote_error, chunk.data, sizeof(remote_error));
+            if (!remote_error) error = ESP_ERR_INVALID_RESPONSE;
+            else error = remote_error;
+            for (uint8_t i = 4U; i < 9U; ++i)
+                if (chunk.data[i]) error = ESP_ERR_INVALID_RESPONSE;
+            break;
+        }
+        if (part && request.pin != chunk.pin) { error = ESP_ERR_INVALID_RESPONSE; break; }
+        request.pin = chunk.pin;
+        uint8_t amount = part == 2U ? 4U : 9U;
+        for (uint8_t i = amount; i < 9U; ++i)
+            if (chunk.data[i]) error = ESP_ERR_INVALID_RESPONSE;
+        if (error == ESP_OK) memcpy(bytes + part * 9U, chunk.data, amount);
+    }
+    give_link_mutex();
+    int64_t ended = esp_timer_get_time();
+    if (error == ESP_OK && (ended < begun || (uint64_t)(ended - begun) >= 20000U))
+        error = ESP_ERR_TIMEOUT;
+    if (error != ESP_OK) memset(bytes, 0, 22U);
+    return error;
+}
+
+esp_err_t c5_spi_link_wifi_channel_survey_session_metrics(uint64_t session_id,
+    uint8_t generation, uint8_t band, cerberus_wifi_channel_survey_status_payload_t *out)
+{
+    if (!out) return ESP_ERR_INVALID_ARG;
+    memset(out, 0, sizeof(*out));
+    if (!generation || band < 1U || band > 2U) return ESP_ERR_INVALID_ARG;
+    esp_err_t error = survey_session_projection(session_id,
+        CERBERUS_WIFI_CHANNEL_SURVEY_READ_STATUS, 0U, (uint8_t *)out);
+    if (error == ESP_OK && (out->generation != generation || out->band != band ||
+        out->state > CERBERUS_WIFI_CHANNEL_SURVEY_ERROR ||
+        out->result_count > CERBERUS_WIFI_CHANNEL_SURVEY_MAX_RESULTS ||
+        out->completed_count > out->result_count ||
+        out->dwell_ms != CERBERUS_WIFI_CHANNEL_SURVEY_DWELL_MS)) error = ESP_ERR_INVALID_RESPONSE;
+    if (error != ESP_OK) memset(out, 0, sizeof(*out));
+    return error;
+}
+
+esp_err_t c5_spi_link_wifi_channel_survey_session_result(uint64_t session_id,
+    uint8_t generation, uint8_t index, cerberus_wifi_channel_survey_result_payload_t *out)
+{
+    if (!out) return ESP_ERR_INVALID_ARG;
+    memset(out, 0, sizeof(*out));
+    if (!generation || index >= CERBERUS_WIFI_CHANNEL_SURVEY_MAX_RESULTS) return ESP_ERR_INVALID_ARG;
+    esp_err_t error = survey_session_projection(session_id,
+        CERBERUS_WIFI_CHANNEL_SURVEY_READ_RESULT, index, (uint8_t *)out);
+    if (error == ESP_OK && (out->generation != generation || out->index != index ||
+        out->seen > 1U || !out->channel ||
+        out->dwell_ms != CERBERUS_WIFI_CHANNEL_SURVEY_DWELL_MS)) error = ESP_ERR_INVALID_RESPONSE;
+    if (error != ESP_OK) memset(out, 0, sizeof(*out));
+    return error;
+}
+
 static esp_err_t wifi_packet_monitor_status_command(cerberus_spi_command_t command,
     const void *request, size_t request_length,
     cerberus_wifi_packet_monitor_status_payload_t *status)

@@ -3,17 +3,19 @@
 Source version is `0.1.0-dev.rev126`; onboard C5 capability revision remains
 69. Implementation and independent source/visual reviews are complete. All
 136 host suites and five native targets pass on the same 1,120 unchanged
-inputs. The linked resource audit and matched local packaging pass. Installation
-is pending because the connected device's Recon session was still active at
-the final readiness check; no rev126 flash write or reset has been attempted.
-Installed firmware is rev124; the completed
+inputs. The linked resource audit and matched local packaging pass. The paired
+rev126/capability69 update is installed with verified backups, all image writes
+and two successful boot captures. The owner confirmed the revised controls,
+ALERT label and stable recognized-hint priority. The completed
 [rev125 file-interchange package](DUAL_RADIO_REV125.md) remains a local,
 uninstalled checkpoint whose changes are included in this follow-up.
 
 The owner confirmed that the new dashboard appears and works, then requested
 priority for recognized observations, a more intuitive layout, a visible radar
-choice and the label ALERT instead of ANIMATED ALERT. That report does not
-independently confirm every Pause/Resume, Back, recording or radar interaction.
+choice and the label ALERT instead of ANIMATED ALERT. After rev126 installation,
+the owner confirmed Dashboard/Radar switching, Pause/Resume, Back and ALERT,
+plus recognized hints remaining first and stable. Recording, every classifier
+family and sustained load remain separate acceptance checks.
 
 The dashboard keeps ordinary observations accessible while presenting existing
 classified hints first, then confidence and first-consumed time with stable
@@ -43,8 +45,8 @@ local rejection/acknowledgment checks. Inventory UI passes 1,178 checks, and
 the existing renderer bounds/touch suite passes. These are source/host results,
 not physical observations. The final host matrix also passes all 136 registered
 suites; S3, onboard C5, bridge, expansion WROOM and expansion XIAO all pass native
-builds. Resource measurements, packaging, installation and physical acceptance
-will be recorded after they complete.
+builds. Resource measurements, packaging, installation and the owner's targeted
+physical acceptance are recorded below.
 The full Marauder port and loaded radio/SD performance remain unfinished.
 
 ## Retained validation and resources
@@ -100,15 +102,47 @@ Manifest SHA-256:
 host/native receipts and resource audit. Its `installed: false` is intentional.
 
 The candidate-bound six identity tests and 22 installation-helper tests pass.
-Offline preflight verifies the exact package and all helper hashes. Fresh
-baseline backups, paired writes and boot checks still require released device
-owners. A transient idle C5 sample was insufficient: S3 remained initialized,
-and a subsequent sample caught the next active Recon sweep. The user was asked
-to leave Recon with Back and return to Home. The installer did not reset or
-write while that session was active.
+Offline preflight verifies the exact package and all helper hashes. Initial
+readiness checks found an active Recon session. A transient idle C5 sample was
+insufficient: S3 remained initialized, and a later sample caught the next active
+sweep. No reset or write occurred until the owner reported returning to Home
+and a fresh capture passed all warm ownership checks.
 
 The operator/recovery plan is `artifacts/device-rev126/INSTALL.md`. Documentation
 after the built source commit records completed packaging and readiness only;
 the strict installer requires the exact clean built commit before device work.
 No push, pull request or release was made for this checkpoint. The overall
 Marauder port remains unfinished.
+
+## Completed local installation and owner acceptance
+
+The owner returned to Home, and a fresh inactive capture authorized the guarded
+non-flash reset. The original clean checkout was temporarily selected at the
+exact built commit for installation, then returned to its development branch.
+Fresh 2 MiB S3 and C5 backups match the installed rev124 images and passed full
+prefix verification. All nine writes across the temporary bridge, onboard C5
+and S3 application passed image-hash verification. Higher flash and the prior
+crash record were retained.
+
+The final receipt is `artifacts/device-rev126/installation-receipt.json`, SHA-256
+`7feb116b5eaf8f1e29f4b4358c553032eb3fd61e8aff21955c182d77cf7dc718`.
+The immutable earlier `local-milestone.json` still records its original
+`installed: false`; the installation receipt records the later device event.
+
+The two boot captures are 53.440668 seconds apart. They confirm rev126/C5
+capability69, advancing uptime, C5 boot count 1, buffered display, mounted SD
+and no previous reset fault. The initial READY timeouts and legacy fallbacks
+remain at their startup baseline of four each; mutex, READY fall/high and driver
+errors are zero and no listed SPI error counter increased between captures.
+
+Both captures report 137,580 free internal S3 bytes, a 94,208-byte largest
+internal block, 1,427,552 free PSRAM bytes and ten tasks. The observed console
+low-water mark is 1,420 bytes after the settled capture. These sampled idle
+figures do not establish peak memory, worst-case stack or loaded performance.
+
+The owner then reported “All controls work; ALERT appears” and “Recognized hints
+stay first and stable” in response to the explicit rev126 checks. This confirms
+the targeted Dashboard/Radar, Pause/Resume, Back, label and ordering behavior;
+it does not establish every classifier's accuracy, SD recording, continuous
+loaded operation or complete Marauder feature parity. The report is retained
+in `artifacts/device-rev126/owner-acceptance.json`.

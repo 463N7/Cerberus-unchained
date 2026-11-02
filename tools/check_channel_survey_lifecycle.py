@@ -41,7 +41,9 @@ start = link.index("static esp_err_t wifi_channel_survey_status_command(")
     "static esp_err_t wifi_packet_monitor_status_command(", start)])
 ui = (root / "s3_main/main/ui.c").read_text()
 start = ui.index("static cerberus_wifi_channel_survey_status_payload_t wifi_channel_survey_status;")
-globals_text = ui[start:ui.index("static cerberus_wifi_packet_monitor_status_payload_t", start)]
+globals_text = "\n".join(re.search(r"^#define " + name + r" .+$", ui, re.M).group(0)
+    for name in ("UI_WIFI_VISIBLE_ROWS", "UI_WIFI_SURVEY_METRICS_MS", "UI_WIFI_SURVEY_RETRY_MS")) + "\n"
+globals_text += ui[start:ui.index("static cerberus_wifi_packet_monitor_status_payload_t", start)]
 start = ui.index("static bool wifi_channel_survey_matches_claim(")
 helpers = ui[start:ui.index("static uint16_t packet_monitor_count(", start)]
 (out / "survey_ui.h").write_text(globals_text + function(ui,
@@ -86,3 +88,7 @@ for path in out.glob("survey-*.ppm"):
         chunk(b"IHDR", struct.pack(">IIBBBBB", 320, 480, 8, 2, 0, 0, 0)) +
         chunk(b"IDAT", zlib.compress(b"".join(b"\0" + pixels[y*960:(y+1)*960] for y in range(480)))) +
         chunk(b"IEND", b""))
+
+# Keep the native scoped-lease interleaving fixture under this registered suite.
+# Its generated files and compiler caches are separate from the UI bridge.
+subprocess.run([sys.executable, str(root / "tools/check_channel_survey_session.py")], check=True)

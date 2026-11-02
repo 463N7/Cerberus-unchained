@@ -21,7 +21,7 @@ extern "C" {
 
 #define CERBERUS_PROTOCOL_VERSION_V1 1U
 #define CERBERUS_PROTOCOL_VERSION 2U
-#define CERBERUS_C5_FIRMWARE_VERSION 69U
+#define CERBERUS_C5_FIRMWARE_VERSION 70U
 #define CERBERUS_SPI_MAGIC 0x43455242UL
 #define CERBERUS_SPI_TRANSFER_SIZE 32U
 #define CERBERUS_SPI_FRAME_PAYLOAD_SIZE 22U
@@ -163,6 +163,11 @@ typedef enum {
     CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_FAMILY = 132,
     CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE = 133,
     CERBERUS_SPI_COMMAND_DUAL_BLE_SNAPSHOT_READ_RESPONSE_COMPACT = 134,
+    CERBERUS_SPI_COMMAND_WIFI_CHANNEL_SURVEY_SESSION_INFO = 135,
+    CERBERUS_SPI_COMMAND_WIFI_CHANNEL_SURVEY_SESSION_START = 136,
+    CERBERUS_SPI_COMMAND_WIFI_CHANNEL_SURVEY_SESSION_STOP = 137,
+    CERBERUS_SPI_COMMAND_WIFI_CHANNEL_SURVEY_SESSION_STATUS = 138,
+    CERBERUS_SPI_COMMAND_WIFI_CHANNEL_SURVEY_SESSION_READ = 139,
 } cerberus_spi_command_t;
 
 typedef enum {
@@ -727,6 +732,73 @@ typedef struct __attribute__((packed)) {
     uint32_t updated_ms; /* since survey start; compare with status.elapsed_ms */
     uint16_t dwell_ms;
 } cerberus_wifi_channel_survey_result_payload_t;
+
+/* Scoped survey control (capability 70). The independently seeded 64-bit
+ * session counter never wraps within a boot. Its random initial value reduces
+ * accidental cross-boot collision; it is not eternal uniqueness/authentication.
+ * INFO returns the latest epoch without renewing. START accepts only epoch+1,
+ * or replays the exact retained session/band without rearming. */
+#define CERBERUS_WIFI_CHANNEL_SURVEY_SESSION_MIN_FIRMWARE 70U
+#define CERBERUS_WIFI_CHANNEL_SURVEY_SESSION_LEASE_MS 10000U
+#define CERBERUS_WIFI_CHANNEL_SURVEY_SESSION_BOUND 1U
+#define CERBERUS_WIFI_CHANNEL_SURVEY_SESSION_RADIO_HELD 2U
+#define CERBERUS_WIFI_CHANNEL_SURVEY_SESSION_CANCELLED 4U
+#define CERBERUS_WIFI_CHANNEL_SURVEY_READ_STATUS 0U
+#define CERBERUS_WIFI_CHANNEL_SURVEY_READ_RESULT 1U
+#define CERBERUS_WIFI_CHANNEL_SURVEY_READ_PART_BYTES 9U
+#define CERBERUS_WIFI_CHANNEL_SURVEY_READ_PARTS 3U
+
+typedef struct __attribute__((packed)) {
+    uint64_t session_id;
+    uint8_t band;
+} cerberus_wifi_channel_survey_session_start_t;
+
+typedef struct __attribute__((packed)) {
+    uint64_t session_id;
+} cerberus_wifi_channel_survey_session_request_t;
+
+/* Failed scoped commands echo the requested session, never a replacement's
+ * identity. If that session was not accepted, all fields except session/error
+ * are zero. BOUND persists for the retained completed job; RADIO_HELD is the
+ * queued worker or unresolved SDK reservation. CANCELLED cannot be renewed. */
+typedef struct __attribute__((packed)) {
+    uint64_t session_id;
+    int32_t error_code;
+    uint8_t state;
+    uint8_t band;
+    uint8_t generation;
+    uint8_t flags;
+    uint8_t result_count;
+    uint8_t completed_count;
+    uint16_t total_sweeps;
+    uint16_t dwell_ms;
+} cerberus_wifi_channel_survey_session_status_t;
+
+/* Part0/pin0 freezes exactly one legacy22-byte status or result. Parts1/2
+ * require its full session/pin/kind/index. One global pin can be replaced by
+ * a newer read; superseded continuations fail, never mix metric revisions.
+ * READ does not renew ownership. Pin exhaustion fails closed without wrap. */
+typedef struct __attribute__((packed)) {
+    uint64_t session_id;
+    uint32_t pin;
+    uint8_t kind;
+    uint8_t index;
+    uint8_t part;
+} cerberus_wifi_channel_survey_session_read_t;
+
+typedef struct __attribute__((packed)) {
+    uint64_t session_id;
+    uint32_t pin;
+    uint8_t part;
+    uint8_t data[CERBERUS_WIFI_CHANNEL_SURVEY_READ_PART_BYTES];
+} cerberus_wifi_channel_survey_session_chunk_t;
+/* Successful parts contain9/9/4 bytes, last5 zero. Errors echo request.session
+ * and request.part, pin0, signed error LE in data[0..3], remaining bytes zero.
+ * Full metrics cost three exchanges, with no new result bank/task. */
+_Static_assert(sizeof(cerberus_wifi_channel_survey_session_start_t)==9U,"survey start wire");
+_Static_assert(sizeof(cerberus_wifi_channel_survey_session_status_t)==22U,"survey status wire");
+_Static_assert(sizeof(cerberus_wifi_channel_survey_session_read_t)==15U,"survey read wire");
+_Static_assert(sizeof(cerberus_wifi_channel_survey_session_chunk_t)==22U,"survey chunk wire");
 
 /* Count-only fixed-channel management-frame monitor. Each sample covers one
  * completed 200 ms interval. Sequence plus generation makes ring overwrites

@@ -9,8 +9,8 @@ This is a separate project from
 own scope and releases. Unchained starts from the complete rev81 contribution,
 with its original Git history and contributor attribution preserved.
 
-**Current source version: `0.1.0-dev.rev126`, paired with onboard
-C5 protocol firmware revision 69. No Unchained binary release is selected yet.**
+**Current source version: `0.1.0-dev.rev127`, targeting onboard
+C5 protocol firmware revision 70. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
 
@@ -41,15 +41,27 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 
 ## Development status
 
+Rev127 corrects Channel Survey ownership when C5 restarts
+between preflight and Start. The session-bound control/readout and
+renewable ownership lease preserve existing passive metrics while preventing
+stale commands from controlling a replacement survey. All 136 host suites and
+five native targets pass with unchanged inputs. Linked fixed data/BSS grows by
+16 S3 bytes and 88 C5 bytes, with no new task or observation bank. Matched
+packaging is pending. See [rev127](docs/DUAL_RADIO_REV127.md). Installed firmware is
+rev126, with the owner's targeted Recon controls and priority acceptance.
+
 Rev126 implements owner feedback on Recon: recognized hints appear first in a
 stable list, Dashboard/Radar are visible main tabs, and category controls say
 ALERT. Current accepted S3 Meta identifier hints now reach Recon at LOW
 confidence, with no glasses/model claim. All 136 host suites and five native
 targets pass on 1,120 unchanged inputs; independent review and the linked
 resource audit pass. The Recon model/view sizes remain unchanged. The matched
-package and offline installation checks are ready; flashing awaits release of
-the active Recon session. See
-[rev126](docs/DUAL_RADIO_REV126.md). Installed firmware remains rev124.
+package is installed with verified paired writes and two successful boot
+captures 53 seconds apart, with no additional listed SPI errors. The owner
+confirmed Dashboard/Radar, Pause/Resume, Back, the ALERT label and stable
+recognized-hint priority. See [rev126](docs/DUAL_RADIO_REV126.md). Installed
+firmware is rev126; broader feature and loaded-performance acceptance remains
+unfinished.
 
 Rev125 implements offline Marauder AP JSON and SSID text import, details,
 copy saving and export from native combined S3/C5 Wi-Fi reports. It preserves
@@ -59,7 +71,7 @@ five native targets pass on 1,118 unchanged inputs. The linked resource audit
 measures 32 additional fixed S3 bytes; existing Recon, scan and archive
 allocations are unchanged, with optional interchange costs tracked separately.
 The matched local rev125 package is finalized but was not installed while Recon
-feedback is addressed. The installed pair remains rev124.
+feedback was addressed. At that checkpoint the installed pair was rev124.
 See [rev125](docs/DUAL_RADIO_REV125.md) and
 [the interchange contract](docs/WIFI_MARAUDER_INTERCHANGE.md).
 

@@ -74,6 +74,7 @@ static void packet_monitor_run(void);
 static void packet_monitor_receive(const wifi_promiscuous_pkt_t *packet,
     wifi_promiscuous_pkt_type_t type);
 static void channel_survey_task(void *arg);
+static void channel_survey_session_init_locked(void);
 static void channel_survey_receive(const wifi_promiscuous_pkt_t *packet,
     wifi_promiscuous_pkt_type_t type);
 static wifi_ap_record_t scan_results[CERBERUS_WIFI_SCAN_MAX_RESULTS];
@@ -958,6 +959,7 @@ esp_err_t cerberus_wifi_scanner_init(void)
     scan_session_epoch = ((uint64_t)esp_random() << 32) | esp_random();
     if (!scan_session_epoch || scan_session_epoch == UINT64_MAX) scan_session_epoch = UINT64_MAX / 2U;
     scan_session_id = 0U;
+    channel_survey_session_init_locked();
     scan_status.state = scanner_ready ? CERBERUS_WIFI_SCAN_IDLE : CERBERUS_WIFI_SCAN_ERROR;
     scan_status.error_code = err;
     defense_status.state = scanner_ready ? CERBERUS_WIFI_DEFENSE_IDLE : CERBERUS_WIFI_DEFENSE_ERROR;

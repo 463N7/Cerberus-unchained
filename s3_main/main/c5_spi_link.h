@@ -244,6 +244,24 @@ esp_err_t c5_spi_link_wifi_channel_survey_status(
     cerberus_wifi_channel_survey_status_payload_t *status);
 esp_err_t c5_spi_link_wifi_channel_survey_result(uint8_t generation, uint8_t index,
     cerberus_wifi_channel_survey_result_payload_t *result);
+/* Capability70 exact survey ownership. Control replies retain accepted job
+ * errors; ESP_OK means a validated reply, not successful RF. A rejected query
+ * echoes the requested session with BOUND clear. No legacy Stop fallback.
+ * Each call uses one 20ms passive transport deadline and no command retries;
+ * INFO/START additionally refresh capability before the scoped command.
+ * Metrics freeze one22-byte projection and read it in three parts. */
+esp_err_t c5_spi_link_wifi_channel_survey_session_info(
+    cerberus_wifi_channel_survey_session_status_t *reply);
+esp_err_t c5_spi_link_wifi_channel_survey_session_start(uint64_t session_id, uint8_t band,
+    cerberus_wifi_channel_survey_session_status_t *reply);
+esp_err_t c5_spi_link_wifi_channel_survey_session_status(uint64_t session_id,
+    cerberus_wifi_channel_survey_session_status_t *reply);
+esp_err_t c5_spi_link_wifi_channel_survey_session_stop(uint64_t session_id,
+    cerberus_wifi_channel_survey_session_status_t *reply);
+esp_err_t c5_spi_link_wifi_channel_survey_session_metrics(uint64_t session_id,
+    uint8_t generation, uint8_t band, cerberus_wifi_channel_survey_status_payload_t *out);
+esp_err_t c5_spi_link_wifi_channel_survey_session_result(uint64_t session_id,
+    uint8_t generation, uint8_t index, cerberus_wifi_channel_survey_result_payload_t *out);
 esp_err_t c5_spi_link_wifi_packet_monitor_start(uint8_t channel,
     cerberus_wifi_packet_monitor_status_payload_t *status);
 esp_err_t c5_spi_link_wifi_packet_monitor_stop(uint8_t generation,
