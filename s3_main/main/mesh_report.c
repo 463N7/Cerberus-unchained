@@ -11,16 +11,16 @@ static bool overlap(const void *a,size_t an,const void *b,size_t bn)
     return x<=y?y-x<an:x-y<bn;
 }
 static bool channel_valid(uint8_t channel) { return channel>=11U && channel<=26U; }
-static bool time_valid(const mesh_scan_t *s,uint64_t time,bool valid)
+static bool time_valid(const mesh_evidence_view_t *s,uint64_t time,bool valid)
 {
-    const cerberus_mesh_observation_summary_t *f=&s->final_summary;
+    const cerberus_mesh_observation_summary_t *f=s->summary;
     return valid ? (!(f->flags&CERBERUS_MESH_OBSERVATION_START_TIME_VALID) || time>=f->started_us) &&
         (!(f->flags&CERBERUS_MESH_OBSERVATION_STOP_TIME_VALID) || time<=f->stopped_us) &&
         (!(f->flags&CERBERUS_MESH_OBSERVATION_COPY_TIME_VALID) || time<=f->copied_us) : time==0U;
 }
-static bool pan_valid(const mesh_scan_t *s,const mesh_observation_pan_key_t *p)
+static bool pan_valid(const mesh_evidence_view_t *s,const mesh_observation_pan_key_t *p)
 {
-    return channel_valid(p->channel) && (s->final_summary.tuned_mask&(1U<<(p->channel-11U))) &&
+    return channel_valid(p->channel) && (s->summary->tuned_mask&(1U<<(p->channel-11U))) &&
         (p->known || !p->value);
 }
 static bool same_pan(const mesh_observation_pan_key_t *a,const mesh_observation_pan_key_t *b)
@@ -43,9 +43,9 @@ static bool reference(const mesh_observation_t *m,uint8_t index,uint32_t sequenc
     return sequence<=m->witness_count ? index==sequence-1U && m->witnesses[index].input.sequence==sequence :
         index==MESH_OBSERVATION_NO_WITNESS;
 }
-static bool seen_valid(const mesh_scan_t *s,const mesh_observation_seen_t *seen)
+static bool seen_valid(const mesh_evidence_view_t *s,const mesh_observation_seen_t *seen)
 {
-    const mesh_observation_t *m=&s->model;
+    const mesh_observation_t *m=s->model;
     if (!seen->frames || seen->frames>m->counters.records || !seen->first_sequence ||
         seen->first_sequence>seen->last_sequence || seen->last_sequence>m->last_sequence ||
         seen->frames>seen->last_sequence-seen->first_sequence+1U ||
@@ -70,11 +70,11 @@ static bool parsed_witness(const mesh_observation_t *m,uint8_t index,mesh_mac_ob
     return w->parse_result==MESH_MAC_HEADER_OK &&
         mesh_mac_parse(w->input.mac,w->input.length,mac)==MESH_MAC_HEADER_OK;
 }
-static bool witness_valid(const mesh_scan_t *s,unsigned index,uint64_t *last,bool *timed)
+static bool witness_valid(const mesh_evidence_view_t *s,unsigned index,uint64_t *last,bool *timed)
 {
-    const mesh_observation_witness_t *w=&s->model.witnesses[index];
+    const mesh_observation_witness_t *w=&s->model->witnesses[index];
     const mesh_observation_input_t *in=&w->input;
-    if (in->session!=s->model.session || in->sequence!=index+1U ||
+    if (in->session!=s->model->session || in->sequence!=index+1U ||
         !channel_valid(in->channel) || !(s->observed_mask&(1U<<(in->channel-11U))) ||
         in->length<2U || in->length>MESH_MAC_MAX_LENGTH || (in->flags&~7U) ||
         !time_valid(s,in->callback_us,(in->flags&MESH_OBSERVATION_TIME_VALID)!=0U) ||
@@ -90,19 +90,13 @@ static bool witness_valid(const mesh_scan_t *s,unsigned index,uint64_t *last,boo
     return w->parse_result==mesh_mac_parse(in->mac,in->length,&mac);
 }
 
-static bool summary_valid(const mesh_scan_t *s)
+static bool summary_valid(const mesh_evidence_view_t *s)
 {
-    const cerberus_mesh_observation_summary_t *f=&s->final_summary;
-    const cerberus_mesh_observation_control_t *r=&s->remote;
-    if (!s->frozen || !s->final_valid || s->faulted || !mesh_scan_released(s) ||
-        s->accepted || s->have_control || s->start_attempted || s->stop_requested || s->close_requested ||
-        !s->model.session || r->session_id!=s->model.session || r->sequence || r->error_code ||
-        r->state || r->flags || r->count || r->capacity || r->channel || r->version ||
-        s->sequence || s->part || s->fault_error || s->error!=f->error_code ||
-        !s->request.channel_mask || s->request.mode>CERBERUS_MESH_OBSERVATION_SWEEP ||
-        s->request.dwell_ms<100U || s->request.dwell_ms>2000U ||
-        (s->request.mode==CERBERUS_MESH_OBSERVATION_FIXED &&
-         (s->request.channel_mask&(uint16_t)(s->request.channel_mask-1U)))) return false;
+    const cerberus_mesh_observation_summary_t *f=s->summary;
+    if (!s->model->session || !f->requested_mask ||
+        f->mode>CERBERUS_MESH_OBSERVATION_SWEEP || f->dwell_ms<100U || f->dwell_ms>2000U ||
+        (f->mode==CERBERUS_MESH_OBSERVATION_FIXED &&
+         (f->requested_mask&(uint16_t)(f->requested_mask-1U)))) return false;
     uint64_t total=(uint64_t)f->invalid_callbacks+f->queue_drops+f->enqueued;
     bool saturated=f->callbacks==UINT32_MAX || f->invalid_callbacks==UINT32_MAX ||
         f->queue_drops==UINT32_MAX || f->enqueued==UINT32_MAX || f->acked==UINT32_MAX;
@@ -114,13 +108,12 @@ static bool summary_valid(const mesh_scan_t *s)
     bool stop=(f->flags&CERBERUS_MESH_OBSERVATION_STOP_TIME_VALID)!=0U;
     bool copy=(f->flags&CERBERUS_MESH_OBSERVATION_COPY_TIME_VALID)!=0U;
     return f->version==1U && !f->reserved && !(f->flags&~0x7fU) && !f->channel &&
-        (f->flags&CERBERUS_MESH_OBSERVATION_STOPPED) && f->mode==s->request.mode &&
-        f->requested_mask==s->request.channel_mask && f->dwell_ms==s->request.dwell_ms &&
+        (f->flags&CERBERUS_MESH_OBSERVATION_STOPPED) &&
         !(f->tuned_mask&(uint16_t)~f->requested_mask) && !(s->observed_mask&(uint16_t)~f->tuned_mask) &&
         (!f->callbacks || f->tuned_mask) && f->last_sequence<=MESH_OBSERVATION_MAX_SEQUENCE &&
-        f->enqueued==f->acked && f->acked==f->last_sequence && f->acked==s->acked_sequence &&
-        f->acked==s->last_enqueued && f->acked==s->model.last_sequence &&
-        f->acked==s->model.counters.records &&
+        f->enqueued==f->acked && f->acked==f->last_sequence &&
+        f->acked==s->model->last_sequence &&
+        f->acked==s->model->counters.records &&
         f->callbacks==(total>UINT32_MAX?UINT32_MAX:(uint32_t)total) &&
         saturated==((f->flags&CERBERUS_MESH_OBSERVATION_COUNTERS_SATURATED)!=0U) &&
         (f->last_sequence!=MESH_OBSERVATION_MAX_SEQUENCE || (f->flags&CERBERUS_MESH_OBSERVATION_SEQUENCE_EXHAUSTED)) &&
@@ -129,10 +122,10 @@ static bool summary_valid(const mesh_scan_t *s)
         (!start || !copy || f->started_us<=f->copied_us) && (!stop || !copy || f->stopped_us<=f->copied_us);
 }
 
-bool mesh_report_valid(const mesh_scan_t *s)
+bool mesh_evidence_valid(const mesh_evidence_view_t *s)
 {
-    if (!s || !summary_valid(s)) return false;
-    const mesh_observation_t *m=&s->model;
+    if (!s || !s->model || !s->summary || !summary_valid(s)) return false;
+    const mesh_observation_t *m=s->model;
     const mesh_observation_counters_t *c=&m->counters;
     if (m->pan_count>MESH_OBSERVATION_PANS || m->address_count>MESH_OBSERVATION_ADDRESSES ||
         m->edge_count>MESH_OBSERVATION_EDGES || m->witness_count>MESH_OBSERVATION_WITNESSES ||
@@ -150,16 +143,21 @@ bool mesh_report_valid(const mesh_scan_t *s)
     bool saturated=c->pan_omissions==UINT32_MAX || c->address_omissions==UINT32_MAX ||
         c->edge_omissions==UINT32_MAX || c->witness_omissions==UINT32_MAX;
     if (c->saturated!=saturated) return false;
-    uint64_t last=0U;bool timed=false;
+    uint64_t first=0U,last=0U;bool timed=false;
     unsigned parsed_counts[3]={0};
     for (unsigned i=0;i<m->witness_count;++i) {
+        bool previously_timed=timed;
         if (!witness_valid(s,i,&last,&timed)) return false;
+        if (!previously_timed && timed) first=last;
         mesh_mac_result_t result=m->witnesses[i].parse_result;
         if (result>MESH_MAC_UNSUPPORTED) return false;
         ++parsed_counts[result];
     }
     if (parsed_counts[MESH_MAC_HEADER_OK]>c->headers || parsed_counts[MESH_MAC_MALFORMED]>c->malformed ||
-        parsed_counts[MESH_MAC_UNSUPPORTED]>c->unsupported || (timed && (!m->time_seen || last>m->last_valid_us))) return false;
+        parsed_counts[MESH_MAC_UNSUPPORTED]>c->unsupported ||
+        (timed && (!m->time_seen || first!=s->first_callback_us || last>m->last_valid_us)) ||
+        (c->records<=MESH_OBSERVATION_WITNESSES &&
+         (s->callback_time_seen!=timed || s->last_callback_us!=(timed?last:0U)))) return false;
     for (unsigned i=0;i<m->pan_count;++i) {
         const mesh_observation_pan_t *p=&m->pans[i];
         if (!pan_valid(s,&p->key) || !origins_valid(&p->key,p->origin_bits) || !seen_valid(s,&p->seen)) return false;
@@ -268,10 +266,10 @@ static void seen(writer_t *w,const mesh_observation_seen_t *s)
         s->frames,s->first_sequence,s->last_sequence,s->first_time_valid,s->first_us,
         s->last_time_valid,s->last_us,s->first_witness,s->last_witness);
 }
-static bool format(const mesh_scan_t *s,char *output,size_t capacity,size_t *length)
+static bool format(const mesh_evidence_view_t *s,char *output,size_t capacity,size_t *length)
 {
     writer_t w={output,capacity,0U,true};
-    const mesh_observation_t *m=&s->model;const cerberus_mesh_observation_summary_t *f=&s->final_summary;
+    const mesh_observation_t *m=s->model;const cerberus_mesh_observation_summary_t *f=s->summary;
     append(&w,"# CERBERUS_MESH_OBSERVATIONS_CSV,1\r\n");
     append(&w,"# Historical passive MAC addressing observations; not authenticated devices or topology.\r\n");
     append(&w,"# Destination means addressed endpoint; RSSI/LQI belong only to a received source frame.\r\n");
@@ -329,15 +327,52 @@ static bool format(const mesh_scan_t *s,char *output,size_t capacity,size_t *len
     return true;
 }
 
+static mesh_evidence_view_t live_view(const mesh_scan_t *s)
+{
+    return (mesh_evidence_view_t){&s->model,&s->final_summary,s->first_callback_us,
+        s->last_callback_us,s->observed_mask,s->callback_time_seen};
+}
+
+bool mesh_report_valid(const mesh_scan_t *s)
+{
+    if (!s) return false;
+    const cerberus_mesh_observation_summary_t *f=&s->final_summary;
+    const cerberus_mesh_observation_control_t *r=&s->remote;
+    if (!s->frozen || !s->final_valid || s->faulted || !mesh_scan_released(s) ||
+        s->accepted || s->have_control || s->start_attempted || s->stop_requested || s->close_requested ||
+        r->session_id!=s->model.session || r->sequence || r->error_code ||
+        r->state || r->flags || r->count || r->capacity || r->channel || r->version ||
+        s->sequence || s->part || s->fault_error || s->error!=f->error_code ||
+        f->mode!=s->request.mode || f->requested_mask!=s->request.channel_mask ||
+        f->dwell_ms!=s->request.dwell_ms || f->acked!=s->acked_sequence || f->acked!=s->last_enqueued)
+        return false;
+    mesh_evidence_view_t view=live_view(s);
+    return mesh_evidence_valid(&view);
+}
+
+bool mesh_evidence_report_encode(const mesh_evidence_view_t *s,char *output,size_t capacity,size_t *length)
+{
+    if (!length || overlap(s,s?sizeof(*s):0U,length,sizeof(*length)) ||
+        overlap(output,capacity,length,sizeof(*length)) || overlap(s,s?sizeof(*s):0U,output,capacity) ||
+        (s && (overlap(s->model,s->model?sizeof(*s->model):0U,length,sizeof(*length)) ||
+        overlap(s->model,s->model?sizeof(*s->model):0U,output,capacity) ||
+        overlap(s->summary,s->summary?sizeof(*s->summary):0U,length,sizeof(*length)) ||
+        overlap(s->summary,s->summary?sizeof(*s->summary):0U,output,capacity)))) return false;
+    *length=0U;
+    if ((!output && capacity) || !mesh_evidence_valid(s)) return false;
+    size_t needed=0U;
+    if (!format(s,NULL,0U,&needed)) return false;
+    if (!output) { *length=needed;return true; }
+    if (capacity<=needed) return false;
+    return format(s,output,capacity,length);
+}
+
 bool mesh_report_encode(const mesh_scan_t *s,char *output,size_t capacity,size_t *length)
 {
     if (!length || overlap(s,s?sizeof(*s):0U,length,sizeof(*length)) ||
         overlap(output,capacity,length,sizeof(*length)) || overlap(s,s?sizeof(*s):0U,output,capacity)) return false;
     *length=0U;
     if ((!output && capacity) || !mesh_report_valid(s)) return false;
-    size_t needed=0U;
-    if (!format(s,NULL,0U,&needed)) return false;
-    if (!output) { *length=needed;return true; }
-    if (capacity<=needed) return false;
-    return format(s,output,capacity,length);
+    mesh_evidence_view_t view=live_view(s);
+    return mesh_evidence_report_encode(&view,output,capacity,length);
 }

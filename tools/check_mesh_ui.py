@@ -42,7 +42,7 @@ footer_draw = 'return draw_button(64, UI_BACK_Y, 192, UI_BACK_HEIGHT, back_label
 assert footer_draw in ui
 footer_defines = '\n'.join(re.findall(r'^#define UI_BACK_(?:Y|HEIGHT) .+$', ui, re.M))
 begin = ui.index('        mesh_ui_tick((uint64_t)now_ms,')
-tick = ui[begin:ui.index(';', begin) + 1]
+tick = 'mesh_archive_tick(screen_asleep);\n' + ui[begin:ui.index(';', begin) + 1]
 begin = ui.index('    if (current_page == UI_PAGE_IEEE802154) {', ui.index('static void open_tool_page(ui_page_t page)\n{'))
 entry = ui[begin:].split('{', 1)[1].split('}', 1)[0]
 begin = ui.index('    if (ieee802154_mode == UI_IEEE802154_MODE_MENU) {', ui.index('static void handle_ieee802154_tap('))
@@ -52,19 +52,27 @@ begin = live.index('static bool live_is_view(void)')
 live_view = live[begin:live.index('\nstatic void live_status', begin)]
 assert 'const bool defer_c5 = live_wifi_capture_defers_c5() || mesh_ui_busy();' in live
 assert 'if (c5_online && !live_wifi_capture_defers_c5() && !mesh_ui_busy())' in live
+begin = ui.index('            if (mesh_archive_is_file(file_entries[index].name)) {')
+file_route = ui[begin:ui.index('            } else if', begin)] + '}'
+file_route = file_route.replace('file_entries[index].name', 'name')
+assert 'if (current_page == UI_PAGE_MESH_ARCHIVE) return mesh_archive_draw();' in ui
+assert 'mesh_archive_tap(x, y);' in ui
+assert '#include "mesh_archive_ui.h"' in ui
 (out / "mesh_routes.h").write_text('static void route_back(void){\n' + back + '}\n'
     + launcher + '\nstatic void route_footer(void){\n' + footer + '}\n'
     + live_view + footer_defines + '\nstatic esp_err_t route_draw_footer(void){const char *back_label="BACK";\n' + footer_label + footer_override + footer_draw + '}\n'
     'static void route_entry(void){\n' + entry + '}\n'
     'static void route_field(cerberus_field_action_t action){\n' + field_parent + field + '}\n'
+    'static void route_file(const char *name){\n' + file_route + '}\n'
     'static void route_tick(uint64_t now_ms,bool screen_asleep){\n' + tick + '}\n'
     'static void route_tools(uint16_t x,uint16_t y){\n' + menu + '}\n')
 env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(out / "zig-global"), ZIG_LOCAL_CACHE_DIR=str(out / "zig-local"))
 exe = out / ("mesh-ui.exe" if os.name == "nt" else "mesh-ui")
-subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
+subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-O1", "-Wall", "-Wextra", "-Werror",
     "-I", str(out), "-I", str(root / "tools/host_checks/stubs"), "-I", str(root / "s3_main/main"), "-I", str(root / "shared"),
     str(root / "tools/host_checks/mesh_ui_check.c"), str(root / "s3_main/main/mesh_scan.c"),
     str(root / "s3_main/main/mesh_locate.c"),
+    str(root / "s3_main/main/mesh_archive.c"), str(root / "s3_main/main/mesh_report.c"),
     str(root / "s3_main/main/mesh_observation.c"), str(root / "shared/mesh_mac.c"),
     str(root / "s3_main/main/sentinel_hub.c"), str(root / "s3_main/main/field_menu.c"),
     str(root / "s3_main/main/ui_widgets.c"),

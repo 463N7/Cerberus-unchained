@@ -145,6 +145,7 @@ typedef enum {
     UI_PAGE_MAC_MONITOR,
     UI_PAGE_BLE_ARCHIVE,
     UI_PAGE_WIFI_ARCHIVE,
+    UI_PAGE_MESH_ARCHIVE,
 } ui_page_t;
 
 typedef struct {
@@ -363,6 +364,11 @@ static void mesh_ui_back(void);
 static void mesh_ui_tap(uint16_t x, uint16_t y);
 static esp_err_t mesh_ui_draw(void);
 static bool mesh_ui_busy(void);
+static bool mesh_archive_is_file(const char *name);
+static void mesh_archive_open_file(const char *path, const char *name);
+static void mesh_archive_files(void);
+static esp_err_t mesh_archive_draw(void);
+static void mesh_archive_tap(uint16_t x, uint16_t y);
 static void probe_sniff_open(void);
 static void probe_sniff_back(void);
 static void probe_sniff_tap(uint16_t x, uint16_t y);
@@ -8173,6 +8179,7 @@ static esp_err_t draw_wardrive(void)
 
 static esp_err_t draw_detail_page(void)
 {
+    if (current_page == UI_PAGE_MESH_ARCHIVE) return mesh_archive_draw();
     if (current_page == UI_PAGE_IEEE802154 && ieee802154_mode == UI_IEEE802154_MODE_MESH) return mesh_ui_draw();
     if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_PROBE_SNIFF) return probe_sniff_draw();
     if (wardrive_gps_view_is_open()) return wardrive_gps_view_draw();
@@ -10828,7 +10835,9 @@ static void handle_files_tap(uint16_t x, uint16_t y)
         } else if (index < file_entry_count && file_entries[index].is_directory) {
             navigate_file_directory(file_entries[index].name);
         } else if (index < file_entry_count) {
-            if (wifi_archive_is_file(file_entries[index].name)) {
+            if (mesh_archive_is_file(file_entries[index].name)) {
+                mesh_archive_open_file(file_path, file_entries[index].name);
+            } else if (wifi_archive_is_file(file_entries[index].name)) {
                 wifi_archive_open_file(file_path, file_entries[index].name);
             } else if (ble_archive_is_file(file_entries[index].name)) {
                 ble_archive_open_file(file_path, file_entries[index].name);
@@ -11464,6 +11473,7 @@ static void handle_scripts_tap(uint16_t x, uint16_t y)
 #include "dual_wifi_live_ui.h"
 #include "probe_sniff_ui.h"
 #include "mesh_ui.h"
+#include "mesh_archive_ui.h"
 #include "wifi_archive_live_ui.h"
 #include "wifi_interchange_live_ui.h"
 #include "dual_ble_live_ui.h"
@@ -12003,6 +12013,10 @@ static void handle_tap(uint16_t x, uint16_t y)
         return;
     }
 
+    if (current_page == UI_PAGE_MESH_ARCHIVE) {
+        mesh_archive_tap(x, y);
+        return;
+    }
     if (current_page == UI_PAGE_BLE_ARCHIVE) {
         ble_archive_tap(x, y);
         return;
@@ -12541,6 +12555,7 @@ void cerberus_ui_run(const cerberus_ui_config_t *config)
              wifi_mode != UI_WIFI_MODE_PACKET_MONITOR || screen_asleep)) {
             (void)packet_monitor_stop_ui();
         }
+        mesh_archive_tick(screen_asleep);
         mesh_ui_tick((uint64_t)now_ms, current_page == UI_PAGE_IEEE802154 &&
             ieee802154_mode == UI_IEEE802154_MODE_MESH && !screen_asleep);
         probe_sniff_tick((uint64_t)now_ms, current_page == UI_PAGE_WIFI &&

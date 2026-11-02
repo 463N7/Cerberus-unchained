@@ -7,6 +7,7 @@
 #include "probe_sniff_model.h"
 #include "mesh_report.h"
 #include "mesh_locate_report.h"
+#include "mesh_archive.h"
 #include "esp_err.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -40,6 +41,9 @@ typedef enum {
     CERBERUS_BLE_ARCHIVE_IO_SAVE_PROBE,
     CERBERUS_BLE_ARCHIVE_IO_SAVE_MESH,
     CERBERUS_BLE_ARCHIVE_IO_SAVE_MESH_LOCATE,
+    CERBERUS_BLE_ARCHIVE_IO_SAVE_MESH_ARCHIVE,
+    CERBERUS_BLE_ARCHIVE_IO_LOAD_MESH_ARCHIVE,
+    CERBERUS_BLE_ARCHIVE_IO_EXPORT_MESH_ARCHIVE_CSV,
 } cerberus_ble_archive_io_operation_t;
 
 typedef enum {
@@ -51,6 +55,7 @@ typedef enum {
     CERBERUS_BLE_ARCHIVE_IO_FORMAT_PROBE_REPORT,
     CERBERUS_BLE_ARCHIVE_IO_FORMAT_MESH_REPORT,
     CERBERUS_BLE_ARCHIVE_IO_FORMAT_MESH_LOCATE_REPORT,
+    CERBERUS_BLE_ARCHIVE_IO_FORMAT_MESH_ARCHIVE,
 } cerberus_ble_archive_io_format_t;
 typedef struct {
     cerberus_ble_archive_io_state_t state;
@@ -136,6 +141,16 @@ esp_err_t cerberus_ble_archive_io_save_mesh(const mesh_scan_t *scan, uint64_t *j
  * arm. Saves a new Mxxxxx.CSV in LOGS through the same serialized storage worker.
  * The frozen source/history copy completes before returning to the UI. */
 esp_err_t cerberus_ble_archive_io_save_mesh_locate(const mesh_locate_t *locate, uint64_t *job_id);
+/* Historical native maps have no live controller or radio ownership. Save and
+ * Load publish FORMAT_MESH_ARCHIVE and support the matching immutable copy.
+ * Export copies the historical document before return, then writes the existing
+ * Mesh CSV schema under LOGS with FORMAT_MESH_REPORT; it has no typed-map result.
+ * Native Save chooses a new Mxxxxx.MSH under /CERBERUS/MESH. */
+esp_err_t cerberus_ble_archive_io_save_mesh_archive(const mesh_archive_t *document, uint64_t *job_id);
+esp_err_t cerberus_ble_archive_io_load_mesh_archive(const char *relative_path,
+    const char *file_name, uint64_t *job_id);
+esp_err_t cerberus_ble_archive_io_copy_mesh_archive(uint64_t job_id, mesh_archive_t *document);
+esp_err_t cerberus_ble_archive_io_export_mesh_archive_csv(const mesh_archive_t *document, uint64_t *job_id);
 void cerberus_ble_archive_io_get_status(cerberus_ble_archive_io_status_t *status);
 /* Copies only a fully validated completed native BLE SAVE or LOAD. JSON jobs
  * require copy_airtag_json and Wi-Fi jobs require their matching typed copy. Getters reject

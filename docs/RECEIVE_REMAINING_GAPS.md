@@ -1,5 +1,12 @@
 # Remaining receive and device-workflow gaps
 
+Latest source audit, 2026-11-02: the live GitHub `develop` commit resolves to
+`79cc6bcba1db6679baee1dab2b0c1ad5010e6363`, still matching the pinned source.
+Installed [rev131](DUAL_RADIO_REV131.md) passes paired boot checks and the owner
+has accepted Mesh menu-first navigation and Back. Individual feature acceptance
+remains separate. Rev132 is developing historical Mesh saved maps; the earlier
+audit and checkpoint history below retain their original scope.
+
 This source audit used Cerberus `41b65fdec1f2dc1ccdb01d73e56887dee5d9194e`
 and the clean pinned Marauder develop checkout
 `79cc6bcba1db6679baee1dab2b0c1ad5010e6363`. A read-only GitHub compare at
@@ -91,6 +98,33 @@ acceptance. This report is not raw-frame PCAP, and its observations do not prove
 association or physical-device identity. Full upstream options, dense and warm
 repeated-use acceptance remain open. The existing Wardriving clue-filtered
 probe table and separate PCAP capture path retain their separate roles.
+
+## Selected AP/station Packet Count
+
+The 2026-11-02 source review corrects the earlier ledger's description of
+`WIFI_SCAN_PACKET_RATE`. Its exposed workflow is Packet Count, reached from
+[`MenuFunctions.cpp:5179`](https://github.com/justcallmekoko/ESP32Marauder/blob/79cc6bcba1db6679baee1dab2b0c1ad5010e6363/esp32_marauder/MenuFunctions.cpp#L5179)
+and CLI `packetcount` in `CommandLine.cpp:841`. The
+[receive handler](https://github.com/justcallmekoko/ESP32Marauder/blob/79cc6bcba1db6679baee1dab2b0c1ad5010e6363/esp32_marauder/WiFiScan.cpp#L10344)
+matches selected APs, then selected stations, increments the first matching
+target's count and appends matching frames to the capture buffer. Its
+[display](https://github.com/justcallmekoko/ESP32Marauder/blob/79cc6bcba1db6679baee1dab2b0c1ad5010e6363/esp32_marauder/WiFiScan.cpp#L11422)
+shows per-selected-target totals. That first-match behavior is not complete
+per-endpoint accounting.
+
+Cerberus's packet monitor and Channel Survey aggregate channel activity.
+Selected-BSSID capture already exposes whole-job heard/written/drop counters;
+those must not be erased from the parity assessment. Neither supplies the
+distinct selected-AP/station counting view described above. A future receive
+implementation should bind frozen target identity and channel, distinguish
+observed source/destination roles, preserve unknown signal and dropped/gapped
+coverage, and provide exact Start/Stop/Back cleanup. C5 can count bounded clear
+headers while S3 presents the selected target and history. No association or
+physical-device identity should be inferred from a matching header address.
+
+This is an identified gap, not an implemented feature. Parser/role/clock and
+session regressions, frozen selection and export tests, plus real receive/count
+accuracy checks are required. A channel graph cannot stand in for this outcome.
 
 ## GPS Data and NMEA presentation
 

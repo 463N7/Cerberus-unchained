@@ -2,8 +2,9 @@
 
 The matched rev131 development package passes the complete local host/native
 matrix and package verification and is installed on both chips. Paired
-application boot and sampled idle checks pass; touchscreen and Mesh feature
-acceptance remain pending. This original Cerberus implementation uses CYM as a
+application boot and sampled idle checks pass. The owner confirms menu-first
+navigation and the Back controls work; real Mesh feature acceptance remains
+pending. This original Cerberus implementation uses CYM as a
 workflow reference; see the
 [reference and scope plan](MESH_DETECTION_PLAN.md). It does not claim complete
 CYM or Marauder parity.
@@ -136,8 +137,9 @@ The earlier immutable `local-milestone.json` correctly records the package
 checkpoint before installation; the separate installation receipt records the
 subsequent paired update.
 
-The owner still needs to check menu-first navigation and Back on the actual
-touchscreen, followed by Mesh Start/Stop and a normal Wi-Fi scan. Real selected
+The owner confirmed on 2026-11-02 that Home → Scan → Mesh Detection opens the
+five-tool menu and that MESH MENU / BACK TO SCAN return to the expected screens.
+Mesh Start/Stop followed by a normal Wi-Fi scan remains unverified. Real selected
 source reception, Locate handoff/history, stopped SD save/reopen and sustained
 loaded operation are also unverified. Sampled idle boot and software checks
 do not establish those behaviors or complete Mesh/CYM/Marauder parity.

@@ -218,13 +218,14 @@ static bool checked_locate_report_encode(const mesh_locate_t *snapshot,
     void(*hook)(void)=locate_format_hook;locate_format_hook=NULL;if(hook)hook();
     return okay;
 }
+#include "mesh_archive_io_boundary.h"
 /* Interleave Release and nested readers at the actual large copy. No document
  * bytes may be copied while interrupts are disabled, nor freed while pinned. */
 static void (*copy_hook)(void);
 static unsigned document_copies;
 static void *archive_checked_copy(void *out,const void *in,size_t bytes)
 {
-    if(bytes==sizeof(cerberus_ble_archive_t)||bytes==sizeof(cerberus_airtag_json_t)||bytes==sizeof(cerberus_wifi_archive_t)||bytes==sizeof(cerberus_wifi_marauder_ap_t)||bytes==sizeof(cerberus_wifi_marauder_ssid_t)){
+    if(bytes==sizeof(mesh_archive_t)||bytes==sizeof(cerberus_ble_archive_t)||bytes==sizeof(cerberus_airtag_json_t)||bytes==sizeof(cerberus_wifi_archive_t)||bytes==sizeof(cerberus_wifi_marauder_ap_t)||bytes==sizeof(cerberus_wifi_marauder_ssid_t)){
         CHECK(!locked);++document_copies;
         void(*hook)(void)=copy_hook;copy_hook=NULL;if(hook)hook();
     }
@@ -258,7 +259,13 @@ static cerberus_wifi_marauder_result_t checked_ssid_conversion(const cerberus_wi
 #define cerberus_probe_sniff_report checked_probe_report
 #define mesh_report_encode checked_mesh_report_encode
 #define mesh_locate_report_encode checked_locate_report_encode
+#define mesh_archive_encode checked_map_encode
+#define mesh_archive_decode checked_map_decode
+#define mesh_archive_report_encode checked_map_report
 #include "archive_io_impl.h"
+#undef mesh_archive_encode
+#undef mesh_archive_decode
+#undef mesh_archive_report_encode
 #undef mesh_locate_report_encode
 #undef mesh_report_encode
 #undef cerberus_probe_sniff_report
@@ -349,6 +356,7 @@ static void reset(void)
     probe_saves=probe_formats=0;probe_length=0;probe_format_hook=NULL;
     mesh_saves=mesh_formats=0;mesh_length=0;mesh_format_hook=NULL;
     locate_formats=0;locate_format_hook=NULL;
+    map_saves=map_loads=map_encodes=map_decodes=map_exports=0;map_codec_hook=NULL;
     memset(&output,0xA5,sizeof(output));untouched=output;
 }
 static void run_worker(void)
@@ -707,7 +715,7 @@ static void check_wifi_operations(void)
     CHECK(cerberus_ble_archive_io_save_wifi(NULL,&id)==ESP_ERR_INVALID_ARG&&id==0);
     CHECK(cerberus_ble_archive_io_save_wifi(&wifi_input,NULL)==ESP_ERR_INVALID_ARG);
     CHECK(cerberus_ble_archive_io_copy_wifi(0,NULL)==ESP_ERR_INVALID_ARG);
-    CHECK(archive_io_start((cerberus_ble_archive_io_operation_t)99,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,&id)==ESP_ERR_INVALID_ARG&&id==0);
+    CHECK(archive_io_start((cerberus_ble_archive_io_operation_t)99,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,&id)==ESP_ERR_INVALID_ARG&&id==0);
     CHECK(!archive_io_allocation_size((cerberus_ble_archive_io_operation_t)99)&&!outstanding&&!pending_task);
 }
 
@@ -715,6 +723,7 @@ static void check_wifi_operations(void)
 #include "probe_report_io_check.h"
 #include "mesh_report_io_check.h"
 #include "mesh_locate_report_io_check.h"
+#include "mesh_archive_io_check.h"
 
 int main(void)
 {
@@ -841,6 +850,7 @@ int main(void)
     check_wifi_interchange_operations();
     check_probe_operations();
     check_mesh_operations();
+    check_mesh_archive_operations();
     check_locate_operations();
     archive_io_last_job=UINT64_MAX;CHECK(cerberus_ble_archive_io_save(&input,&id)==ESP_ERR_INVALID_STATE&&id==0&&!pending_task);
     CHECK(cerberus_ble_archive_io_save_airtag_json(&json_input,&id)==ESP_ERR_INVALID_STATE&&id==0);

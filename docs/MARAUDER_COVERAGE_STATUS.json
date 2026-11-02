@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "checkpoint": "rev128-source",
-  "scope": "Source/workflow status through rev128. Rev126 remains the latest verified installed pair, with the owner's targeted acceptance of Recon Dashboard/Radar controls, ALERT wording and stable recognized-hint priority. Rev127 has a verified local package for exact Channel Survey ownership. Rev128 adds the dedicated passive Probe Sniff workflow; its final implementation, build/package and physical acceptance are tracked separately in DUAL_RADIO_REV128.md. The installed rev126 pair includes the earlier AP JSON/SSID text interchange work, but installation does not establish individual feature acceptance. A read-only GitHub comparison at 2026-11-02 00:22:40 UTC found develop identical to 79cc6bcba1db6679baee1dab2b0c1ad5010e6363. All mode and workstream status assignments remain unchanged; RECEIVE_REMAINING_GAPS.md records remaining scope. Full Marauder parity is unfinished.",
+  "checkpoint": "rev132-development",
+  "scope": "Rev131 is the latest verified installed pair. Its complete host/native matrix, package and sampled paired boot pass; the owner accepted Mesh menu-first entry and Back controls. Real Mesh reception, Locate and SD acceptance remain pending. Rev132 develops historical Mesh saved-map reopening; its source, build/package and physical acceptance are tracked separately in DUAL_RADIO_REV132.md. Prior targeted acceptance is retained in each checkpoint document; installation does not establish individual feature acceptance. A read-only GitHub develop resolution on 2026-11-02 again returned 79cc6bcba1db6679baee1dab2b0c1ad5010e6363. Review of its actual Packet Count handler corrected the WIFI_SCAN_PACKET_RATE remaining scope below. All mode/workstream status assignments remain unchanged; RECEIVE_REMAINING_GAPS.md records remaining scope. Full Marauder parity is unfinished.",
   "status_definitions": {
     "partial": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open.",
     "pending": "The distinct upstream workflow has no verified implementation at this checkpoint.",
@@ -947,10 +947,10 @@
       "symbol": "WIFI_SCAN_PACKET_RATE",
       "family": "wifi_channel_and_signal",
       "status": "partial",
-      "cerberus_evidence": "docs/FEATURE_PARITY.md",
-      "next_gap": "C5 measures 100 ms channel packet samples; add upstream continuous packet-rate timeline and live dual-band acceptance.",
-      "s3_role": "S3 schedules, graphs and stores channel/signal history, with 2.4 GHz observations when feasible.",
-      "c5_role": "C5 measures dual-band channel activity and target RSSI.",
+      "cerberus_evidence": "docs/RECEIVE_REMAINING_GAPS.md",
+      "next_gap": "Upstream Packet Count displays counts for selected AP/station identities, not merely a channel-rate graph. Cerberus has channel aggregates and selected-BSSID capture job counters, but lacks this distinct per-target counting view and its option parity. Exact target/role accounting, lifecycle, presentation and physical count accuracy remain open.",
+      "s3_role": "Existing channel/history presentation and frozen AP/client selection can support a dedicated selected-target counting view; that workflow is not yet implemented.",
+      "c5_role": "Existing channel monitoring and selected-BSSID capture provide related counts, but do not implement upstream's per-selected-identity Packet Count workflow.",
       "related_menu_entries": [],
       "related_cli_commands": [],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open."

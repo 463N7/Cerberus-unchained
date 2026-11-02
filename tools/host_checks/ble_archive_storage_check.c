@@ -36,6 +36,8 @@
 #include "archive_storage_types.h"
 #include "ble_archive.h"
 #include "wifi_archive_io_fixture.h"
+#include "mesh_archive.h"
+#include "mesh_report_fixture.h"
 #include "ble_archive_family_fixture.h"
 #include "ble_archive_response_fixture.h"
 #define CERBERUS_STORAGE_MOUNT_PATH "sdcard"
@@ -438,11 +440,13 @@ static void check_full_wifi_document(void)
 #include "wifi_interchange_storage_check.h"
 #include "probe_report_storage_check.h"
 #include "mesh_report_storage_check.h"
+#include "mesh_archive_storage_check.h"
 
 int main(void)
 {
     check_probe_report_storage();
     check_mesh_report_storage();
+    check_mesh_archive_storage();
     check_wifi_interchange_storage();
     check_full_v6_document();
     check_json_storage();

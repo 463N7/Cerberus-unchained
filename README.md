@@ -29,7 +29,7 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source version: `0.1.0-dev.rev131` (in development), targeting onboard
+**Current source version: `0.1.0-dev.rev132` (in development), targeting onboard
 C5 protocol firmware revision 73. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -61,14 +61,19 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 
 ## Development status
 
+Rev132 implements native Mesh saved maps: portable `.MSH` files, asynchronous
+SD save/open and historical observation browsing with CSV export. It is not
+built, packaged or installed yet; focused checks pass. See
+[the current checkpoint](docs/DUAL_RADIO_REV132.md).
+
 Rev131 corrects the Mesh entry flow: the Scan tile is named Mesh Detection and
 opens the five-tool menu before any individual tool. It also adds passive
 selected-source Locate with a compact C5 filter, independent S3 signal history
 and stopped CSV export. All 150 registered host suites and five native targets
 pass on 1,194 unchanged inputs; the matched development package verifies.
 Rev131 is installed on both chips, with C5 capability 73 online, mounted SD
-and two stable idle boot samples. Touchscreen navigation, real Mesh reception,
-Locate and SD report acceptance remain pending. See
+and two stable idle boot samples. The owner confirms menu-first navigation and
+Back work; real Mesh reception, Locate and SD report acceptance remain pending. See
 [the current checkpoint](docs/DUAL_RADIO_REV131.md) for scope and evidence.
 
 Rev130 adds a passive Mesh Detection receive path, typed address model,

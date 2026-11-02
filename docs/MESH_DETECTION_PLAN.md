@@ -19,8 +19,8 @@ The [rev131 implementation](DUAL_RADIO_REV131.md) corrects menu-first
 navigation and adds passive selected-source tracking with stopped CSV export.
 All 150 host suites, five native targets and matched-package checks pass. The
 paired rev131 update is installed and passes two sampled idle boot checks;
-touchscreen navigation, real reception, Locate and SD report acceptance remain
-pending. Protocol discovery, raw capture and historical map reopening remain
+the owner has accepted menu-first navigation and Back. Real reception, Locate
+and SD report acceptance remain pending. Protocol discovery, raw capture and historical map reopening remain
 later work; this plan does not
 imply that the complete CYM workflow is ported.
 

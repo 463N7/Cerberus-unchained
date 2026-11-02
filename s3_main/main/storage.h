@@ -209,6 +209,17 @@ esp_err_t cerberus_storage_wifi_archive_save(const uint8_t *data, size_t length,
     char *file_name, size_t capacity);
 esp_err_t cerberus_storage_wifi_archive_load(const char *relative_path,
     const char *file_name, uint8_t *data, size_t capacity, size_t *length);
+/* Native historical maps: exclusive Mxxxxx.TMP -> Mxxxxx.MSH publication
+ * under /CERBERUS/MESH. Load accepts only safe .MSH names, complete bounded
+ * data/EOF/close and clears output on failure. All caller ranges must be
+ * disjoint; alias rejection preserves every range unchanged. Never mounts or
+ * takes over SD. */
+#define CERBERUS_STORAGE_MESH_ARCHIVE_PATH "/CERBERUS/MESH"
+#define CERBERUS_STORAGE_MESH_ARCHIVE_MAX_BYTES 18332U
+esp_err_t cerberus_storage_mesh_archive_save(const uint8_t *data, size_t length,
+    char *file_name, size_t capacity);
+esp_err_t cerberus_storage_mesh_archive_load(const char *relative_path,
+    const char *file_name, uint8_t *data, size_t capacity, size_t *length);
 /* Bounded passive Probe Sniff evidence reports; legacy Wi-Fi report callers
  * retain their existing behavior. No automatic mount or USB/stream takeover. */
 #define CERBERUS_STORAGE_PROBE_REPORT_PATH "/CERBERUS/LOGS"

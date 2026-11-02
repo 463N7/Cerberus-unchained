@@ -7,6 +7,11 @@
 #include "ble_archive_io.h"
 #include "esp_heap_caps.h"
 
+/* Defined by the historical viewer included immediately after this header. */
+static esp_err_t mesh_archive_save_scan(const mesh_scan_t *scan, uint64_t *job);
+static void mesh_archive_files(void);
+static void mesh_archive_open_file(const char *path, const char *name);
+
 #define MESH_UI_ROWS 4U
 typedef struct {
     mesh_observation_selection_t value;
@@ -172,10 +177,10 @@ static void mesh_ui_tick(uint64_t now_ms, bool visible)
         else if (mesh_scan_released(&s->scan)) {
             s->save_pending = false;
             s->error = s->scan.frozen && s->scan.final_valid && !s->suppress_old ?
-                cerberus_ble_archive_io_save_mesh(&s->scan, &s->job) : ESP_ERR_INVALID_STATE;
+                mesh_archive_save_scan(&s->scan, &s->job) : ESP_ERR_INVALID_STATE;
             if (s->error == ESP_OK) {
                 s->job_cancelled = s->job_locate = false;
-                snprintf(s->message, sizeof(s->message), "SAVING FROZEN REPORT");
+                snprintf(s->message, sizeof(s->message), "SAVING FROZEN MAP");
             }
         }
     }
@@ -202,14 +207,15 @@ static void mesh_ui_tick(uint64_t now_ms, bool visible)
             char *name = s->job_locate ? s->locate_saved_name : s->saved_name;
             char *message = s->job_locate ? s->locate_message : s->message;
             bool publish = !s->closing && !(s->job_locate && s->locate_return);
-            if (publish && status.state == CERBERUS_BLE_ARCHIVE_IO_COMPLETE &&
-                status.operation == (s->job_locate ? CERBERUS_BLE_ARCHIVE_IO_SAVE_MESH_LOCATE : CERBERUS_BLE_ARCHIVE_IO_SAVE_MESH) &&
-                status.format == (s->job_locate ? CERBERUS_BLE_ARCHIVE_IO_FORMAT_MESH_LOCATE_REPORT : CERBERUS_BLE_ARCHIVE_IO_FORMAT_MESH_REPORT)) {
+            if (publish && status.state == CERBERUS_BLE_ARCHIVE_IO_COMPLETE && status.error == ESP_OK &&
+                (s->job_locate || status.result_ready) &&
+                status.operation == (s->job_locate ? CERBERUS_BLE_ARCHIVE_IO_SAVE_MESH_LOCATE : CERBERUS_BLE_ARCHIVE_IO_SAVE_MESH_ARCHIVE) &&
+                status.format == (s->job_locate ? CERBERUS_BLE_ARCHIVE_IO_FORMAT_MESH_LOCATE_REPORT : CERBERUS_BLE_ARCHIVE_IO_FORMAT_MESH_ARCHIVE)) {
                 snprintf(name, sizeof(s->saved_name), "%s", status.file_name);
                 snprintf(message, sizeof(s->message), "SAVED %.31s", status.file_name);
             } else if (publish) {
                 if (s->error == ESP_OK) s->error = ESP_ERR_INVALID_RESPONSE;
-                snprintf(message, sizeof(s->message), "REPORT SAVE FAILED");
+                snprintf(message, sizeof(s->message), "SAVE FAILED");
             }
             cerberus_ble_archive_io_release(s->job); s->job = 0U;
         }
@@ -263,20 +269,22 @@ static const mesh_observation_seen_t *mesh_ui_seen(const mesh_ui_painted_t *p)
         p->value.kind == MESH_OBSERVATION_SELECT_ADDRESS ? &p->value.record.address.seen :
         &p->value.record.edge.seen;
 }
-static esp_err_t mesh_ui_detail_draw(const mesh_ui_store_t *s)
+/* Pure copied evidence renderer, shared with the historical map viewer. */
+static esp_err_t mesh_ui_detail_value(const mesh_ui_painted_t *p, uint8_t raw_page,
+    esp_err_t error, bool historical, bool locate_enabled)
 {
-    const mesh_ui_painted_t *p = &s->selected;
     const mesh_observation_seen_t *seen = mesh_ui_seen(p);
     char line[64], a[24], b[24];
     bool address_detail = p->value.kind == MESH_OBSERVATION_SELECT_ADDRESS;
-    if (address_detail)
+    bool address_action = address_detail && !historical;
+    if (address_action)
         ESP_RETURN_ON_ERROR(mesh_ui_button(8, 376, 148, 36, "LOCATE",
-            mesh_ui_locate_allowed(s)), TAG, "mesh locate action");
-    if (s->error != ESP_OK) {
-        snprintf(line, sizeof(line), "ERROR: %.35s", esp_err_to_name(s->error));
+            locate_enabled), TAG, "mesh locate action");
+    if (error != ESP_OK) {
+        snprintf(line, sizeof(line), "ERROR: %.35s", esp_err_to_name(error));
         ESP_RETURN_ON_ERROR(draw_centered(340, line, UI_BAD, 1), TAG, "mesh detail error");
     }
-    ESP_RETURN_ON_ERROR(draw_centered(54, "FROZEN SELECTED OBSERVATION", UI_MUTED, 1), TAG, "mesh detail scope");
+    ESP_RETURN_ON_ERROR(draw_centered(54, historical ? "HISTORICAL SELECTED OBSERVATION" : "FROZEN SELECTED OBSERVATION", UI_MUTED, 1), TAG, "mesh detail scope");
     if (p->value.kind == MESH_OBSERVATION_SELECT_PAN) {
         mesh_ui_pan(&p->value.record.pan.key, line, sizeof(line));
         ESP_RETURN_ON_ERROR(draw_centered(77, line, UI_TEXT, 2), TAG, "mesh PAN");
@@ -335,7 +343,7 @@ static esp_err_t mesh_ui_detail_draw(const mesh_ui_store_t *s)
     if (privacy_addresses_masked())
         return draw_centered(280, "RAW BYTES HIDDEN / PRIVACY ENABLED", UI_MUTED, 1);
     for (unsigned row = 0U; row < 4U; ++row) {
-        unsigned offset = s->raw_page * 64U + row * 16U;
+        unsigned offset = raw_page * 64U + row * 16U;
         if (offset >= raw->length) break;
         size_t used = 0U;
         for (unsigned i = offset; i < raw->length && i < offset + 16U; ++i)
@@ -343,10 +351,16 @@ static esp_err_t mesh_ui_detail_draw(const mesh_ui_store_t *s)
                 i + 1U < raw->length && i < offset + 15U ? " " : "");
         ESP_RETURN_ON_ERROR(draw_centered((uint16_t)(266U + row * 20U), line, UI_TEXT, 1), TAG, "mesh raw");
     }
-    snprintf(line, sizeof(line), "RAW PAGE %u / %u", s->raw_page + 1U, (raw->length + 63U) / 64U);
+    snprintf(line, sizeof(line), "RAW PAGE %u / %u", raw_page + 1U, (raw->length + 63U) / 64U);
     ESP_RETURN_ON_ERROR(draw_centered(353, line, UI_MUTED, 1), TAG, "mesh raw page");
-    return raw->length > 64U ? draw_small_button(address_detail ? 164U : 80U, 376,
-        address_detail ? 148U : 160U, 36, "NEXT RAW PAGE") : ESP_OK;
+    return raw->length > 64U ? draw_small_button(address_action ? 164U : 80U, 376,
+        address_action ? 148U : 160U, 36, "NEXT RAW PAGE") : ESP_OK;
+}
+
+static esp_err_t mesh_ui_detail_draw(const mesh_ui_store_t *s)
+{
+    return mesh_ui_detail_value(&s->selected, s->raw_page, s->error, false,
+        mesh_ui_locate_allowed(s));
 }
 
 static void mesh_ui_locate_toggle(void)
@@ -457,6 +471,44 @@ static esp_err_t mesh_ui_locate_draw(const mesh_ui_store_t *s)
         !l->faulted && (l->accepted || l->frozen));
 }
 
+static esp_err_t mesh_ui_rows_draw(const mesh_observation_t *m, uint8_t group,
+    uint8_t page, uint8_t count, mesh_ui_painted_t rows[MESH_UI_ROWS], uint8_t *painted_out)
+{
+    char line[64];
+    *painted_out = 0U;
+    uint8_t painted = 0U;
+    for (unsigned slot = 0U; slot < MESH_UI_ROWS && page * MESH_UI_ROWS + slot < count; ++slot) {
+        uint8_t index = (uint8_t)(page * MESH_UI_ROWS + slot);
+        mesh_ui_painted_t *p = &rows[slot];
+        if (!mesh_observation_select(m, (mesh_observation_kind_t)group, index, &p->value)) return ESP_ERR_INVALID_RESPONSE;
+        if (group == 2U) {
+            const mesh_observation_edge_t *edge = &p->value.record.edge;
+            if (edge->source >= m->address_count || edge->destination >= m->address_count) return ESP_ERR_INVALID_RESPONSE;
+            p->source = m->addresses[edge->source].key; p->destination = m->addresses[edge->destination].key;
+        }
+        uint16_t y = (uint16_t)(145U + slot * 42U);
+        ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(8, y, 304, 39, UI_PANEL), TAG, "mesh row");
+        if (group == 0U) mesh_ui_pan(&p->value.record.pan.key, line, sizeof(line));
+        else if (group == 1U) mesh_ui_address(&p->value.record.address.key, line, sizeof(line));
+        else { char a[24], b[24]; mesh_ui_address(&p->source, a, sizeof(a)); mesh_ui_address(&p->destination, b, sizeof(b));
+            snprintf(line, sizeof(line), "%s -> %s", a, b); }
+        ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 4U, line, UI_TEXT, UI_PANEL, 1), TAG, "mesh row identity");
+        if (group == 1U) {
+            mesh_ui_pan(&p->value.record.address.key.pan, line, sizeof(line));
+            ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 15U, line, UI_MUTED, UI_PANEL, 1), TAG, "mesh address PAN");
+        } else if (group == 2U) {
+            mesh_ui_edge_context(p, line, sizeof(line));
+            ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 15U, line, UI_MUTED, UI_PANEL, 1), TAG, "mesh edge limits");
+        }
+        snprintf(line, sizeof(line), "%lu FRAMES / %s RAW", (unsigned long)mesh_ui_seen(p)->frames,
+            p->value.witness_valid ? "LATEST" : "NO LATEST");
+        ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 27U, line, UI_GOOD, UI_PANEL, 1), TAG, "mesh row facts");
+        ++painted;
+    }
+    *painted_out = painted;
+    return ESP_OK;
+}
+
 static esp_err_t mesh_ui_draw(void)
 {
     mesh_ui_store_t *s = mesh_ui;
@@ -482,7 +534,7 @@ static esp_err_t mesh_ui_draw(void)
     snprintf(line, sizeof(line), s->mode == CERBERUS_MESH_OBSERVATION_FIXED ? "CH %u +" : "250MS DWELL", s->channel);
     ESP_RETURN_ON_ERROR(mesh_ui_button(140, 70, 88, 30, line,
         settings && s->mode == CERBERUS_MESH_OBSERVATION_FIXED), TAG, "mesh channel");
-    ESP_RETURN_ON_ERROR(draw_small_button(236, 70, 76, 30, "TOOLS"), TAG, "mesh tools");
+    ESP_RETURN_ON_ERROR(mesh_ui_button(236, 70, 76, 30, "SAVED", settings), TAG, "mesh saved");
     const char *tabs[] = {"PAN CONTEXTS", "ADDRESSES", "TRAFFIC"};
     for (unsigned i = 0U; i < 3U; ++i) {
         uint16_t x = (uint16_t)(8U + i * 104U);
@@ -493,34 +545,8 @@ static esp_err_t mesh_ui_draw(void)
     s->count = s->suppress_old ? 0U : s->group == 0U ? m->pan_count : s->group == 1U ? m->address_count : m->edge_count;
     if (s->page * MESH_UI_ROWS >= s->count) s->page = 0U;
     uint8_t painted = 0U;
-    for (unsigned slot = 0U; slot < MESH_UI_ROWS && s->page * MESH_UI_ROWS + slot < s->count; ++slot) {
-        uint8_t index = (uint8_t)(s->page * MESH_UI_ROWS + slot);
-        mesh_ui_painted_t *p = &s->painted[slot];
-        if (!mesh_observation_select(m, (mesh_observation_kind_t)s->group, index, &p->value)) return ESP_ERR_INVALID_RESPONSE;
-        if (s->group == 2U) {
-            const mesh_observation_edge_t *edge = &p->value.record.edge;
-            if (edge->source >= m->address_count || edge->destination >= m->address_count) return ESP_ERR_INVALID_RESPONSE;
-            p->source = m->addresses[edge->source].key; p->destination = m->addresses[edge->destination].key;
-        }
-        uint16_t y = (uint16_t)(145U + slot * 42U);
-        ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(8, y, 304, 39, UI_PANEL), TAG, "mesh row");
-        if (s->group == 0U) mesh_ui_pan(&p->value.record.pan.key, line, sizeof(line));
-        else if (s->group == 1U) mesh_ui_address(&p->value.record.address.key, line, sizeof(line));
-        else { char a[24], b[24]; mesh_ui_address(&p->source, a, sizeof(a)); mesh_ui_address(&p->destination, b, sizeof(b));
-            snprintf(line, sizeof(line), "%s -> %s", a, b); }
-        ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 4U, line, UI_TEXT, UI_PANEL, 1), TAG, "mesh row identity");
-        if (s->group == 1U) {
-            mesh_ui_pan(&p->value.record.address.key.pan, line, sizeof(line));
-            ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 15U, line, UI_MUTED, UI_PANEL, 1), TAG, "mesh address PAN");
-        } else if (s->group == 2U) {
-            mesh_ui_edge_context(p, line, sizeof(line));
-            ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 15U, line, UI_MUTED, UI_PANEL, 1), TAG, "mesh edge limits");
-        }
-        snprintf(line, sizeof(line), "%lu FRAMES / %s RAW", (unsigned long)mesh_ui_seen(p)->frames,
-            p->value.witness_valid ? "LATEST" : "NO LATEST");
-        ESP_RETURN_ON_ERROR(cerberus_display_draw_text(14, y + 27U, line, UI_GOOD, UI_PANEL, 1), TAG, "mesh row facts");
-        ++painted;
-    }
+    ESP_RETURN_ON_ERROR(mesh_ui_rows_draw(m, s->group, s->page, s->count,
+        s->painted, &painted), TAG, "mesh rows");
     if (!s->count) ESP_RETURN_ON_ERROR(draw_centered(220,
         s->suppress_old ? "WAITING FOR THIS SESSION'S EVIDENCE" : "NO RETAINED OBSERVATIONS", UI_MUTED, 1), TAG, "mesh empty");
     snprintf(line, sizeof(line), "PAN %u/16 / ADDR %u/64 / TRAFFIC %u/64", s->suppress_old ? 0U : m->pan_count,
@@ -538,7 +564,7 @@ static esp_err_t mesh_ui_draw(void)
     if (c5_status.firmware_version < CERBERUS_MESH_OBSERVATION_MIN_FIRMWARE)
         snprintf(line, sizeof(line), "C5 FIRMWARE %u REQUIRED", CERBERUS_MESH_OBSERVATION_MIN_FIRMWARE);
     else if (error != ESP_OK) snprintf(line, sizeof(line), "ERROR: %.35s", esp_err_to_name(error));
-    else if (s->job || s->save_pending) snprintf(line, sizeof(line), "%s", s->job ? "SD WRITING / PLEASE WAIT" : "STOPPING FOR FINAL REPORT");
+    else if (s->job || s->save_pending) snprintf(line, sizeof(line), "%s", s->job ? "SD WRITING / PLEASE WAIT" : "STOPPING FOR FINAL MAP");
     else if (s->message[0]) snprintf(line, sizeof(line), "%s", s->message);
     else if (m->counters.saturated && !s->suppress_old) snprintf(line, sizeof(line), "COUNTERS SATURATED / VALUES ARE BOUNDS");
     else if (m->counters.witness_omissions && !s->suppress_old) snprintf(line, sizeof(line), "RAW OMIT %lu / PARSE %lu+%lu",
@@ -557,7 +583,7 @@ static esp_err_t mesh_ui_draw(void)
     bool save_enabled = !s->closing && !s->job && !s->save_pending && !s->start_pending &&
         !s->scan.faulted && !s->suppress_old && (s->scan.accepted || s->scan.frozen);
     ESP_RETURN_ON_ERROR(cerberus_ui_widget_draw_button((cerberus_ui_rect_t){216, 382, 96, 36},
-        s->job || s->save_pending ? "SAVING" : s->saved_name[0] ? "OPEN CSV" : held ? "STOP & SAVE" : "SAVE REPORT",
+        s->job || s->save_pending ? "SAVING" : s->saved_name[0] ? "OPEN MAP" : held ? "STOP & SAVE" : "SAVE MAP",
         1U, save_enabled, UI_WIDGET_THEME), TAG, "mesh save");
     if (!s->closing && !s->save_pending && !s->job) s->painted_count = painted;
     return ESP_OK;
@@ -581,7 +607,9 @@ static void mesh_ui_tap(uint16_t x, uint16_t y)
     }
     bool idle = mesh_scan_released(&s->scan) && !s->start_pending && !s->job && !s->save_pending;
     if (y >= 70U && y < 100U) {
-        if (x >= 236U && x < 312U) mesh_ui_close(true);
+        if (idle && x >= 236U && x < 312U) {
+            mesh_ui_close(false); mesh_archive_files();
+        }
         else if (idle && x >= 8U && x < 132U) s->mode ^= 1U;
         else if (idle && x >= 140U && x < 228U && s->mode == CERBERUS_MESH_OBSERVATION_FIXED)
             s->channel = s->channel == 26U ? 11U : (uint8_t)(s->channel + 1U);
@@ -602,9 +630,8 @@ static void mesh_ui_tap(uint16_t x, uint16_t y)
         else if (x >= 216U && x < 312U && !s->job && !s->save_pending && !s->scan.faulted) {
             if (s->saved_name[0]) {
                 char name[CERBERUS_STORAGE_NAME_MAX]; memcpy(name, s->saved_name, sizeof(name));
-                mesh_ui_close(false); current_page = UI_PAGE_FILES;
-                snprintf(file_path, sizeof(file_path), "%s", CERBERUS_STORAGE_MESH_REPORT_PATH);
-                open_text_file(name);
+                mesh_ui_close(false);
+                mesh_archive_open_file(CERBERUS_STORAGE_MESH_ARCHIVE_PATH, name);
             } else if (!s->start_pending && !s->suppress_old && (s->scan.accepted || s->scan.frozen)) {
                 s->save_pending = true; s->error = ESP_OK; s->painted_count = 0U;
                 mesh_scan_stop(&s->scan);
