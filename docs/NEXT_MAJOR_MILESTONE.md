@@ -4,8 +4,12 @@ The rev128 milestone and requested PR update were completed at `7248b50`, and
 the goal was paused. The owner resumed the goal on 2026-11-02. The historical
 stopping conditions below describe that completed checkpoint, not a new pause.
 
-Current priorities are to correct the observed CI failures, fix the verified
-802.15.4 receive-continuity defect, and then implement
+The CI correction is published at `fb37720`; its installer and full Ubuntu jobs
+passed, while Windows jobs were still running at the local rev129 checkpoint.
+The 802.15.4 receive-continuity fix has a verified local rev129 package: 139 host
+suites and five native targets on 1,145 unchanged inputs, with unchanged linked
+fixed RAM on both chips. It is not flashed or published. See
+[rev129](DUAL_RADIO_REV129.md). The next feature priority is to implement
 [Scan → Mesh Detection](MESH_DETECTION_PLAN.md) as requested. GPS and the six-C5
 backboard are deferred. The broader Marauder feature and dual-processor
 optimization objective remains active and unfinished. Hardware acceptance is

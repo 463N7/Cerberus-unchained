@@ -6,6 +6,13 @@ does not replace that objective. GPS, the ATGM336H and the six-C5 expansion boar
 are deferred. The first implementation must work with the onboard S3 and C5.
 This document is a plan and source inventory, not an implemented-feature claim.
 
+The receive prerequisite now has a verified local
+[rev129 candidate](DUAL_RADIO_REV129.md): 139 host suites and five native targets
+pass, including the sustained 802.15.4 regression. Physical reception acceptance
+remains open. Mesh Detection itself is not in that candidate or on the installed
+device. The next implementation starts with typed MAC parsing, then exact-session
+C5 transport, the S3 observation model, interface and historical storage.
+
 ## Reference baseline
 
 The supplied [CYM SD asset repository](https://github.com/JimGat/CYM-SD-Assets)
@@ -126,3 +133,29 @@ encrypted payload remaining unknown, sustained receive and overflow handling,
 callback/Stop overlap, lost replies/reboot, frozen selection, and faithful
 save/reopen. Physical tests must separately demonstrate real Zigbee/Thread
 traffic and repeatable handoffs to Wi-Fi/BLE. No GPS is required for this phase.
+
+## First implementation contract
+
+The first useful slice is Networks / Addresses / Observed Traffic, frozen
+inspection and save/reopen. C5 copies bounded raw observations; S3 parses and
+builds the model. Proposed initial caps are 16 optional C5 queue slots, and S3
+PSRAM stores for 16 PAN contexts, 64 addresses, 64 edges and 64 witnesses. These
+are design bounds, not native allocation measurements. A destination is only an
+addressed endpoint until heard as a source; RSSI/LQI belong to the received
+transmitter. Broadcast and addressless ACKs must not create invented peer links.
+
+The existing SPI payload is 22 bytes. A proposed session64/sequence32/part8
+envelope leaves nine bytes per read. A 139-byte raw observation would need 16
+reads plus Peek and ACK, before status/retry overhead. Keep Stop/lease work ahead
+of optional readout and expose queue/model losses. Measure actual throughput
+before selecting a compact projection or promising coverage. Preserve one
+immutable frame until exact acknowledgement, and do not count retries twice.
+
+Protocol references for the independent MAC parser are ESP-IDF v6.0.1 and its
+OpenThread submodule `9b887f6bd1437170fc9bcb726f32185ccb3cb841`. In 2015 frames,
+extended-to-extended addressing does not justify the legacy compressed-PAN
+equality shortcut. Preserve explicit, compressed-same and unknown PAN origins;
+bound auxiliary security, MIC and Header IE fields, and leave encrypted payload
+opaque. Parsing a clear header does not establish authentication or Thread/
+Matter classification. Future code must retain appropriate source attribution
+if any licensed implementation is adapted rather than independently written.

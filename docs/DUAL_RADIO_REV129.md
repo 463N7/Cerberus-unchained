@@ -36,9 +36,33 @@ receipts did not include this standalone worker suite and remain historical
 evidence; they do not validate the expanded registry. Independent source review
 found no remaining blocker for this narrow fix.
 
-Focused checks pass. Full host and native validation and matched packaging are
-pending for this candidate. Rev126 remains the last verified installation;
-rev129 has not been flashed or accepted on real 802.15.4 traffic.
+Final local validation passes at source commit
+`9fb8b0572c080a8528ef2bcee501bcc43a6b7107`: all 139 registered host suites and all
+five native targets use the same 1,145 unchanged inputs. The 21 shard-selection
+and aggregate rejection tests also pass. Host checks use Python 3.14.2 and
+Zig 0.14.1; native builds use the existing PlatformIO 6.2.0 / IDF 6.0.1 toolchain.
+The S3 READY/console and C5 link gates pass. These are local results; the hosted
+rev128 CI follow-up is a different source revision and execution.
+
+The matched development package is
+`dist/cerberus-unchained-0.1.0-dev.rev129-20261102T190446Z`.
+Its three application images match the retained native matrix, all 20 checksum
+entries verify, and read-only web-package verification passes chip headers,
+partitions and image bounds. The Marauder notice remains included. Manifest
+SHA-256 is `ad2c73790c953fdf3660bfce898c0fbc47a72556f0a481f89ca87c4dc76ed1d9`;
+package-source SHA-256 is
+`a687281eb1f506d73f2093eef5504bec036314fb21a6d00fd7f5915b41bb563a`.
+
+Compared with the retained rev128 images, linked fixed data/BSS is unchanged on
+both chips. No worker, observation bank or task allocation was added. This is
+not a runtime heap, stack high-water or throughput measurement. Local evidence
+is retained in `artifacts/rev129-validation/local-milestone.json`, with bound host
+logs, native reports/ELFs and package manifest. Earlier 138-suite evidence is
+retained separately in `artifacts/rev129-initial-host-evidence`.
+
+Rev126 remains the last verified installation; rev129 has not been flashed or
+accepted on real 802.15.4 traffic. No public image or web-flasher release was
+selected. This checkpoint does not close the broader Marauder parity gaps.
 
 This fix does not establish lossless reception, packet timing, mesh membership
 or topology. Existing finite sweeps still drain rather than exposing a Stop

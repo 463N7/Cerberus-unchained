@@ -66,7 +66,10 @@ Activity sweeps: the receiver remains awake after each frame until the channel
 dwell ends. The host regression reproduces the previous first-frame-only
 behavior and checks later frames, passive ACK settings and cleanup. Both
 worker fixtures are registered together in the rev129 139-suite host registry.
-See [the receive checkpoint](docs/DUAL_RADIO_REV129.md) for validation and limits.
+All 139 host suites and five native targets pass on 1,145 unchanged inputs; the
+matched local package verifies, with unchanged linked fixed RAM on both chips.
+Rev129 has not been installed. See
+[the receive checkpoint](docs/DUAL_RADIO_REV129.md) for validation and limits.
 [Mesh Detection](docs/MESH_DETECTION_PLAN.md) is the next planned receive
 workflow; it is not implemented by this fix and requires no GPS.
 
