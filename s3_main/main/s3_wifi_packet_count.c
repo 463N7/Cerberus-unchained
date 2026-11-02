@@ -149,7 +149,11 @@ static void count_worker(void *arg)
     for(;;){
         portENTER_CRITICAL(&count_lock);count_expire_locked(c,esp_timer_get_time());
         bool waiting=c->state==CERBERUS_PACKET_COUNT_STAGING&&!c->stop;
-        portEXIT_CRITICAL(&count_lock);if(!waiting)break;vTaskDelay(pdMS_TO_TICKS(25));
+        portEXIT_CRITICAL(&count_lock);
+        if(!waiting){
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(25));
     }
     esp_err_t e=ESP_OK;
     if(!count_cancelled(c))e=cerberus_s3_wifi_prepare(CERBERUS_S3_WIFI_COUNT);
@@ -204,8 +208,13 @@ static void count_worker(void *arg)
         }
     }
     portENTER_CRITICAL(&count_lock);count_first_error(c,e);count_stop_locked(c,esp_timer_get_time());portEXIT_CRITICAL(&count_lock);
-    for(;;){portENTER_CRITICAL(&count_lock);bool inflight=c->inflight!=0;portEXIT_CRITICAL(&count_lock);
-        if(!inflight)break;vTaskDelay(pdMS_TO_TICKS(1));}
+    for(;;){
+        portENTER_CRITICAL(&count_lock);bool inflight=c->inflight!=0;portEXIT_CRITICAL(&count_lock);
+        if(!inflight){
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
     do{
         e=count_cleanup(c);
         if(e!=ESP_OK){portENTER_CRITICAL(&count_lock);count_first_error(c,e);portEXIT_CRITICAL(&count_lock);vTaskDelay(pdMS_TO_TICKS(250));}
@@ -221,7 +230,10 @@ static void count_worker(void *arg)
         bool dispose=c->release&&!count_command&&!c->inflight;
         if(dispose)count_context=NULL;
         portEXIT_CRITICAL(&count_lock);
-        if(dispose)break;vTaskDelay(pdMS_TO_TICKS(25));
+        if(dispose){
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(25));
     }
     heap_caps_free(c->raw);heap_caps_free(c);vTaskDelete(NULL);
 }
