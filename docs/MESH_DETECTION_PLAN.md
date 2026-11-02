@@ -13,12 +13,15 @@ remains open. Mesh Detection itself is not in the rev129 candidate. The
 [rev130 implementation](DUAL_RADIO_REV130.md) now contains typed MAC
 parsing, exact-session C5 transport and the S3 observation model/controller.
 Interface and SD report integration pass the complete local host/native matrix
-and package checks. The paired rev130 update is installed and passes sampled
-idle boot checks; Mesh feature acceptance on the device remains pending.
-The next [rev131 implementation](DUAL_RADIO_REV131.md) corrects menu-first
+and package checks. The paired rev130 update passed sampled idle boot checks
+before the rev131 update below; Mesh feature acceptance remains pending.
+The [rev131 implementation](DUAL_RADIO_REV131.md) corrects menu-first
 navigation and adds passive selected-source tracking with stopped CSV export.
-Its full build and hardware acceptance are pending. Protocol discovery, raw
-capture and historical map reopening remain later work; this plan does not
+All 150 host suites, five native targets and matched-package checks pass. The
+paired rev131 update is installed and passes two sampled idle boot checks;
+touchscreen navigation, real reception, Locate and SD report acceptance remain
+pending. Protocol discovery, raw capture and historical map reopening remain
+later work; this plan does not
 imply that the complete CYM workflow is ported.
 
 ## Reference baseline

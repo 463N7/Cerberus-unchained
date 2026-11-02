@@ -1,8 +1,10 @@
 # Rev131: Mesh menu navigation and passive selected-source Locate
 
-Development source; full host/native matrix, package and physical acceptance
-are pending. The paired rev130 image remains installed. This original Cerberus
-implementation uses CYM as a workflow reference; see the
+The matched rev131 development package passes the complete local host/native
+matrix and package verification and is installed on both chips. Paired
+application boot and sampled idle checks pass; touchscreen and Mesh feature
+acceptance remain pending. This original Cerberus implementation uses CYM as a
+workflow reference; see the
 [reference and scope plan](MESH_DETECTION_PLAN.md). It does not claim complete
 CYM or Marauder parity.
 
@@ -63,8 +65,8 @@ Invalid clocks revoke the displayed age bound. The two chips' uptime clocks
 remain separate; the S3 pre-PEEK anchor yields a conservative upper age bound,
 not a synchronized timestamp or proof of continuous reception.
 
-SAVE REPORT requires a stopped projection, matching final STATUS and confirmed
-release. It copies an immutable snapshot before handing work to the shared SD
+STOP & SAVE / SAVE LOCATE requires a stopped projection, matching final STATUS
+and confirmed release. It copies an immutable snapshot before handing work to the shared SD
 worker. `CERBERUS_MESH_LOCATE_CSV,1` is separate from the survey CSV schema and
 uses `/CERBERUS/LOGS/Mxxxxx.CSV` names. It includes the selected typed source,
 source counters/error, retained/coalesced history, age-at-anchor bound and final
@@ -79,10 +81,63 @@ fabric, infer distance/bearing, or reopen a historical map. No GPS is required.
 
 ## Validation record
 
-Focused production-bound host fixtures currently cover C5 receive/filtering,
+Production-bound host fixtures cover C5 receive/filtering,
 S3 controller and SPI adapter, source identity/raw validation, lost responses,
 clock failure, session cleanup, CSV and archive lifecycles, UI navigation and
-the preserved survey/Locate handoff. The complete suite registry is expanded
-from 146 to 150. Native resource measurements and the matched build/package
-receipt will be recorded after the full matrix passes. Host structure sizes
-are not native resource measurements or physical acceptance.
+the preserved survey/Locate handoff. The actual Scan entry, five-tool menu and
+shared Back footer are rendered and checked by the host UI fixture.
+
+At built source `6f7750ae58a3a9325f31a3384625c891923c039b`:
+
+- All 150 registered host suites and five native targets pass with 1,194
+  unchanged input hashes across the two matrices.
+- The matched development package is
+  `dist/cerberus-unchained-0.1.0-dev.rev131-20261102T212533Z`. All 22 checksum
+  entries and the read-only web-export verification pass. No public binary
+  release is selected or exported.
+- The final native C5 IRAM check passes for twelve project functions and two
+  DRAM lookup tables; its decoder has 151 passing self-test cases. This remains
+  a bounded placement/control-flow check, not a complete vendor call graph or
+  interrupt latency proof.
+- Earlier failed runs are retained separately. They caught an outdated footer
+  extractor, missing central-enum command entries and Windows/RISC-V decoder
+  cases. The final matrix was rerun after those corrections.
+
+Native linked fixed data/BSS totals are 169,420 bytes on S3 (16 fewer than
+rev130) and 83,400 bytes on C5 (40 more). Those deltas exclude executable IRAM
+and optional heap allocations and are not the total runtime RAM cost. C5's
+448-byte Locate context and 2,624-byte survey context are mutually exclusive.
+S3's optional Mesh UI, Locate controller and Locate report snapshot total
+42,280 bytes when overlapping. A retained larger survey-report operation can
+raise the conservative overlap to 143,784 bytes. These measurements establish
+allocation sizes, not sufficient headroom under every loaded workflow.
+
+## Installation and remaining acceptance
+
+Fresh verified rev130 backups were captured before installing the matched
+bridge, C5 and S3 images. Every programmed image hash verified. Both captured
+application samples report rev131, C5 capability 73 online, mounted SD and
+idle radio state. The samples are 200.52 seconds apart: both chip uptimes
+advance, C5 boot count stays at one and SPI exchanges increase from 256 to
+1,117. No additional listed SPI error or fallback counters accrue. Four
+initial-ready timeouts/fallbacks are present at boot and remain unchanged;
+mutex, falling/high-ready and driver error counters stay zero.
+
+At both samples S3 internal free memory is 137,680 bytes with a 94,208-byte
+largest block; PSRAM free is 1,427,552 bytes. C5 snapshot free memory is 53,636
+bytes, 2,480 fewer than the rev130 baseline. The console's observed stack low
+water changes from 2,016 to 1,280 bytes during these captures; it is an observed
+minimum, not a worst-case stack guarantee.
+
+Local evidence is retained in `artifacts/rev131-validation/` and
+`artifacts/device-rev131/`. The installation receipt SHA-256 is
+`d5828a331491e13f61a14b5ec079049c177763bc8a925f15f1bbe7209e17ef8e`.
+The earlier immutable `local-milestone.json` correctly records the package
+checkpoint before installation; the separate installation receipt records the
+subsequent paired update.
+
+The owner still needs to check menu-first navigation and Back on the actual
+touchscreen, followed by Mesh Start/Stop and a normal Wi-Fi scan. Real selected
+source reception, Locate handoff/history, stopped SD save/reopen and sustained
+loaded operation are also unverified. Sampled idle boot and software checks
+do not establish those behaviors or complete Mesh/CYM/Marauder parity.

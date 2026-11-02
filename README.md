@@ -64,16 +64,20 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 Rev131 corrects the Mesh entry flow: the Scan tile is named Mesh Detection and
 opens the five-tool menu before any individual tool. It also adds passive
 selected-source Locate with a compact C5 filter, independent S3 signal history
-and stopped CSV export. Focused host checks pass; the complete host/native
-matrix and hardware acceptance are pending. Rev130 remains installed. See
+and stopped CSV export. All 150 registered host suites and five native targets
+pass on 1,194 unchanged inputs; the matched development package verifies.
+Rev131 is installed on both chips, with C5 capability 73 online, mounted SD
+and two stable idle boot samples. Touchscreen navigation, real Mesh reception,
+Locate and SD report acceptance remain pending. See
 [the current checkpoint](docs/DUAL_RADIO_REV131.md) for scope and evidence.
 
 Rev130 adds a passive Mesh Detection receive path, typed address model,
 exact-session transfer, PAN/address/traffic views and stopped SD reports.
 All 146 registered host suites and five native targets pass on 1,174 unchanged
 inputs. The matched rev130 development package and native resource audit also
-pass. The paired rev130 update is installed, with C5 capability 72 online,
-mounted SD and two stable idle boot samples. Mesh touchscreen, real reception
+pass. The paired rev130 update was installed, with C5 capability 72 online,
+mounted SD and two stable idle boot samples, before the rev131 update above.
+Mesh touchscreen, real reception
 and loaded-operation acceptance remain pending. See
 [the Mesh foundation](docs/DUAL_RADIO_REV130.md) for its observation scope,
 measured allocation costs and remaining work. These software checks do not
