@@ -48,6 +48,7 @@ esp_err_t esp_ieee802154_sleep(void);
 esp_err_t esp_ieee802154_set_channel(uint8_t);
 esp_err_t esp_ieee802154_set_coordinator(bool);
 esp_err_t esp_ieee802154_set_promiscuous(bool);
+esp_err_t esp_ieee802154_set_rx_when_idle(bool);
 esp_err_t esp_ieee802154_receive(void);
 esp_err_t esp_ieee802154_receive_handle_done(uint8_t*);
 esp_err_t esp_ieee802154_energy_detect(uint32_t);
@@ -58,9 +59,10 @@ for name in ["esp_attr.h", "esp_ieee802154.h", "esp_log.h", "freertos/FreeRTOS.h
     path = out / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('#include "fake_worker_platform.h"\n')
-exe = out / "radio-worker-check.exe"
-subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
-    "-I", str(out), "-I", str(root / "tools/host_checks/stubs"), "-I", str(root / "shared"),
-    "-I", str(root / "c5_firmware/main"), str(root / "tools/host_checks/radio_worker_check.c"),
-    "-o", str(exe)], check=True)
-subprocess.run([str(exe)], check=True)
+for name in ("radio_worker_check", "radio_receive_continuity_check"):
+    exe = out / (name + ".exe")
+    subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror",
+        "-I", str(out), "-I", str(root / "tools/host_checks/stubs"), "-I", str(root / "shared"),
+        "-I", str(root / "c5_firmware/main"), str(root / "tools/host_checks" / (name + ".c")),
+        "-o", str(exe)], check=True)
+    subprocess.run([str(exe)], check=True)

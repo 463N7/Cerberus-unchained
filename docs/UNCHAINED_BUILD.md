@@ -2,7 +2,7 @@
 
 Unchained is experimental firmware built on its rev81 foundation, with the
 accumulated dual-radio observation, analysis, storage and Wardriving additions.
-The source version comes from the checked-in CMake configuration; rev128 targets
+The source version comes from the checked-in CMake configuration; rev129 targets
 onboard C5 capability revision 71. A version label, host check or
 compiler result does not establish on-device acceptance.
 

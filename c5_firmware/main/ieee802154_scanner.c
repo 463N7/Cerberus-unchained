@@ -425,6 +425,11 @@ static void run_beacon_scan(void)
     if (err == ESP_OK) {
         err = esp_ieee802154_set_promiscuous(true);
     }
+    if (err == ESP_OK) {
+        /* IDF otherwise sleeps after the first received frame. Promiscuous
+         * mode disables automatic ACKs; keep listening for this whole dwell. */
+        err = esp_ieee802154_set_rx_when_idle(true);
+    }
     beacon_scan_active = err == ESP_OK;
 
     for (uint8_t index = 0;
@@ -469,6 +474,11 @@ static void run_beacon_scan(void)
     }
 
     beacon_scan_active = false;
+    /* Clear continued reception on every exit, including setup failure. */
+    esp_err_t idle_err = esp_ieee802154_set_rx_when_idle(false);
+    if (err == ESP_OK && idle_err != ESP_OK) {
+        err = idle_err;
+    }
     esp_err_t promiscuous_err = esp_ieee802154_set_promiscuous(false);
     if (err == ESP_OK && promiscuous_err != ESP_OK) {
         err = promiscuous_err;
@@ -488,6 +498,11 @@ static void run_activity_scan(void)
     }
     if (err == ESP_OK) {
         err = esp_ieee802154_set_promiscuous(true);
+    }
+    if (err == ESP_OK) {
+        /* IDF otherwise sleeps after the first received frame. Promiscuous
+         * mode disables automatic ACKs; keep listening for this whole dwell. */
+        err = esp_ieee802154_set_rx_when_idle(true);
     }
     activity_scan_active = err == ESP_OK;
 
@@ -520,6 +535,11 @@ static void run_activity_scan(void)
     }
 
     activity_scan_active = false;
+    /* Clear continued reception on every exit, including setup failure. */
+    esp_err_t idle_err = esp_ieee802154_set_rx_when_idle(false);
+    if (err == ESP_OK && idle_err != ESP_OK) {
+        err = idle_err;
+    }
     esp_err_t promiscuous_err = esp_ieee802154_set_promiscuous(false);
     if (err == ESP_OK && promiscuous_err != ESP_OK) {
         err = promiscuous_err;

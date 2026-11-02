@@ -29,7 +29,7 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source version: `0.1.0-dev.rev128`, targeting onboard
+**Current source version: `0.1.0-dev.rev129`, targeting onboard
 C5 protocol firmware revision 71. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
@@ -61,6 +61,14 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 
 ## Development status
 
+Rev129 corrects receive continuity in the existing passive 802.15.4 Beacon and
+Activity sweeps: the receiver remains awake after each frame until the channel
+dwell ends. The host regression reproduces the previous first-frame-only
+behavior and checks later frames, passive ACK settings and cleanup. See
+[the receive checkpoint](docs/DUAL_RADIO_REV129.md) for validation and limits.
+[Mesh Detection](docs/MESH_DETECTION_PLAN.md) is the next planned receive
+workflow; it is not implemented by this fix and requires no GPS.
+
 Rev128 adds a dedicated passive Probe Sniff workflow: bounded request,
 transmitter and network-name lists, stable details, incremental transfer and
 explicit stopped-evidence saving to SD. C5 owns passive reception while S3
@@ -70,8 +78,8 @@ five native targets and linked resource checks pass on 1,142 unchanged inputs;
 status. The matched local candidate and package verification also pass.
 Fixed data/BSS is unchanged on S3 and grows by 48 bytes on C5; optional
 capture, UI and save allocations are measured separately. Rev126 remains
-installed. This major milestone is the requested checkpoint for updating
-existing Unchained PR #1 and pausing the unfinished overall port.
+installed. This major milestone completed the requested PR #1 update and pause
+checkpoint; the owner resumed the unfinished overall port on November 2.
 
 Rev127 corrects Channel Survey ownership when C5 restarts
 between preflight and Start. The session-bound control/readout and

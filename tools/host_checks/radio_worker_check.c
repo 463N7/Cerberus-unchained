@@ -48,6 +48,7 @@ esp_err_t esp_ieee802154_sleep(void){return fail_sleep?ESP_FAIL:ESP_OK;}
 esp_err_t esp_ieee802154_set_channel(uint8_t c){assert(c>=11&&c<=26);return fail_channel?ESP_FAIL:ESP_OK;}
 esp_err_t esp_ieee802154_set_coordinator(bool v){assert(!v);return ESP_OK;}
 esp_err_t esp_ieee802154_set_promiscuous(bool v){(void)v;return ESP_OK;}
+esp_err_t esp_ieee802154_set_rx_when_idle(bool v){(void)v;return ESP_OK;}
 esp_err_t esp_ieee802154_receive(void){++receives;return ESP_OK;}
 esp_err_t esp_ieee802154_receive_handle_done(uint8_t *f){(void)f;return ESP_OK;}
 esp_err_t esp_ieee802154_energy_detect(uint32_t n){assert(n==3125);++detects;esp_ieee802154_energy_detect_done(-77);return ESP_OK;}
