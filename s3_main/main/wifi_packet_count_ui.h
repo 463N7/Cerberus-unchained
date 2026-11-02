@@ -290,7 +290,8 @@ static esp_err_t wifi_packet_count_draw(void)
                 uint64_t current=(uint64_t)v->published.recording.dropped_full+v->published.recording.dropped_other;
                 if(!v->committed){if(UINT64_MAX-dropped<current)dropped=UINT64_MAX;else dropped+=current;}
                 wifi_count_short(dropped,number,sizeof(number));
-                snprintf(line,23U,"Q%u / DROP %.11s",v->published.recording.pending,number);
+                /* wifi_count_short emits at most ten characters. */
+                snprintf(line,23U,"Q%u / DROP %.10s",v->published.recording.pending,number);
             }
             ESP_RETURN_ON_ERROR(cerberus_display_draw_text(x+6U,94,line,UI_MUTED,UI_PANEL,1),TAG,"count queue losses");
         }
@@ -341,7 +342,8 @@ static esp_err_t wifi_packet_count_draw(void)
         char a[12],b[12],c[12],d[12];
         wifi_count_small32(s->recording.source[0].written,a,sizeof(a));wifi_count_small32(s->recording.source[1].written,b,sizeof(b));
         wifi_count_small32(s->recording.source[0].discarded,c,sizeof(c));wifi_count_small32(s->recording.source[1].discarded,d,sizeof(d));
-        snprintf(line,sizeof(line),"S3/C5 W:%s/%s %s:%s/%s",a,b,
+        /* Each compact uint32 counter is at most seven characters. */
+        snprintf(line,sizeof(line),"S3/C5 W:%.7s/%.7s %.5s:%.7s/%.7s",a,b,
             s->recording.source[0].loss_unknown||s->recording.source[1].loss_unknown?"LOSS?":"LOST",c,d);
     }
     else if (s->scan.fallback) snprintf(line,sizeof(line),"C5 ALL CHANNELS / S3 UNAVAILABLE");
