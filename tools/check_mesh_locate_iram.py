@@ -20,6 +20,8 @@ PROJECT = ('mesh_mac_parse', 'overlaps', 'take', 'little_value', 'read_pan',
 CONTROL = {'j', 'jr', 'jal', 'jalr', 'call', 'tail', 'b', 'beq', 'bne', 'blt',
            'bge', 'bltu', 'bgeu', 'beqz', 'bnez', 'blez', 'bgez', 'bltz', 'bgtz',
            'bgt', 'ble', 'bgtu', 'bleu'}
+MEMORY = {'lb', 'lbu', 'lh', 'lhu', 'lw', 'lwu', 'sb', 'sh', 'sw', 'lwsp', 'swsp'}
+CONSTANT_ANNOTATION = {'li', 'lui', 'addi'}
 # This gate deliberately rejects unreviewed ISA spellings instead of assuming
 # they cannot transfer control. Objdump may print compressed opcodes either as
 # their normal aliases or with the c. prefix; both forms use the same policy.
@@ -43,7 +45,7 @@ def decode_instructions(text: str, start: int, size: int) -> list[dict]:
     cursor = start
     decoded = []
     for line in text.splitlines():
-        if not re.match(r'^\s*[0-9a-fA-F]+:', line):
+        if not re.match(r'^\s*[0-9a-fA-F]+:\s', line):
             continue
         match = re.fullmatch(r'\s*([0-9a-fA-F]+):\s+([0-9a-fA-F]{4}|[0-9a-fA-F]{8})'
                              r'\s+([a-z][a-z0-9.]*)\s*(.*?)\s*', line)
@@ -77,6 +79,30 @@ def decode_instructions(text: str, start: int, size: int) -> list[dict]:
     return decoded
 
 
+def internal_symbol(symbol: dict) -> bool:
+    return symbol['section'].startswith(('.iram', '.dram')) or (
+        symbol['section'] == '*ABS*' and 0x40000000 <= symbol['address'] < 0x40080000)
+
+
+def reference_symbol(instruction: dict, address: int, name: str, symbols: list[dict]) -> dict | None:
+    candidates = [s for s in symbols if s['address'] == address or
+                  (s['size'] and s['address'] <= address < s['address'] + s['size'])]
+    op = instruction['op'].removeprefix('c.')
+    if not candidates and not instruction['control'] and op in CONSTANT_ANNOTATION:
+        # RISC-V objdump labels synthesized integer constants with the closest
+        # symbol, e.g. INT32_MAX as CACHE+0x1ff37fff after an addi. This is not a
+        # memory access. Only these explicit constant-forming opcodes qualify;
+        # no arbitrary instruction is exempt. Real object-address annotations have candidates
+        # and must resolve internally below; actual loads/stores never bypass.
+        return None
+    if instruction['control']:
+        candidates = [s for s in candidates if s['function']]
+    chosen = [s for s in candidates if s['name'] == name.split('+')[0]] or candidates
+    if not chosen or not any(internal_symbol(s) for s in chosen):
+        raise RuntimeError('Non-internal/unresolved callback reference: ' + name)
+    return next(s for s in chosen if internal_symbol(s))
+
+
 def self_test() -> None:
     """Python-only regression vectors; no compiler, ELF or device is used."""
     checks = 0
@@ -93,7 +119,8 @@ def self_test() -> None:
             checks += 1
         else:
             raise AssertionError('Unsafe disassembly accepted: ' + text)
-    good('40800000 <fn>:\n40800000: 1141 addi sp,sp,-16\n40800002: 00000517 auipc a0,0x0\n'
+    good(r'C:\Users\build\firmware.elf:     file format elf32-littleriscv' + '\n'
+         '40800000 <fn>:\n40800000: 1141 addi sp,sp,-16\n40800002: 00000517 auipc a0,0x0\n'
          '40800006: 8082 ret', 8)
     for op in sorted(CONTROL | {'c.j', 'c.jal', 'c.jr', 'c.jalr', 'c.beqz', 'c.bnez'}):
         bad(f'40800000: 0000006f {op} 40800010', 4)
@@ -115,6 +142,22 @@ def self_test() -> None:
     bad('40800000: 00000013 nop', 2)                 # overrun
     bad('40800000: 1141 nop\n40800002: 8082 ret', 2) # extra instruction
     bad('40800000 <fn>:', 4)                         # no instructions
+    constant = good('40800000: 177d addi a4,a4,-1 # 7fffffff <CACHE+0x1ff37fff>', 2)[0]
+    assert reference_symbol(constant, 0x7fffffff, 'CACHE+0x1ff37fff', []) is None
+    checks += 1
+    flash = [{'name':'table','address':0x42000000,'size':4,'section':'.flash.rodata','function':False}]
+    for text, address, name, symbols in (
+        ('40800000: 177d addi a4,a4,-1 # 42000000 <table>',0x42000000,'table',flash),
+        ('40800000: 00072703 lw a4,0(a4) # 7fffffff <CACHE+0x1ff37fff>',0x7fffffff,'CACHE+0x1ff37fff',[]),
+        ('40800000: 00e74733 xor a4,a4,a4 # 7fffffff <CACHE+0x1ff37fff>',0x7fffffff,'CACHE+0x1ff37fff',[]),
+        ('40800000: 0000006f jal 7fffffff <CACHE+0x1ff37fff>',0x7fffffff,'CACHE+0x1ff37fff',[])):
+        instruction = good(text,2 if '177d' in text else 4)[0]
+        try:
+            reference_symbol(instruction,address,name,symbols)
+        except RuntimeError:
+            checks += 1
+        else:
+            raise AssertionError('Unsafe referenced data/control target accepted')
     print('C5 Locate IRAM disassembly parser:', checks, 'Python-only checks PASS')
 
 
@@ -135,9 +178,6 @@ def verify(root: Path, image: Path | None = None, output: Path | None = None) ->
                             function='F' in p[1:-3]))
     def base(name):
         return name.split('.')[0]
-    def internal(s):
-        return s['section'].startswith(('.iram', '.dram')) or (
-            s['section'] == '*ABS*' and 0x40000000 <= s['address'] < 0x40080000)
     def named(name):
         found = [s for s in symbols if s['name'] == name and s['function']]
         if len(found) != 1:
@@ -162,19 +202,16 @@ def verify(root: Path, image: Path | None = None, output: Path | None = None) ->
         text = run('-d', '-j', s['section'], '--start-address='+hex(s['address']),
                    '--stop-address='+hex(s['address']+s['size']))
         texts.append(text)
-        calls=[]; references=[]
+        calls=[]; references=[]; constants=[]
         instructions=decode_instructions(text,s['address'],s['size'])
         for instruction in instructions:
             is_call=instruction['control']
             for addr,name in instruction['targets']:
                 if s['address'] <= addr < s['address']+s['size']: continue
-                candidates=[v for v in symbols if v['address']==addr or
-                            (v['size'] and v['address']<=addr<v['address']+v['size'])]
-                if is_call: candidates=[v for v in candidates if v['function']]
-                chosen=[v for v in candidates if v['name']==name.split('+')[0]] or candidates
-                if not chosen or not any(internal(v) for v in chosen):
-                    raise RuntimeError('Non-internal/unresolved callback reference: '+s['name']+' -> '+name)
-                target_symbol=next(v for v in chosen if internal(v))
+                target_symbol=reference_symbol(instruction,addr,name,symbols)
+                if target_symbol is None:
+                    constants.append({'value':hex(addr),'annotation':name,'op':instruction['op']})
+                    continue
                 item={'address':hex(addr),'name':name,'section':target_symbol['section']}
                 if is_call:
                     calls.append(item)
@@ -184,6 +221,7 @@ def verify(root: Path, image: Path | None = None, output: Path | None = None) ->
                     else: external[target_symbol['name']]=item
                 else: references.append(item)
         inspected.append({**s,'address':hex(s['address']),'direct_calls':calls,'symbolic_references':references,
+                          'non_dereferencing_constant_annotations':constants,
                           'instructions':len(instructions)})
     sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
     sources=['shared/mesh_mac.c','shared/mesh_mac.h','shared/mesh_locate_protocol.h',
