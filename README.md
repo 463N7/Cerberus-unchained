@@ -67,11 +67,11 @@ explicit stopped-evidence saving to SD. C5 owns passive reception while S3
 validates, groups, presents and saves the observations. All 138 host suites,
 five native targets and linked resource checks pass on 1,142 unchanged inputs;
 [the rev128 checkpoint](docs/DUAL_RADIO_REV128.md) records the limits and package
-status. Fixed data/BSS is unchanged on S3 and grows by 48 bytes on C5; optional
+status. The matched local candidate and package verification also pass.
+Fixed data/BSS is unchanged on S3 and grows by 48 bytes on C5; optional
 capture, UI and save allocations are measured separately. Rev126 remains
-installed. The requested stopping point is
-this major milestone, an update to existing Unchained PR #1, then a pause of
-the unfinished overall port.
+installed. This major milestone is the requested checkpoint for updating
+existing Unchained PR #1 and pausing the unfinished overall port.
 
 Rev127 corrects Channel Survey ownership when C5 restarts
 between preflight and Start. The session-bound control/readout and

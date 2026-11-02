@@ -6,7 +6,7 @@ Preserve the existing PR branch history and its remote CI fixes; do not open a
 second overlapping PR or force-push the stale local contribution branch.
 Do not treat completion of this checkpoint as full Marauder feature parity.
 
-The chosen milestone is a complete passive Probe Sniff workflow: a dedicated
+The implemented milestone is the passive Probe Sniff workflow: a dedicated
 receive entry, bounded deduplicated transmitter/requested-network inventories,
 stable selected details, and explicit SD evidence saving. The C5 owns passive
 Wi-Fi capture; the S3 owns collection validation, aggregation, presentation and
@@ -19,18 +19,17 @@ checked Stop/Back/hidden/sleep cleanup, explicit retention/drop limits, and
 honest channel/time/source evidence. Observed probes are not authenticated
 clients, confirmed associations or proof of physical-device identity.
 
-The rev127 reliability checkpoint has passed its full validation and local
-package verification. Rev128 implements the Probe Sniff workflow in the same
-worktree. Final integrated checks and packaging must bind the same frozen
-source inputs; earlier passing receipts remain historical evidence if a
-subsequent correction changes those inputs.
+The rev127 reliability checkpoint and rev128 implementation both have verified
+local packages. Rev128 passes 138 host suites, five native targets and the
+linked resource audit on 1,142 unchanged inputs. Its matched package and all
+package checksum entries verify; see [the final checkpoint](DUAL_RADIO_REV128.md).
+Rev126 remains installed. Probe reception, saving/reopening, warm repeated use
+and loaded responsiveness still require physical acceptance.
 
-Before the requested PR, finish the new workflow, focused regression coverage,
-complete host/native checks, memory/resource review, and feasible connected
-device acceptance. Verify the live upstream base and current GitHub identity,
-preserve attribution and integrate the accumulated contribution honestly.
-Clearly separate source/build evidence from physical acceptance and record any
-remaining hardware or upstream-parity gaps in the PR.
+Update the existing PR with the accumulated contribution and final local
+validation, preserving its later remote CI fixes and upstream attribution.
+Keep hosted CI and physical acceptance separate from the completed local
+checks. No new image was installed during this milestone's preparation.
 
 Once the major milestone and requested PR are complete, mark the existing goal
 paused at the owner's explicit request. Leave a concrete resumption checkpoint

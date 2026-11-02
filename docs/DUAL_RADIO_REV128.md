@@ -2,7 +2,7 @@
 
 This milestone is implemented. All 138 host suites and all five native targets
 pass on the same 1,142 unchanged inputs, and the linked resource audit passes.
-Matched-package verification is the remaining local preparation step. Rev126
+Matched-package verification also passes. Rev126
 remains the latest verified installed pair; the owner accepted its Recon
 Dashboard/Radar controls, ALERT wording and stable recognized-hint priority.
 Rev127 has a verified local package and has not been installed separately.
@@ -151,3 +151,33 @@ of the unfinished overall port. The existing PR branch's later Linux fixture
 and Windows timeout fixes are preserved in the development history. No public
 binary release, automatic upstream merge or further feature milestone is part
 of that stopping point.
+
+## Final package and resumption checkpoint
+
+Source commit `c3d7d3c88487e70f1c99f04b8fb1126aeccd4be6` produced the verified
+local package `cerberus-unchained-0.1.0-dev.rev128-20261102T005202Z`.
+Its manifest SHA-256 is
+`ea2cef8786dd9e5f002b027f3fa1a8e0735793ad85899cbbb48fe3fd64337ad6`.
+The packaged S3, onboard C5 and bridge applications match the retained
+five-target matrix; all 20 package checksum entries verify, including the
+exact retained Marauder license notice. The native console evidence matches
+the packaged S3 ELF. The exporter passes `--verify-only` for image hashes,
+chip headers, partitions and bounds, without exporting or selecting a release.
+The final local receipt is retained in
+`artifacts/rev128-validation/local-milestone.json`.
+
+This package has not been installed. Rev126 remains the last verified device
+pair; its accepted Recon controls do not establish Probe Sniff acceptance.
+The existing PR carries the accumulated rev82–128 contribution. Hosted CI
+results belong to the actual updated PR head and remain separate from the
+local Windows validation above. The overall mission pauses at this checkpoint.
+
+On resumption, first review the updated PR checks and finish any failed CI
+gate. Then install the matched candidate through the normal radio-release
+gate and test Probe Sniff Start/Stop, all three views, selection stability,
+Save/Open File and repeated Back-to-scan transitions. Measure loaded response
+time and heap/stack margins on the board. Verify the scoped Channel Survey
+handoff on hardware as well. Continue from
+[remaining gaps](RECEIVE_REMAINING_GAPS.md) and the
+[coverage ledger](MARAUDER_COVERAGE_LEDGER.md); reported active-feature failures,
+full Marauder parity, GPS and six-C5 expansion acceptance are still open.
