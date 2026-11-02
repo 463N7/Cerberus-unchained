@@ -414,7 +414,7 @@ static void archive_maximum_output(void)
 }
 static void archive_format_output(void)
 {
-    const char *names[] = {"BLE", "AIRTAG_JSON", "WIFI_NATIVE", "AP_JSON", "SSID_TEXT", "PROBE_REPORT", "UNKNOWN"};
+    const char *names[] = {"BLE", "AIRTAG_JSON", "WIFI_NATIVE", "AP_JSON", "SSID_TEXT", "PROBE_REPORT", "MESH_REPORT", "UNKNOWN"};
     for (unsigned format = 0; format < sizeof(names) / sizeof(names[0]); ++format) {
         reset(); start(); archive_reads = 0;
         memset(&archive_status, 0, sizeof(archive_status));
