@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the 151 registered host suites through historical Mesh observation maps.
+"""Run the 157 registered host suites through selected AP/client Packet Count.
 
 The checked-in synthetic fixtures need no board, radio, or private captures.
 Generated fixtures, native executables, previews, logs, and the result receipt
@@ -37,6 +37,12 @@ CHECKS = (
     'check_mesh_bridge.py',
     'check_mesh_report.py',
     'check_mesh_archive.py',
+    'check_wifi_packet_count.py',
+    'check_wifi_packet_count_native.py',
+    'check_s3_wifi_packet_count.py',
+    'check_wifi_packet_count_scan.py',
+    'check_wifi_packet_count_record.py',
+    'check_wifi_packet_count_ui.py',
     'check_mesh_ui.py',
     'check_mesh_locate.py',
     'check_mesh_locate_link.py',
@@ -183,8 +189,8 @@ SERIAL_CHECKS = (
 
 def registered_checks() -> tuple[str, ...]:
     names = (*CHECKS, *SERIAL_CHECKS)
-    if len(names) != 151 or len(set(names)) != 151:
-        raise ValueError("Expected 151 unique suites; do not silently skip a suite")
+    if len(names) != 157 or len(set(names)) != 157:
+        raise ValueError("Expected 157 unique suites; do not silently skip a suite")
     return names
 
 
@@ -203,7 +209,7 @@ def selected_checks(shard_index: int | None = None,
         return names
     if (type(shard_index) is not int or type(shard_count) is not int or
             not 1 <= shard_count <= len(names) or not 0 <= shard_index < shard_count):
-        raise ValueError("Supply both --shard-index and --shard-count; index is zero-based and count is 1..151")
+        raise ValueError("Supply both --shard-index and --shard-count; index is zero-based and count is 1..157")
     return names[shard_index::shard_count]
 
 
@@ -315,7 +321,7 @@ def main() -> int:
     changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
     receipt = {
         "format": 1,
-        "suite_set": "rev132",
+        "suite_set": "rev133",
         "recorded_utc": datetime.now(timezone.utc).isoformat(),
         "status": "passed" if not changed and head == head_after and
             (args.shard_count is None or clean_after) and

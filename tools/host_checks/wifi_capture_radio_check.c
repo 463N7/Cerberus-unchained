@@ -4,6 +4,7 @@
 #include "wifi_capture_service.h"
 #include <assert.h>
 #include <stdatomic.h>
+static atomic_bool packet_count_radio_reserved;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -273,6 +274,10 @@ int main(void)
     atomic_store(&probe_sniff_radio_reserved,true);
     assert(cerberus_wifi_capture_start(&blocked)==ESP_ERR_INVALID_STATE&&!atomic_load(&capture_radio_reserved));
     atomic_store(&probe_sniff_radio_reserved,false);
+    { atomic_store(&packet_count_radio_reserved,true);
+    assert(cerberus_wifi_capture_start(&blocked)==ESP_ERR_INVALID_STATE&&!atomic_load(&capture_radio_reserved));
+    atomic_store(&packet_count_radio_reserved,false); }
+
     atomic_store(&mac_radio_reserved,true);
     unsigned prior_preempts=survey_preempts;
     assert(cerberus_wifi_capture_start(&blocked)==ESP_ERR_INVALID_STATE&&!atomic_load(&capture_radio_reserved));

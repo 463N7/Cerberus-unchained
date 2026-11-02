@@ -3,6 +3,7 @@
 #include "remote_id_channel_plan.h"
 #include <assert.h>
 #include <stdatomic.h>
+static atomic_bool packet_count_radio_reserved;
 #include <stdio.h>
 #include <string.h>
 static unsigned checks;
@@ -118,6 +119,8 @@ static void cerberus_wifi_capture_service_receive(const uint8_t *p,unsigned n,un
 static void station_receive(const wifi_promiscuous_pkt_t *p){(void)p;}
 static void cerberus_c5_test_receive(const uint8_t *p,unsigned n,unsigned c){(void)p;(void)n;(void)c;}
 /* Dedicated Probe capture is inactive in this legacy consumer fixture. */
+static void packet_count_receive(const wifi_promiscuous_pkt_t *p,wifi_promiscuous_pkt_type_t type,int64_t entered)
+{(void)p;(void)type;(void)entered;}
 static void probe_sniff_receive(const wifi_promiscuous_pkt_t *p,wifi_promiscuous_pkt_type_t type,int64_t entered)
 { (void)p;(void)type;(void)entered; }
 #include "wifi_remote_id_service.h"

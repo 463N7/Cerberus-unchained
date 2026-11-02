@@ -7,6 +7,7 @@
 #include <assert.h>
 #include <setjmp.h>
 #include <stdatomic.h>
+static atomic_bool packet_count_radio_reserved;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
+static atomic_bool packet_count_radio_reserved;
 #include "esp_err.h"
 #include "cerberus_protocol.h"
 #define ESP_ERR_NOT_FOUND 0x105
@@ -108,6 +109,10 @@ int main(void)
     atomic_store(&probe_sniff_radio_reserved,true);
     assert(cerberus_wifi_station_start(&blocked)==ESP_ERR_INVALID_STATE&&!station_reserved&&!notified&&!enabled);
     atomic_store(&probe_sniff_radio_reserved,false);
+    { atomic_store(&packet_count_radio_reserved,true);
+    assert(cerberus_wifi_station_start(&blocked)==ESP_ERR_INVALID_STATE&&!station_reserved&&!notified&&!enabled);
+    atomic_store(&packet_count_radio_reserved,false); }
+
     cerberus_wifi_station_request_t r=reset();assert(cerberus_wifi_station_start(&r)==ESP_OK&&notified==1&&cerberus_wifi_station_running());
     assert(cerberus_wifi_station_start(&r)==ESP_OK&&notified==1);r.seconds=15;assert(cerberus_wifi_station_start(&r)==ESP_ERR_INVALID_ARG);r.seconds=5;
     overlap=true;assert(station_run());assert(station_table.status.state==CERBERUS_STATION_COMPLETE&&!cerberus_wifi_station_running());

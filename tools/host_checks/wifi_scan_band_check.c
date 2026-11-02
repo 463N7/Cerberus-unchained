@@ -2,6 +2,7 @@
 #include "c5_spi_link.h"
 #include <assert.h>
 #include <stdatomic.h>
+static atomic_bool packet_count_radio_reserved;
 #include <stdio.h>
 #include <string.h>
 
@@ -151,6 +152,12 @@ int main(void)
     assert(cerberus_wifi_scanner_start()==ESP_ERR_INVALID_STATE);
     assert(!notifications && scan_session_epoch==100U);
     atomic_store(&probe_sniff_radio_reserved,false);
+    { atomic_store(&packet_count_radio_reserved,true);
+    assert(cerberus_wifi_scanner_start_band(&a,&reply)==ESP_ERR_INVALID_STATE);
+    assert(cerberus_wifi_scanner_start()==ESP_ERR_INVALID_STATE);
+    assert(!notifications && scan_session_epoch==100U);
+    atomic_store(&packet_count_radio_reserved,false); }
+
 
     reset(); a.session_id = 101U;
     channel_survey_status.state = CERBERUS_WIFI_CHANNEL_SURVEY_RUNNING;

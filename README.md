@@ -29,8 +29,8 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source version: `0.1.0-dev.rev132` (in development), targeting onboard
-C5 protocol firmware revision 73. No Unchained binary release is selected yet.**
+**Current source version: `0.1.0-dev.rev133` (in development), targeting onboard
+C5 protocol firmware revision 74. No Unchained binary release is selected yet.**
 The installer stays unavailable until an Unchained matched image set is built
 and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
 
@@ -61,6 +61,14 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 
 ## Development status
 
+Rev133 adds a selected AP/client Packet Count workflow with a separate target
+list, disjoint S3/C5 channel coverage, cumulative per-target counts and optional
+per-receiver PCAPNG files on SD. Exact session ownership, immutable transfer
+pins, recording drain and source-clock validity are checked independently.
+The [rev133 checkpoint](docs/DUAL_RADIO_REV133.md) records validation and remaining
+physical acceptance; source implementation does not establish full feature
+parity. Rev132 is the installed baseline while this candidate is validated.
+
 Rev132 implements native Mesh saved maps: portable `.MSH` files, asynchronous
 SD save/open and historical observation browsing with CSV export. All 151 host
 suites and five native targets pass on
@@ -68,7 +76,7 @@ suites and five native targets pass on
 installed on both chips. Paired boot, mounted SD and sampled idle checks pass;
 real SD save/reopen and Mesh reception acceptance remain pending. Fixed RAM
 grows by 16 bytes on S3 and is unchanged on C5; the larger archive buffers are
-optional PSRAM allocations. See [the current checkpoint](docs/DUAL_RADIO_REV132.md).
+optional PSRAM allocations. See [the rev132 checkpoint](docs/DUAL_RADIO_REV132.md).
 
 Rev131 corrects the Mesh entry flow: the Scan tile is named Mesh Detection and
 opens the five-tool menu before any individual tool. It also adds passive

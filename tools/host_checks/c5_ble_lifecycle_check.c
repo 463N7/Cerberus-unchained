@@ -10,6 +10,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdatomic.h>
+static atomic_bool packet_count_radio_reserved;
 #include "ble_response.h"
 
 static unsigned checks;
@@ -397,6 +398,10 @@ int main(void)
     reset_case();atomic_store(&probe_sniff_radio_reserved,true);
     CHECK(wifi_another_radio_operation_is_active());
     atomic_store(&probe_sniff_radio_reserved,false);
+    { atomic_store(&packet_count_radio_reserved,true);
+    CHECK(wifi_another_radio_operation_is_active());
+    atomic_store(&packet_count_radio_reserved,false); }
+
     stale_timeout_preserves_replacement();
     pending_stop_blocks_replacement(false);pending_stop_blocks_replacement(true);
     reset_pending_start_and_duplicate_stop();timer_arm_failure_all_modes();

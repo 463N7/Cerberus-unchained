@@ -155,7 +155,7 @@ esp_err_t cerberus_wifi_packet_monitor_start(uint8_t channel)
     if (error != ESP_OK) return error;
     if (another_radio_operation_is_active()) return ESP_ERR_INVALID_STATE;
     xSemaphoreTake(scanner_mutex, portMAX_DELAY);
-    if (!scanner_ready || atomic_load_explicit(&probe_sniff_radio_reserved,memory_order_acquire) || station_reserved || atomic_load_explicit(&mac_radio_reserved,memory_order_acquire) || atomic_load_explicit(&csi_radio_reserved,memory_order_acquire) ||
+    if (!scanner_ready || (atomic_load_explicit(&probe_sniff_radio_reserved,memory_order_acquire)||atomic_load_explicit(&packet_count_radio_reserved,memory_order_acquire)) || station_reserved || atomic_load_explicit(&mac_radio_reserved,memory_order_acquire) || atomic_load_explicit(&csi_radio_reserved,memory_order_acquire) ||
         scan_status.state == CERBERUS_WIFI_SCAN_RUNNING ||
         defense_status.state == CERBERUS_WIFI_DEFENSE_RUNNING ||
         wifi_connection_is_active_locked() ||

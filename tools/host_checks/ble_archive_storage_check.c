@@ -56,6 +56,7 @@ static SemaphoreHandle_t storage_mutex;
 static bool locked, sd_mounted, fail_lock, fail_mutex, wardrive_busy;
 static cerberus_storage_owner_t storage_owner;
 static FILE *sd_wifi_capture_file;
+static void *sd_packet_count; /* Optional PCAP lease admission. */
 static struct {bool active;} sd_recon;
 static char sd_operation_source_path[CERBERUS_STORAGE_PATH_MAX+CERBERUS_STORAGE_NAME_MAX];
 static unsigned locks, unlocks, streams, descriptors;

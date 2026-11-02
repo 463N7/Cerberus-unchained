@@ -29,6 +29,7 @@ static WORD_ALIGNED_ATTR cerberus_c5_event_batch_frame_t event_batch_cache;
 static uint8_t event_batch_cache_sequence;
 static uint8_t event_batch_cache_max_events;
 static bool event_batch_cache_valid;
+static size_t received_transfer_bytes=CERBERUS_SPI_TRANSFER_SIZE;
 
 static uint16_t heap_kib(uint32_t bytes)
 {
@@ -380,6 +381,37 @@ static void prepare_v2_response(const cerberus_spi_frame_t *request)
             request->sequence,&error,sizeof(error));
         break;
     }
+    /* BEGIN PACKET COUNT DISPATCH */
+    case CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_INFO:
+    case CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_BEGIN:
+    case CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_TARGET:
+    case CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_START:
+    case CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_STATUS:
+    case CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_STOP:
+    case CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_PEEK:
+    case CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_READ:
+    case CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_RELEASE:
+    case CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_RAW_ACK: {
+        if(request->payload_length!=cerberus_packet_count_request_bytes(request->command))return;
+        uint8_t payload[22]={0};
+        (void)cerberus_wifi_packet_count_exchange(request->command,request->payload,
+            request->payload_length,payload,sizeof(payload));
+        prepare_frame_response((cerberus_spi_command_t)request->command,
+            request->sequence,payload,sizeof(payload));
+        break;
+    }
+    case CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_RAW_READ: {
+        if(received_transfer_bytes!=CERBERUS_PACKET_COUNT_RAW_TRANSFER_BYTES||
+            request->payload_length!=sizeof(cerberus_packet_count_read_t))return;
+        cerberus_packet_count_raw_chunk_t payload;
+        (void)cerberus_wifi_packet_count_exchange(request->command,request->payload,
+            request->payload_length,&payload,sizeof(payload));
+        cerberus_packet_count_raw_frame_t frame;
+        if(cerberus_protocol_prepare_packet_count_raw(&frame,request->sequence,&payload))
+            memcpy(tx_buffer,&frame,sizeof(frame));
+        break;
+    }
+    /* END PACKET COUNT DISPATCH */
     /* BEGIN PROBE SNIFF DISPATCH */
     case CERBERUS_SPI_COMMAND_WIFI_PROBE_SNIFF_INFO:
     case CERBERUS_SPI_COMMAND_WIFI_PROBE_SNIFF_START:
@@ -1583,6 +1615,7 @@ static void spi_slave_task(void *arg)
         err = spi_slave_get_trans_result(SPI2_HOST, &completed, portMAX_DELAY);
         gpio_set_level(CERBERUS_C5_READY_GPIO, 0);
         if (err == ESP_OK) {
+            received_transfer_bytes=completed?completed->trans_len/8U:0U;
             prepare_response(rx_buffer);
         } else {
             ESP_LOGW(TAG, "SPI transaction failed: %s", esp_err_to_name(err));

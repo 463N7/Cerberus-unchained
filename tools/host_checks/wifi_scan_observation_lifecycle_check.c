@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <setjmp.h>
 #include <stdatomic.h>
+static atomic_bool packet_count_radio_reserved;
 #include <stdio.h>
 
 typedef int esp_err_t;
@@ -189,9 +190,13 @@ static esp_err_t esp_wifi_scan_start(const wifi_scan_config_t *config,bool block
 }
 
 /* Dedicated Probe capture is inactive in this legacy consumer fixture. */
+static void packet_count_receive(const wifi_promiscuous_pkt_t *p,wifi_promiscuous_pkt_type_t type,int64_t entered)
+{(void)p;(void)type;(void)entered;}
 static void probe_sniff_receive(const wifi_promiscuous_pkt_t *p,wifi_promiscuous_pkt_type_t type,int64_t entered)
 { (void)p;(void)type;(void)entered; }
 static bool probe_sniff_retained(void){return false;}
+static bool packet_count_retained(void){return atomic_load(&packet_count_radio_reserved);}
+static void packet_count_worker_tick(void){CHECK(!atomic_load(&packet_count_radio_reserved));}
 static void probe_sniff_worker_tick(void){CHECK(!atomic_load(&probe_sniff_radio_reserved));}
 #include "wifi_scan_observation_impl.h"
 

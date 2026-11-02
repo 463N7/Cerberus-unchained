@@ -2,10 +2,13 @@
 
 Latest source audit, 2026-11-02: the live GitHub `develop` commit resolves to
 `79cc6bcba1db6679baee1dab2b0c1ad5010e6363`, still matching the pinned source.
-Installed [rev131](DUAL_RADIO_REV131.md) passes paired boot checks and the owner
-has accepted Mesh menu-first navigation and Back. Individual feature acceptance
-remains separate. Rev132 is developing historical Mesh saved maps; the earlier
-audit and checkpoint history below retain their original scope.
+Installed [rev132](DUAL_RADIO_REV132.md) passes the complete host/native matrix,
+matched packaging, installation and sampled paired boot checks. The owner has
+accepted rev131's Mesh menu-first navigation and Back. Historical Mesh Save/Open,
+real Mesh reception and Locate acceptance remain pending. Rev133 is developing
+[selected AP/client Packet Count](DUAL_RADIO_REV133.md); its source checks and
+physical acceptance remain separate. Earlier audit history below keeps its
+original scope.
 
 This source audit used Cerberus `41b65fdec1f2dc1ccdb01d73e56887dee5d9194e`
 and the clean pinned Marauder develop checkout

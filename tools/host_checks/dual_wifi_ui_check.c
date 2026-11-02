@@ -175,7 +175,8 @@ static void painted_identity_and_handoff(void)
     assert(dual_wifi_ui_tap(20, 160) == DUAL_WIFI_UI_REDRAW);
     assert(dual_wifi_ui_copy_selected(&selected) == ESP_OK && !memcmp(&selected, &original, sizeof(selected)));
     draw_ok();
-    assert(has_text("OPEN AP TOOLS"));
+    assert(has_text("AP TOOLS") && has_text("PACKET COUNT"));
+    assert(dual_wifi_ui_tap(180,340)==DUAL_WIFI_UI_OPEN_PACKET_COUNT);
     mock_status.state = CERBERUS_DUAL_WIFI_RUNNING;
     mock_status.cleanup_pending = true;
     assert(dual_wifi_ui_tap(20, 340) == DUAL_WIFI_UI_REDRAW && stop_calls == 1);

@@ -7,6 +7,7 @@
 #include "wifi_ap_job.h"
 #include "wifi_targets.h"
 #include "field_menu.h"
+#include "wifi_packet_count_scan.h"
 #define ESP_ERROR_CHECK(call) assert((call) == ESP_OK)
 
 enum { UI_PAGE_WIFI, UI_PAGE_OTHER, UI_WIFI_MODE_DUAL, UI_WIFI_MODE_LIST,
@@ -48,6 +49,10 @@ static cerberus_dual_wifi_row_t requested;
 static cerberus_dual_wifi_handoff_t export_handoff, imported_handoff;
 static int64_t mock_time_us;
 static unsigned archive_all_calls, archive_selected_calls;
+static unsigned packet_count_entries;
+static wifi_packet_count_selection_t packet_count_selection;
+static esp_err_t wifi_packet_count_open_selection(const wifi_packet_count_selection_t *selection,unsigned origin)
+{ assert(origin==UI_WIFI_MODE_DUAL);packet_count_selection=*selection;++packet_count_entries;return ESP_OK; }
 static void wifi_archive_save_live(bool selected)
 { if (selected) ++archive_selected_calls; else ++archive_all_calls; }
 
@@ -165,6 +170,7 @@ static void bridge_reset(void)
     readout_busy = store_fail = wifi_relation_exhausted = false;
     rebind_error = copy_error = ESP_OK; corrupt_export = 0U;
     rebind_calls = copy_calls = publish_calls = bind_calls = launcher_calls = 0U;
+    packet_count_entries=0;memset(&packet_count_selection,0,sizeof(packet_count_selection));
     dual_wifi_live_handoff_pending = dual_wifi_return_to_view = false;
     ui_capability_blocked = false;
     current_page = UI_PAGE_WIFI; wifi_mode = UI_WIFI_MODE_DUAL;
@@ -334,6 +340,27 @@ static void cancellation_and_fallback(void)
     rebind_error = ESP_FAIL; dual_wifi_live_tick(300, false);
     assert(!dual_wifi_live_handoff_pending && dual_wifi_ui_error == ESP_FAIL && !publish_calls);
 }
+static void packet_count_navigation(void)
+{
+    for(unsigned source=0;source<2;++source){
+        bridge_reset();publish(4,42);dual_wifi_live_open(false);draw_ok();
+        dual_wifi_live_tap(20,source?220:160);
+        cerberus_dual_wifi_row_t frozen;assert(dual_wifi_ui_copy_selected(&frozen)==ESP_OK);
+        unsigned starts=start_calls,rebinds=rebind_calls;
+        /* Replace the producer bank after painting: this route copies the
+         * selected value, never a new source index or attack target set. */
+        mock_rows[source].ap.bssid[5]^=0xff;
+        dual_wifi_live_tap(180,335);
+        assert(packet_count_entries==1&&packet_count_selection.target.role==CERBERUS_WIFI_PACKET_COUNT_AP);
+        assert(packet_count_selection.target.channel_hint==frozen.ap.channel&&
+            !memcmp(packet_count_selection.target.mac,frozen.ap.bssid,6)&&
+            !memcmp(packet_count_selection.bssid,frozen.ap.bssid,6));
+        assert(packet_count_selection.discovery_source==frozen.source&&
+            packet_count_selection.discovery_publication==frozen.source_generation);
+        assert(!memcmp(packet_count_selection.label,frozen.ap.ssid,32));
+        assert(start_calls==starts&&rebind_calls==rebinds&&!dual_wifi_live_handoff_pending);
+    }
+}
 int main(void)
 {
     existing_view_checks();
@@ -342,6 +369,7 @@ int main(void)
     assert(archive_all_calls == 1U && archive_selected_calls == 1U);
     released_admission(); publication(); rejected_publications(); cancellation_and_fallback();
     cached_c5_handoff();
+    packet_count_navigation();
     bridge_reset(); dual_wifi_ui_leave(); free(live_store);
     puts("Dual Wi-Fi bridge: owner admission, C5 proof/index publication, identity faults, legacy fallback and Back/Stop/sleep cancellation passed.");
     return 0;

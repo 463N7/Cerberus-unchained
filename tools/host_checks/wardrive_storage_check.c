@@ -53,6 +53,7 @@ static const char *test_root;
 static bool sd_mounted = true, locked;
 static cerberus_storage_owner_t storage_owner = CERBERUS_STORAGE_OWNER_FIRMWARE;
 static FILE *sd_wifi_capture_file;
+static void *sd_packet_count; /* Optional PCAP lease admission. */
 static struct { bool active; } sd_recon; /* Only the new lease admission boundary. */
 static int64_t test_now_us;
 static bool cerberus_storage_is_mounted(void) { return sd_mounted; }

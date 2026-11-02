@@ -43,6 +43,9 @@ for name in ("sd_hash_buffer", "sd_operation_source_path",
     constants.append(re.search(r"^static [^\n]*\b" + name + r"\[[^\n]+;", source, re.M).group(0))
 end = source.index("static recon_storage_t sd_recon;") + len("static recon_storage_t sd_recon;")
 constants.append(source[source.rindex("typedef struct", 0, end):end])
+start = source.index("typedef struct {", source.index("/* Allocated only for optional selected-target PCAP"))
+end = source.index("static unsigned sd_packet_count_next_index")
+constants.append(source[start:end])
 (out / "storage_copy_types.h").write_text("\n".join(constants) + "\n", encoding="utf-8")
 parts = [function(signature) for signature in (
     "static bool relative_path_is_safe(const char *relative_path)\n{",

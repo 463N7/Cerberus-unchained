@@ -143,6 +143,26 @@ esp_err_t cerberus_storage_wifi_capture_begin(const uint8_t *header, size_t head
 esp_err_t cerberus_storage_wifi_capture_append(const uint8_t *record, size_t record_length);
 esp_err_t cerberus_storage_wifi_capture_finish(bool keep,
     char *file_name, size_t file_name_capacity, uint64_t *bytes_written);
+/* Optional selected-target capture: exact job lease, two lazy per-radio files.
+ * Requires already-mounted firmware storage; never takes over USB. Creates a
+ * fresh Pnnnnn directory (bounded search), then exclusive S3.TMP/C5.TMP files.
+ * Only checked write/flush/sync/close files publish as .PCAPNG. Failed partial
+ * files remain .TMP; no atomic or power-loss durability guarantee is implied. */
+#define CERBERUS_STORAGE_PACKET_COUNT_PATH "/CERBERUS/PCOUNT"
+typedef struct {
+    uint64_t bytes[2];
+    esp_err_t error[2];
+    char file_name[2][24];
+} cerberus_storage_packet_count_result_t;
+esp_err_t cerberus_storage_packet_count_begin(uint64_t job, char name[8]);
+esp_err_t cerberus_storage_packet_count_open(uint64_t job, unsigned source,
+    const uint8_t *header, size_t length);
+esp_err_t cerberus_storage_packet_count_append(uint64_t job, unsigned source,
+    const uint8_t *record, size_t length);
+/* Exact job required. Waits for the mutex to close every owned handle and
+ * release the lease even after earlier errors. Result must be nonnull. */
+esp_err_t cerberus_storage_packet_count_finish(uint64_t job,
+    cerberus_storage_packet_count_result_t *result);
 /* Wardriving holds one SD lease with lazy UNLOC/WIGLE append streams. USB
  * handoff remains blocked until both streams close and the session ends.
  * Only a stream with no write/sync failure can publish CSV. Failed or

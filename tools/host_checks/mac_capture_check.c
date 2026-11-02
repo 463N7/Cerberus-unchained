@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdatomic.h>
+static atomic_bool packet_count_radio_reserved;
 #include <string.h>
 static unsigned checks;
 #define CHECK(x) do {++checks;if(!(x)){fprintf(stderr,"MAC capture line %d: %s\n",__LINE__,#x);exit(1);}} while(0)
@@ -88,6 +89,8 @@ static void *test_memcpy(void *d,const void *s,size_t n)
 #define free test_free
 #define memcpy test_memcpy
 /* Dedicated Probe capture is inactive in this legacy consumer fixture. */
+static void packet_count_receive(const wifi_promiscuous_pkt_t *p,wifi_promiscuous_pkt_type_t type,int64_t entered)
+{(void)p;(void)type;(void)entered;}
 static void probe_sniff_receive(const wifi_promiscuous_pkt_t *p,wifi_promiscuous_pkt_type_t type,int64_t entered)
 { (void)p;(void)type;(void)entered; }
 #include "wifi_mac_monitor_service.h"

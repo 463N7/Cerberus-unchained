@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdatomic.h>
+static atomic_bool packet_count_radio_reserved;
 #include <string.h>
 static unsigned checks;
 #define CHECK(x) do {++checks;if(!(x)){fprintf(stderr,"CSI check failed at %d: %s\n",__LINE__,#x);exit(1);}} while(0)

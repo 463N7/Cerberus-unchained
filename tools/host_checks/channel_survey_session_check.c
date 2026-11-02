@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <setjmp.h>
 #include <stdatomic.h>
+static atomic_bool packet_count_radio_reserved;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -356,6 +357,14 @@ int main(void)
     CHECK(!notifications&&!enable_calls&&!channel_survey_session_id&&ble_other_radio_active());
     CHECK(cerberus_wifi_channel_survey_start(1)==ESP_ERR_INVALID_STATE&&!notifications);
     atomic_store(&probe_sniff_radio_reserved,false);
+    { atomic_store(&packet_count_radio_reserved,true);
+    cerberus_wifi_channel_survey_session_start_t blocked={101,1};
+    cerberus_wifi_channel_survey_session_status_t blocked_reply;
+    CHECK(cerberus_wifi_channel_survey_session_start(&blocked,&blocked_reply)==ESP_ERR_INVALID_STATE);
+    CHECK(!notifications&&!enable_calls&&!channel_survey_session_id&&ble_other_radio_active());
+    CHECK(cerberus_wifi_channel_survey_start(1)==ESP_ERR_INVALID_STATE&&!notifications);
+    atomic_store(&packet_count_radio_reserved,false); }
+
     replay_reset_and_exclusion();lease_expiry_and_cleanup();immutable_projection();generation_alias_and_native_arbiter();actual_dispatch();
     printf("Scoped Channel Survey: %u assertions passed; actual worker/dispatch, reboot rejection, replay, expiry/failed disable, stale control, immutable metrics and exhaustion.\n",checks);
     return 0;

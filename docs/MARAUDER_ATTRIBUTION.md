@@ -60,6 +60,18 @@ These are examples, not an exhaustive authorship inventory. The
 and implementation status. Studying a feature as a reference, adapting its code,
 and completing its hardware acceptance are distinct claims.
 
+The selected AP/client Packet Count work uses JustCallMeKoko and the ESP32
+Marauder contributors' `WIFI_SCAN_PACKET_RATE` workflow as a reference at
+[`79cc6bc`](https://github.com/justcallmekoko/ESP32Marauder/commit/79cc6bcba1db6679baee1dab2b0c1ad5010e6363):
+`MenuFunctions.cpp`'s Packet Count entry, `WiFiScan.cpp`'s `RunPacketMonitor`,
+selected-target callback and count rendering, and `CommandLine.cpp`'s
+`packetcount`/serial options. Cerberus's parser, independent AP/client accounting,
+dual receiver ownership, scoped transport, controller and SD recording worker
+are original implementations. This is behavioral reference credit, not a claim
+that upstream implementation code was copied or that all options are complete.
+The [design and acceptance contract](WIFI_PACKET_COUNT_PLAN.md) keeps serial
+capture and physical count/recording acceptance separate.
+
 ## Carry this credit into future contributions
 
 - Name **JustCallMeKoko and the ESP32 Marauder contributors** in the PR description

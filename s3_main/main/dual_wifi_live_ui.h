@@ -168,6 +168,17 @@ static void dual_wifi_live_action(dual_wifi_ui_action_t action)
         sentinel_scan_session_pause(&live_session, false);
         live_last_poll = 0U;
         break;
+    case DUAL_WIFI_UI_OPEN_PACKET_COUNT: {
+        cerberus_dual_wifi_row_t row;
+        if (dual_wifi_ui_copy_selected(&row)!=ESP_OK) return;
+        wifi_packet_count_selection_t selection={.target={.role=CERBERUS_WIFI_PACKET_COUNT_AP,
+            .channel_hint=row.ap.channel},.discovery_source=row.source,.discovery_publication=row.source_generation};
+        memcpy(selection.target.mac,row.ap.bssid,6U); memcpy(selection.bssid,row.ap.bssid,6U);
+        memcpy(selection.label,row.ap.ssid,32U);
+        esp_err_t error=wifi_packet_count_open_selection(&selection,UI_WIFI_MODE_DUAL);
+        if (error!=ESP_OK) dual_wifi_ui_set_error(error);
+        break;
+    }
     case DUAL_WIFI_UI_OPEN_AP_TOOLS: {
         if (dual_wifi_live_handoff_pending) return;
         esp_err_t error = dual_wifi_live_released() ?

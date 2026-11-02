@@ -4,6 +4,7 @@
 #include "esp_err.h"
 #include <assert.h>
 #include <stdatomic.h>
+static atomic_bool packet_count_radio_reserved;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -107,6 +108,8 @@ static void cerberus_c5_test_receive(const uint8_t*p,unsigned n,unsigned ch){(vo
 static bool sentinel_watch_protocol_decode_wifi(const uint8_t*p,unsigned n,sentinel_watch_protocol_record_t*out){(void)p;(void)n;(void)out;return false;}
 static void cerberus_watch_capture_observe_timed(void*c,const void*p,const uint8_t*id,unsigned type,int rssi,unsigned ch,uint64_t time){(void)c;(void)p;(void)id;(void)type;(void)rssi;(void)ch;(void)time;CHECK(false);}
 static void cerberus_watch_capture_observe(void*c,const void*p,const uint8_t*id,unsigned type,int rssi,unsigned ch){cerberus_watch_capture_observe_timed(c,p,id,type,rssi,ch,0);}
+static void packet_count_receive(const wifi_promiscuous_pkt_t *p,wifi_promiscuous_pkt_type_t type,int64_t entered)
+{(void)p;(void)type;(void)entered;}
 #include "wifi_probe_sniff_service.h"
 #include "probe_native_callback.h"
 #include "probe_native_admission.h"

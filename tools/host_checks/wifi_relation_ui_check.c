@@ -16,6 +16,7 @@ esp_err_t cerberus_display_draw_mono_bitmap(uint16_t x,uint16_t y,uint16_t w,uin
 #include "sentinel_scan_view.h"
 #include "relation_route_types.h"
 #include "recon_db.h"
+#include "wifi_packet_count_scan.h"
 #include <limits.h>
 #define UI_BACKGROUND 0x0042
 #define UI_MUTED 0x7CB5
@@ -36,6 +37,10 @@ static ui_wifi_mode_t wifi_mode;
 static ui_page_t current_page=UI_PAGE_WIFI,tool_parent_page=UI_PAGE_MAIN;
 static unsigned allocations, frees, starts, steps, cancels, station_entries, writes;
 static unsigned launches, scan_starts, body_back_labels, dual_reopens, dual_draws;
+static unsigned packet_count_entries;
+static wifi_packet_count_selection_t packet_count_selection;
+static esp_err_t wifi_packet_count_open_selection(const wifi_packet_count_selection_t *selection,unsigned origin)
+{assert(origin==UI_WIFI_MODE_OBSERVED_CLIENTS);packet_count_selection=*selection;++packet_count_entries;return ESP_OK;}
 static bool dual_wifi_return_to_view;
 static char footer_text[32];
 static uint8_t footer_scale;
@@ -295,7 +300,16 @@ int main(int argc,char **argv)
     assert(rows[0].to_ap_rssi==-80&&rows[0].from_ap_rssi==-30);
     handle_tap(160,442);assert(!wifi_relation_ui->detail&&wifi_mode==UI_WIFI_MODE_OBSERVED_CLIENTS);
     wifi_relation_tap(100,390);assert(wifi_relation_ui->page==1);wifi_relation_tap(20,151);assert(wifi_relation_ui->detail_index==4);
-    handle_tap(10,380);assert(wifi_relation_ui->detail); /* Removed duplicate body action. */
+    cerberus_wifi_relation_row_t station=wifi_relation_ui->selected.bank.rows[4];
+    unsigned before_starts=starts,before_steps=steps,before_station_entries=station_entries;
+    rows[4].station[5]^=0xff; /* A later source row does not replace selection. */
+    handle_tap(10,380);assert(wifi_relation_ui->detail&&packet_count_entries==1);
+    assert(packet_count_selection.target.role==CERBERUS_WIFI_PACKET_COUNT_STA&&
+        packet_count_selection.target.channel_hint==station.channel&&
+        !memcmp(packet_count_selection.target.mac,station.station,6)&&
+        !memcmp(packet_count_selection.bssid,station.bssid,6)&&
+        packet_count_selection.discovery_publication==wifi_relation_ui->selected_publication);
+    assert(starts==before_starts&&steps==before_steps&&station_entries==before_station_entries&&!writes);
     handle_tap(160,442);assert(!wifi_relation_ui->detail);
     wifi_relation_tap(170,390);assert(writes==1&&strstr(written,"station_rssi,ap_rssi")&&strstr(written,",-80,-30,900000,950000,2\n"));
     assert(allocations==2&&frees==1); /* Persistent PSRAM store, one temporary report. */

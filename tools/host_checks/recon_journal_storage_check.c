@@ -59,12 +59,13 @@ static unsigned calls[EVENT_COUNT], fault_at[EVENT_COUNT];
 static bool fail_all_closes, collide_candidates, collide_last, injected_ferror;
 static unsigned raced_temp_at;
 static char session[7];
+static bool packet_count_testing;
 static const char csv_header[]="kind,name\n", row[]="wifi,test\n", manifest[]="{\"complete\":true}\n";
 static const char error_manifest[]="{\"state\":\"error\",\"error_code\":260}\n";
 
 static bool event(enum event which)
 {
-    CHECK(locked && sd_recon.active);
+    CHECK(locked && (sd_recon.active || packet_count_testing));
     ++calls[which];
     return fault_at[which] && calls[which]==fault_at[which];
 }
@@ -100,7 +101,7 @@ static int wrapped_mkdir(const char *path,int mode)
 {CHECK(mode==0775);if(event(MKDIR)){errno=EIO;return -1;}return native_mkdir(path);}
 static int wrapped_open(const char *path,int flags,int mode)
 {
-    CHECK(sd_recon.active && mode==0664 && flags==(O_WRONLY|O_CREAT|O_EXCL));
+    CHECK((sd_recon.active || sd_packet_count) && mode==0664 && flags==(O_WRONLY|O_CREAT|O_EXCL));
     if(event(OPEN)){errno=EIO;return -1;}
     if(raced_temp_at==calls[OPEN]){FILE *f=fopen(path,"wb");CHECK(f);CHECK(fwrite("KEEP",1,4,f)==4);CHECK(fclose(f)==0);}
     int descriptor=native_open(path,flags|O_BINARY,mode);
@@ -122,7 +123,7 @@ static int wrapped_close(int descriptor)
 }
 static size_t wrapped_write(const void *data,size_t size,size_t length,FILE *stream)
 {
-    CHECK(size==1 && length>0 && sd_recon.active);
+    CHECK(size==1 && length>0 && (sd_recon.active || sd_packet_count));
     if(event(WRITE))return length>1?fwrite(data,1,length/2,stream):0;
     return fwrite(data,size,length,stream);
 }
@@ -168,7 +169,15 @@ static FILE *wrapped_fopen(const char *path,const char *mode)
 #define fclose wrapped_fclose
 #define rename wrapped_rename
 #define fopen wrapped_fopen
+#define MALLOC_CAP_SPIRAM 1U
+#define MALLOC_CAP_8BIT 2U
+static unsigned count_allocations;
+static bool count_fail_allocation;
+static void *heap_caps_calloc(size_t n,size_t size,unsigned caps)
+{CHECK(caps==3U);if(count_fail_allocation)return NULL;void *p=calloc(n,size);if(p)++count_allocations;return p;}
+static void heap_caps_free(void *p) {CHECK(p&&count_allocations);--count_allocations;free(p);}
 #include "recon_storage_impl.h"
+#include "storage_packet_count_impl.h"
 #undef stat
 #undef mkdir
 #undef open
@@ -189,6 +198,7 @@ static void setup(void)
     if(case_number)CHECK(native_chdir("..")==0);
     char name[32];snprintf(name,sizeof(name),"case%04u",++case_number);
     CHECK(native_mkdir(name)==0 && native_chdir(name)==0 && native_mkdir("sdcard")==0);
+    CHECK(!sd_packet_count&&!count_allocations);count_fail_allocation=false;sd_packet_count_next_index=1;
     memset(&sd_recon,0,sizeof(sd_recon));sd_recon_next_index=1;
     memset(&sd_wardrive_stream,0,sizeof(sd_wardrive_stream));memset(&sd_wigle_stream,0,sizeof(sd_wigle_stream));
     sd_wardrive_session_active=false;sd_wifi_capture_file=NULL;sd_wifi_capture_bytes=0;
@@ -355,9 +365,11 @@ static void finish_failures(void)
     CHECK(finish(true)==ESP_ERR_INVALID_STATE);released();
 }
 
+#include "wifi_packet_count_storage_cases.h"
+
 int main(void)
 {
-    normal_and_guards();admission_and_begin_failures();append_and_sync_failures();finish_failures();
+    normal_and_guards();admission_and_begin_failures();append_and_sync_failures();finish_failures();packet_count_storage_cases();
     printf("Recon journal storage PASS %u checks across %u real-file cases\n",checks,case_number);
     return 0;
 }

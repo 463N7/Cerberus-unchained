@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <setjmp.h>
 #include <stdatomic.h>
+static atomic_bool packet_count_radio_reserved;
 #include <stdio.h>
 #include <string.h>
 
@@ -91,7 +92,7 @@ static void xTaskNotifyGive(TaskHandle_t task)
 { assert(task == scanner_task_handle); ++notifications; }
 static void ulTaskNotifyTake(unsigned clear, unsigned timeout)
 {
-    assert(clear == pdTRUE && timeout == portMAX_DELAY && !locked);
+    assert(clear == pdTRUE && (timeout == portMAX_DELAY || timeout == 250U) && !locked);
     if (!notifications) longjmp(worker_done, 1);
     notifications = 0U;
 }
@@ -101,6 +102,7 @@ static void vTaskDelayUntil(TickType_t *last, TickType_t period);
 static void vTaskDelay(TickType_t delay)
 {
     if (delay == 20U) {
+        if(atomic_load(&packet_count_radio_reserved)){clock_ms+=delay;atomic_store(&packet_count_radio_reserved,false);return;}
         if (atomic_load(&probe_sniff_radio_reserved)) {
             clock_ms += delay;atomic_store(&probe_sniff_radio_reserved,false);return;
         }
@@ -198,6 +200,9 @@ static void scan_observation_arm(uint8_t generation, bool available)
 { assert(generation == scan_status.generation && available); }
 static void scan_observation_finish(bool keep) { assert(keep); }
 static bool probe_sniff_retained(void){return false;}
+static bool packet_count_retained(void){return atomic_load(&packet_count_radio_reserved);}
+static unsigned count_polls;
+static void packet_count_worker_tick(void){if(atomic_load(&packet_count_radio_reserved))++count_polls;}
 static void probe_sniff_worker_tick(void){if(atomic_load(&probe_sniff_radio_reserved))++probe_polls;}
 #include "wifi_scan_worker_impl.h"
 
@@ -209,6 +214,7 @@ static void dispatch(void)
 static void reset(void)
 {
     assert(!locked);
+    atomic_store(&packet_count_radio_reserved,false);count_polls=0;
     memset(&scan_status, 0, sizeof(scan_status));
     scan_band = CERBERUS_WIFI_SCAN_BAND_ALL;
     memset(&probe_capture, 0, sizeof(probe_capture));
@@ -255,6 +261,12 @@ int main(void)
     assert(cerberus_wifi_packet_monitor_start(36U)==ESP_ERR_INVALID_STATE&&!notifications&&!enable_calls);
     xTaskNotifyGive(scanner_task_handle);dispatch();
     assert(probe_polls==2U&&!atomic_load(&probe_sniff_radio_reserved));
+    assert(!ap_scans&&!capture_polls&&!remote_polls&&!csi_polls&&!mac_polls&&!station_calls&&!enable_calls);
+    run_ap_and_capture();
+    reset(); atomic_store(&packet_count_radio_reserved,true);
+    assert(cerberus_wifi_packet_monitor_start(36U)==ESP_ERR_INVALID_STATE&&!notifications&&!enable_calls);
+    xTaskNotifyGive(scanner_task_handle);dispatch();
+    assert(count_polls==2U&&!atomic_load(&packet_count_radio_reserved));
     assert(!ap_scans&&!capture_polls&&!remote_polls&&!csi_polls&&!mac_polls&&!station_calls&&!enable_calls);
     run_ap_and_capture();
     reset(); atomic_store(&mac_radio_reserved, true);

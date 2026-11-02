@@ -7,6 +7,7 @@
 #include "probe_sniff_core.h"
 #include "mesh_observation_protocol.h"
 #include "mesh_locate_protocol.h"
+#include "wifi_packet_count_protocol.h"
 #include "s3_wifi_relation.h"
 #include "esp_err.h"
 #include <stdbool.h>
@@ -18,6 +19,10 @@ extern "C" {
 #endif
 
 esp_err_t c5_spi_link_test_start(const cerberus_radio_test_config_t *config,cerberus_radio_test_status_t *status);
+/* One exact, bounded exchange. RAW_READ clocks64 bytes; other commands32.
+ * Caller resolves uncertain mutations and validates source/session semantics. */
+esp_err_t c5_spi_link_wifi_packet_count_exchange(uint8_t command, const void *request,
+    size_t request_size, void *reply, size_t reply_size);
 esp_err_t c5_spi_link_test_status(uint16_t lease_job_id,cerberus_radio_test_status_t *status);
 esp_err_t c5_spi_link_ap_start(const cerberus_wifi_ap_job_t *request,cerberus_radio_test_status_t *status);
 esp_err_t c5_spi_link_ap_validate(const cerberus_wifi_ap_job_t *request);

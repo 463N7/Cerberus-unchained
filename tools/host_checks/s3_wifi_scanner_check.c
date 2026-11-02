@@ -66,6 +66,7 @@ static size_t internal_heap = 131072U;
 static bool task_fail, driver_initialized, driver_started, driver_scanning;
 static bool emit_done, emitted_done, inject_stale, stale_emitted;
 static bool cancel_in_wait, claim_wifi_on_second_ble_query;
+static unsigned claim_count_on_ble_query;
 static bool reset_ble_during_init;
 static unsigned pending_ble_blocks;
 static uint32_t done_status;
@@ -229,6 +230,8 @@ static cerberus_s3_wifi_owner_t test_wifi_owner(void)
     ++ble_wifi_queries;
     if (claim_wifi_on_second_ble_query && ble_wifi_queries == 2U)
         assert(cerberus_s3_wifi_claim(CERBERUS_S3_WIFI_SCAN) == ESP_OK);
+    if (claim_count_on_ble_query == ble_wifi_queries)
+        assert(cerberus_s3_wifi_claim(CERBERUS_S3_WIFI_COUNT) == ESP_OK);
     return cerberus_s3_wifi_owner();
 }
 #define cerberus_s3_wifi_owner test_wifi_owner
@@ -258,6 +261,7 @@ static void reset_all(void)
     mock_ms = alloc_calls = fail_alloc_call = 0;
     init_calls = start_calls = stop_calls = scan_stop_calls = clear_calls = deinit_calls = delete_calls = 0;
     ble_init_calls = ble_wifi_queries = 0;
+    claim_count_on_ble_query = 0;
     internal_heap = 131072;
     driver_initialized = driver_started = driver_scanning = task_fail = false;
     emit_done = true;
@@ -303,7 +307,7 @@ static void ownership_and_admission(void)
     cerberus_s3_wifi_scan_status_t status;
     assert(cerberus_s3_wifi_scanner_start(NULL) == ESP_ERR_INVALID_ARG);
     const cerberus_s3_wifi_owner_t other[] = {CERBERUS_S3_WIFI_WEB,
-        CERBERUS_S3_WIFI_PORTAL, CERBERUS_S3_WIFI_RECEIVER};
+        CERBERUS_S3_WIFI_PORTAL, CERBERUS_S3_WIFI_RECEIVER, CERBERUS_S3_WIFI_COUNT};
     for (unsigned i = 0; i < sizeof(other) / sizeof(other[0]); ++i) {
         assert(cerberus_s3_wifi_claim(other[i]) == ESP_OK);
         assert(cerberus_s3_wifi_scanner_start(&status) == ESP_ERR_INVALID_STATE);
@@ -341,6 +345,14 @@ static void ownership_and_admission(void)
     assert(!ble_init_calls && cerberus_s3_ble_host_owner() == CERBERUS_S3_BLE_OWNER_NONE);
     assert(cerberus_s3_wifi_owner() == CERBERUS_S3_WIFI_SCAN);
     assert(cerberus_s3_wifi_release(CERBERUS_S3_WIFI_SCAN) == ESP_OK);
+    for(unsigned stage=1;stage<=3;++stage){
+        reset_all();claim_count_on_ble_query=stage;
+        assert(cerberus_s3_ble_host_claim(CERBERUS_S3_BLE_OWNER_SCANNER,&test_ble_lease)==ESP_ERR_INVALID_STATE);
+        assert(!test_ble_lease.token&&cerberus_s3_ble_host_owner()==CERBERUS_S3_BLE_OWNER_NONE);
+        assert(cerberus_s3_wifi_owner()==CERBERUS_S3_WIFI_COUNT);
+        assert(ble_init_calls==(stage==3?1U:0U));
+        assert(cerberus_s3_wifi_release(CERBERUS_S3_WIFI_COUNT)==ESP_OK);
+    }
 }
 
 static void pending_ble_reset_admission(void)

@@ -14,6 +14,7 @@ typedef enum {
     DUAL_WIFI_UI_UNSUPPORTED,
     DUAL_WIFI_UI_SAVE_ALL,
     DUAL_WIFI_UI_SAVE_SELECTED,
+    DUAL_WIFI_UI_OPEN_PACKET_COUNT,
 } dual_wifi_ui_action_t;
 
 typedef struct {
@@ -272,8 +273,9 @@ static esp_err_t dual_wifi_ui_draw(void)
                     ESP_RETURN_ON_ERROR(draw_centered(300, "C5 RESULT NOT VERIFIED / SCAN AGAIN",
                         UI_MUTED, 1), TAG, "dual selected recovery");
             }
-            ESP_RETURN_ON_ERROR(draw_button(8, 326, 304, 44,
-                status.rebinding ? "CHECKING AP" : "OPEN AP TOOLS"), TAG, "dual selected tools");
+            ESP_RETURN_ON_ERROR(draw_small_button(8, 326, 148, 44,
+                status.rebinding ? "CHECKING AP" : "AP TOOLS"), TAG, "dual selected tools");
+            ESP_RETURN_ON_ERROR(draw_small_button(164, 326, 148, 44, "PACKET COUNT"), TAG, "dual selected count");
             ESP_RETURN_ON_ERROR(draw_small_button(8, 374, 148, 44,
                 store->save_mask & (UINT64_C(1) << store->selected_row) ? "UNMARK FOR SAVE" : "MARK FOR SAVE"), TAG, "dual saved mark");
             ESP_RETURN_ON_ERROR(draw_small_button(164, 374, 148, 44, "SAVE SELECTED"), TAG, "dual saved selected");
@@ -371,7 +373,9 @@ static dual_wifi_ui_action_t dual_wifi_ui_tap(uint16_t x, uint16_t y)
             if (x >= 164U && x < 312U && store->save_mask) return DUAL_WIFI_UI_SAVE_SELECTED;
         }
         if (store->selected_valid && !status.rebinding && !store->pending_tools &&
-            dual_wifi_ui_inside(x, y, 8, 326, 304, 44)) {
+            dual_wifi_ui_inside(x, y, 164, 326, 148, 44)) return DUAL_WIFI_UI_OPEN_PACKET_COUNT;
+        if (store->selected_valid && !status.rebinding && !store->pending_tools &&
+            dual_wifi_ui_inside(x, y, 8, 326, 148, 44)) {
             store->pending_start = false;
             store->pending_tools = true;
             if (busy) cerberus_dual_wifi_scan_stop();

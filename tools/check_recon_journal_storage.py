@@ -32,11 +32,14 @@ constants = []
 for text, names in ((header, ("CERBERUS_STORAGE_NAME_MAX", "CERBERUS_STORAGE_PATH_MAX",
         "CERBERUS_STORAGE_RECON_PATH", "CERBERUS_STORAGE_RECON_ROW_MAX",
         "CERBERUS_STORAGE_RECON_MANIFEST_MAX", "CERBERUS_STORAGE_RECON_MAX_BYTES",
-        "CERBERUS_STORAGE_RECON_NAME_CAPACITY", "CERBERUS_STORAGE_WARDRIVE_PATH")),
+        "CERBERUS_STORAGE_RECON_NAME_CAPACITY", "CERBERUS_STORAGE_WARDRIVE_PATH",
+        "CERBERUS_STORAGE_PACKET_COUNT_PATH", "CERBERUS_STORAGE_WIFI_CAPTURE_MAX_BYTES")),
         (source, ("SD_HASH_BUFFER_SIZE", "SD_WIFI_CAPTURE_FILE_LIMIT", "SD_WARDRIVE_FILE_LIMIT"))):
     constants += [re.search(r"^#define " + n + r"\s+[^\n]+", text, re.M).group(0) for n in names]
 end = header.index("} cerberus_storage_owner_t;") + len("} cerberus_storage_owner_t;")
 constants.append(header[header.rindex("typedef enum", 0, end):end])
+end = header.index("} cerberus_storage_packet_count_result_t;") + len("} cerberus_storage_packet_count_result_t;")
+constants.append(header[header.rindex("typedef struct", 0, end):end])
 for name in ("sd_hash_buffer", "sd_operation_source_path", "sd_operation_destination_path",
         "sd_operation_temp_path", "sd_wifi_capture_temp_path", "sd_wifi_capture_final_path",
         "sd_wifi_capture_name"):
@@ -50,6 +53,7 @@ signatures = (
     "static bool file_name_is_safe(const char *file_name)\n{",
     "static esp_err_t build_entry_path(\n",
     "static esp_err_t require_firmware_owner_locked(void)\n{",
+    "static bool ble_archive_storage_available(void)\n{",
     "static esp_err_t ensure_storage_mutex(void)\n{",
     "static esp_err_t take_storage_mutex(void)\n{",
     "static void release_storage_mutex(void)\n{",
@@ -77,7 +81,7 @@ exe = out / ("recon-journal-storage-check.exe" if os.name == "nt" else "recon-jo
 env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(out / "zig-cache"))
 subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-O1",
     "-Wall", "-Wextra", "-Werror", "-I", str(out),
-    "-I", str(root / "tools/host_checks/stubs"),
+    "-I", str(root / "tools/host_checks/stubs"), "-I", str(root / "s3_main/main"),
     str(root / "tools/host_checks/recon_journal_storage_check.c"), "-o", str(exe)],
     check=True, env=env)
 with tempfile.TemporaryDirectory(prefix="files-", dir=out) as temporary:

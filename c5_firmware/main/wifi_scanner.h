@@ -12,6 +12,7 @@ extern "C" {
 #endif
 
 esp_err_t cerberus_wifi_scanner_init(void);
+esp_err_t cerberus_wifi_packet_count_exchange(uint8_t command,const void *request,size_t request_size,void *reply,size_t reply_size);
 void cerberus_wifi_probe_sniff_info(cerberus_probe_sniff_control_t *out);
 esp_err_t cerberus_wifi_probe_sniff_start(const cerberus_probe_sniff_start_t *request,cerberus_probe_sniff_control_t *out);
 esp_err_t cerberus_wifi_probe_sniff_status(uint64_t session,cerberus_probe_sniff_control_t *out);

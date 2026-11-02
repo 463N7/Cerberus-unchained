@@ -6,6 +6,7 @@
 #include "wardrive_service.h"
 #include "wifi_target_view.h"
 #include "wifi_packet_monitor_core.h"
+#include "wifi_packet_count_scan.h"
 #include "csi_link.h"
 #include "csi_ui.h"
 #include "ble_test.h"
@@ -233,6 +234,7 @@ typedef enum {
     UI_WIFI_MODE_BASELINE,
     UI_WIFI_MODE_DUAL,
     UI_WIFI_MODE_PROBE_SNIFF,
+    UI_WIFI_MODE_PACKET_COUNT,
 } ui_wifi_mode_t;
 
 typedef cerberus_s3_wifi_ssid_analysis_t ui_wifi_ssid_analysis_t;
@@ -364,6 +366,11 @@ static void mesh_ui_back(void);
 static void mesh_ui_tap(uint16_t x, uint16_t y);
 static esp_err_t mesh_ui_draw(void);
 static bool mesh_ui_busy(void);
+static bool wifi_packet_count_ui_busy(void);
+static esp_err_t wifi_packet_count_open_selection(const wifi_packet_count_selection_t *selection, uint8_t origin);
+static void wifi_packet_count_back(void);
+static void wifi_packet_count_tap(uint16_t x, uint16_t y);
+static esp_err_t wifi_packet_count_draw(void);
 static bool mesh_archive_is_file(const char *name);
 static void mesh_archive_open_file(const char *path, const char *name);
 static void mesh_archive_files(void);
@@ -8199,6 +8206,7 @@ static esp_err_t draw_detail_page(void)
 {
     if (current_page == UI_PAGE_MESH_ARCHIVE) return mesh_archive_draw();
     if (current_page == UI_PAGE_IEEE802154 && ieee802154_mode == UI_IEEE802154_MODE_MESH) return mesh_ui_draw();
+    if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_PACKET_COUNT) return wifi_packet_count_draw();
     if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_PROBE_SNIFF) return probe_sniff_draw();
     if (wardrive_gps_view_is_open()) return wardrive_gps_view_draw();
     if (wardrive_recent_is_open()) return wardrive_recent_draw();
@@ -9099,6 +9107,7 @@ static void handle_wifi_tap(uint16_t x, uint16_t y)
     if (wifi_mode == UI_WIFI_MODE_PROBE_SNIFF) {
         probe_sniff_tap(x, y); ESP_ERROR_CHECK(draw_detail_page()); return;
     }
+    if (wifi_mode == UI_WIFI_MODE_PACKET_COUNT) { wifi_packet_count_tap(x, y); ESP_ERROR_CHECK(draw_detail_page()); return; }
     if (wifi_mode == UI_WIFI_MODE_DUAL) { dual_wifi_live_tap(x, y); return; }
     if (wifi_mode == UI_WIFI_MODE_TARGET) {
         wifi_target_handle_tap(x,y); ESP_ERROR_CHECK(draw_current_page()); return;
@@ -11489,6 +11498,7 @@ static void handle_scripts_tap(uint16_t x, uint16_t y)
 
 #include "sentinel_live_ui.h"
 #include "dual_wifi_live_ui.h"
+#include "wifi_packet_count_ui.h"
 #include "probe_sniff_ui.h"
 #include "mesh_ui.h"
 #include "mesh_archive_ui.h"
@@ -12088,6 +12098,9 @@ static void handle_tap(uint16_t x, uint16_t y)
         return;
     }
 
+    if (!ui_capability_blocked && current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_PACKET_COUNT) {
+        wifi_packet_count_tap(x, y); ESP_ERROR_CHECK(draw_detail_page()); return;
+    }
     if (!ui_capability_blocked && current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_DUAL) {
         dual_wifi_live_tap(x, y);
         return;
@@ -12576,6 +12589,9 @@ void cerberus_ui_run(const cerberus_ui_config_t *config)
         mesh_archive_tick(screen_asleep);
         mesh_ui_tick((uint64_t)now_ms, current_page == UI_PAGE_IEEE802154 &&
             ieee802154_mode == UI_IEEE802154_MODE_MESH && !screen_asleep);
+        wifi_packet_count_tick((uint64_t)now_ms, current_page == UI_PAGE_WIFI &&
+            wifi_mode == UI_WIFI_MODE_PACKET_COUNT && !screen_asleep,
+            current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_DUAL && !screen_asleep);
         probe_sniff_tick((uint64_t)now_ms, current_page == UI_PAGE_WIFI &&
             wifi_mode == UI_WIFI_MODE_PROBE_SNIFF && !screen_asleep);
         bool channels_visible = current_page == UI_PAGE_WIFI &&

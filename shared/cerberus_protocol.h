@@ -16,6 +16,7 @@
 #include "dual_ble_protocol.h"
 #include "probe_sniff_protocol.h"
 #include "mesh_observation_protocol.h"
+#include "wifi_packet_count_protocol.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,7 +24,7 @@ extern "C" {
 
 #define CERBERUS_PROTOCOL_VERSION_V1 1U
 #define CERBERUS_PROTOCOL_VERSION 2U
-#define CERBERUS_C5_FIRMWARE_VERSION 73U
+#define CERBERUS_C5_FIRMWARE_VERSION 74U
 #define CERBERUS_SPI_MAGIC 0x43455242UL
 #define CERBERUS_SPI_TRANSFER_SIZE 32U
 #define CERBERUS_SPI_FRAME_PAYLOAD_SIZE 22U
@@ -191,6 +192,17 @@ typedef enum {
     CERBERUS_SPI_COMMAND_MESH_LOCATE_PEEK = 158,
     CERBERUS_SPI_COMMAND_MESH_LOCATE_READ = 159,
     CERBERUS_SPI_COMMAND_MESH_LOCATE_RELEASE = 160,
+    CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_INFO = 161,
+    CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_BEGIN = 162,
+    CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_TARGET = 163,
+    CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_START = 164,
+    CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_STATUS = 165,
+    CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_STOP = 166,
+    CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_PEEK = 167,
+    CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_READ = 168,
+    CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_RELEASE = 169,
+    CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_RAW_READ = 170,
+    CERBERUS_SPI_COMMAND_WIFI_PACKET_COUNT_RAW_ACK = 171,
 } cerberus_spi_command_t;
 
 typedef enum {
@@ -1585,6 +1597,22 @@ static inline bool cerberus_protocol_frame_is_valid(const cerberus_spi_frame_t *
         frame->protocol_version == CERBERUS_PROTOCOL_VERSION &&
         frame->payload_length <= CERBERUS_SPI_FRAME_PAYLOAD_SIZE &&
         frame->crc16 == cerberus_protocol_crc16(frame, offsetof(cerberus_spi_frame_t, crc16));
+}
+
+static inline bool cerberus_protocol_prepare_packet_count_raw(cerberus_packet_count_raw_frame_t *out,
+    uint8_t sequence,const cerberus_packet_count_raw_chunk_t *payload)
+{
+    if(!out||!payload)return false;
+    memset(out,0,sizeof(*out));out->magic=CERBERUS_SPI_MAGIC;
+    out->protocol_version=CERBERUS_PROTOCOL_VERSION;out->command=CERBERUS_PACKET_COUNT_COMMAND_RAW_READ;
+    out->sequence=sequence;out->payload_length=sizeof(*payload);out->payload=*payload;
+    out->crc16=cerberus_protocol_crc16(out,offsetof(cerberus_packet_count_raw_frame_t,crc16));return true;
+}
+static inline bool cerberus_protocol_packet_count_raw_valid(const cerberus_packet_count_raw_frame_t *p)
+{
+    return p&&p->magic==CERBERUS_SPI_MAGIC&&p->protocol_version==CERBERUS_PROTOCOL_VERSION&&
+        p->command==CERBERUS_PACKET_COUNT_COMMAND_RAW_READ&&p->payload_length==sizeof(p->payload)&&
+        p->crc16==cerberus_protocol_crc16(p,offsetof(cerberus_packet_count_raw_frame_t,crc16));
 }
 
 static inline bool cerberus_protocol_prepare_event_batch(
