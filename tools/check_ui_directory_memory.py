@@ -100,7 +100,7 @@ for name, error in (("draw_files", "storage_last_error"),
 env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(out / "zig-global"),
            ZIG_LOCAL_CACHE_DIR=str(out / "zig-local"))
 exe = out / ("ui-directory-memory-check.exe" if os.name == "nt" else "ui-directory-memory-check")
-subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1",
+subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-O1",
     "-Wall", "-Wextra", "-Werror", "-I", str(out),
     str(root / "tools/host_checks/ui_directory_memory_check.c"), "-o", str(exe)],
     check=True, env=env)

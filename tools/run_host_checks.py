@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "artifacts" / "host-checks"
@@ -167,6 +168,61 @@ SERIAL_CHECKS = (
 )
 
 
+def registered_checks() -> tuple[str, ...]:
+    names = (*CHECKS, *SERIAL_CHECKS)
+    if len(names) != 138 or len(set(names)) != 138:
+        raise ValueError("Expected 138 unique suites; do not silently skip a suite")
+    return names
+
+
+def registry_sha256() -> str:
+    # Bind both the canonical order and the serial/parallel execution boundary.
+    registered_checks()
+    value = {"checks": CHECKS, "serial_checks": SERIAL_CHECKS}
+    return hashlib.sha256(json.dumps(value, sort_keys=True,
+        separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def selected_checks(shard_index: int | None = None,
+                    shard_count: int | None = None) -> tuple[str, ...]:
+    names = registered_checks()
+    if shard_index is None and shard_count is None:
+        return names
+    if (type(shard_index) is not int or type(shard_count) is not int or
+            not 1 <= shard_count <= len(names) or not 0 <= shard_index < shard_count):
+        raise ValueError("Supply both --shard-index and --shard-count; index is zero-based and count is 1..138")
+    return names[shard_index::shard_count]
+
+
+def source_head() -> str | None:
+    try:
+        result = subprocess.run(["git", "rev-parse", "--verify", "HEAD"], cwd=ROOT,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    value = result.stdout.strip()
+    return value if len(value) == 40 and all(c in "0123456789abcdef" for c in value) else None
+
+
+def source_clean() -> bool:
+    try:
+        result = subprocess.run(["git", "status", "--porcelain", "--untracked-files=normal"], cwd=ROOT,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    return not result.stdout.strip()
+
+
+def execution_context() -> dict:
+    run_id, attempt = os.environ.get("GITHUB_RUN_ID"), os.environ.get("GITHUB_RUN_ATTEMPT")
+    if run_id is None and attempt is None:
+        return {"kind": "local"}
+    if any(not isinstance(value, str) or not value.isascii() or not value.isdecimal() or
+           value.startswith("0") for value in (run_id, attempt)):
+        raise ValueError("GitHub execution requires both valid GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT")
+    return {"kind": "github_actions", "run_id": run_id, "run_attempt": attempt}
+
+
 def run(name: str) -> dict:
     # Some older harnesses inherit Zig's shared default cache. Give each suite
     # independent cache roots while preserving each harness's own overrides.
@@ -175,6 +231,7 @@ def run(name: str) -> dict:
                  "ZIG_LOCAL_CACHE_DIR": str(cache / "local")}
     for directory in overrides.values():
         Path(directory).mkdir(parents=True, exist_ok=True)
+    started = time.perf_counter()
     result = subprocess.run(
         [sys.executable, str(ROOT / "tools" / name)], cwd=ROOT,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -187,6 +244,7 @@ def run(name: str) -> dict:
         print(result.stdout[-3000:].decode("utf-8", errors="replace"), flush=True)
     return {
         "check": name, "exit_code": result.returncode,
+        "duration_seconds": round(time.perf_counter() - started, 6),
         "log": path.relative_to(ROOT).as_posix(),
         "log_sha256": hashlib.sha256(result.stdout).hexdigest(),
         "cache_roots": {key: Path(value).relative_to(ROOT).as_posix() for key, value in overrides.items()},
@@ -197,12 +255,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true", help="List suites without running them")
     parser.add_argument("--jobs", type=int, default=3, help="Parallel compiler jobs (default: 3)")
+    parser.add_argument("--shard-index", type=int, help="Zero-based shard index; omitted runs the full registry")
+    parser.add_argument("--shard-count", type=int, help="Number of isolated shards; requires --shard-index")
     args = parser.parse_args()
-    names = (*CHECKS, *SERIAL_CHECKS)
-    if len(names) != 138 or len(set(names)) != 138:
-        parser.error("Expected 138 unique suites; do not silently skip a suite")
+    try:
+        names = registered_checks()
+        selected = selected_checks(args.shard_index, args.shard_count)
+        execution = execution_context()
+    except ValueError as error:
+        parser.error(str(error))
     if args.list:
-        for name in names:
+        for name in selected:
             print(name)
         return 0
     if args.jobs < 1:
@@ -217,31 +280,64 @@ def main() -> int:
         parser.error("Expected ziglang==0.14.1; install the pinned host compiler")
     from build_unified import inputs
 
+    head = source_head()
+    if args.shard_count is not None and head is None:
+        parser.error("Sharded runs require an identifiable Git HEAD")
+    clean = source_clean() if args.shard_count is not None else None
+    if args.shard_count is not None and not clean:
+        parser.error("Sharded runs require a clean Git checkout; use the default full run for local changes")
     OUTPUT.mkdir(parents=True, exist_ok=True)
+    path = OUTPUT / "host-checks.json"
+    # A cancelled run must not leave an earlier successful receipt behind.
+    path.unlink(missing_ok=True)
     before = inputs()
+    chosen = set(selected)
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        results = list(pool.map(run, CHECKS))
+        results = list(pool.map(run, (name for name in CHECKS if name in chosen)))
     # These harnesses create shared generated UI fixture headers.
-    results.extend(run(name) for name in SERIAL_CHECKS)
+    results.extend(run(name) for name in SERIAL_CHECKS if name in chosen)
     after = inputs()
+    head_after = source_head()
+    clean_after = source_clean() if args.shard_count is not None else None
     changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
     receipt = {
         "format": 1,
         "suite_set": "rev128",
         "recorded_utc": datetime.now(timezone.utc).isoformat(),
-        "status": "passed" if not changed and all(r["exit_code"] == 0 for r in results) else "failed",
+        "status": "passed" if not changed and head == head_after and
+            (args.shard_count is None or clean_after) and
+            tuple(r["check"] for r in results) == selected and
+            all(r["exit_code"] == 0 for r in results) else "failed",
         "hardware_validated": False,
+        "platform": sys.platform,
+        "source_head": head,
+        "source_head_after": head_after,
+        "source_clean": clean,
+        "source_clean_after": clean_after,
+        "execution": execution,
+        "registry_sha256": registry_sha256(),
+        "registered_suite_count": len(names),
+        "selection": {
+            "mode": "full" if args.shard_count is None else "shard",
+            "shard_index": args.shard_index,
+            "shard_count": args.shard_count if args.shard_count is not None else 1,
+            "selected_names": list(selected),
+            "selected_suite_count": len(selected),
+        },
         "python_version": sys.version.split()[0],
         "ziglang_version": importlib.metadata.version("ziglang"),
         "inputs_changed": changed,
         "inputs_after": after,
         "checks": results,
     }
-    path = OUTPUT / "host-checks.json"
     path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     print(f"{receipt['status']}: {len(results)} suites; receipt: {path}", flush=True)
     if changed:
         print("Source/configuration inputs changed during validation; rerun on stable inputs.")
+    if head != head_after:
+        print("Git HEAD changed during validation; rerun on one source revision.")
+    if args.shard_count is not None and not clean_after:
+        print("Git checkout became dirty during shard execution; rerun on clean source.")
     return 0 if receipt["status"] == "passed" else 1
 
 

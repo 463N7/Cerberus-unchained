@@ -1,9 +1,9 @@
 # Cerberus Unchained build and release
 
 Unchained is experimental firmware built on its rev81 foundation, with the
-rev82–93 passive observation, analysis, storage and Wardriving additions in this
-contribution. The source version comes from the checked-in CMake configuration;
-the onboard C5 protocol revision remains 60. A version label, host check or
+accumulated dual-radio observation, analysis, storage and Wardriving additions.
+The source version comes from the checked-in CMake configuration; rev128 targets
+onboard C5 capability revision 71. A version label, host check or
 compiler result does not establish on-device acceptance.
 
 ## Hardware and builds
@@ -54,10 +54,22 @@ python tools/check_build_unified.py
 python tools/check_field_kit.py
 ```
 
-The runner covers 115 named suites and uses separate Zig caches. Run it against
+The runner covers 138 named suites and uses separate Zig caches. Run it against
 stable sources, separately from firmware builds. See [validation](VALIDATION.md)
 and [the current contribution and remaining work](CONTRIBUTION_REV93.md). The
 [original rev81 contribution](CONTRIBUTION_REV81.md) remains historical context.
+
+Hosted CI runs the full suite on Ubuntu and four isolated Windows shards. Each
+Windows shard keeps its serial UI fixtures sequential. The aggregate gate
+requires all 138 suites exactly once, matching source/registry/commit hashes,
+verified log hashes and a single GitHub run attempt. Ancillary build-report,
+SD-resource and shard-regression checks still run on both operating systems.
+
+For a failed hosted attempt, use **Re-run all jobs**. Artifact names and receipts
+are attempt-specific; a failed-only rerun cannot borrow passing shard artifacts
+from a prior attempt. Default local invocation remains a complete unsharded run.
+Explicit local shards require a clean Git checkout and can be verified with
+`tools/verify_host_shards.py --local`; see that command's help for arguments.
 
 ## Recovery and matched processors
 
