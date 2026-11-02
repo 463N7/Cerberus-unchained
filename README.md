@@ -46,8 +46,8 @@ between preflight and Start. The session-bound control/readout and
 renewable ownership lease preserve existing passive metrics while preventing
 stale commands from controlling a replacement survey. All 136 host suites and
 five native targets pass with unchanged inputs. Linked fixed data/BSS grows by
-16 S3 bytes and 88 C5 bytes, with no new task or observation bank. Matched
-packaging is pending. See [rev127](docs/DUAL_RADIO_REV127.md). Installed firmware is
+16 S3 bytes and 88 C5 bytes, with no new task or observation bank. The matched
+local package passes verification. See [rev127](docs/DUAL_RADIO_REV127.md). Installed firmware is
 rev126, with the owner's targeted Recon controls and priority acceptance.
 
 Rev126 implements owner feedback on Recon: recognized hints appear first in a

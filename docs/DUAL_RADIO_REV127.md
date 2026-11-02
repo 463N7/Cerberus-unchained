@@ -1,7 +1,7 @@
 # Rev127: Channel Survey session ownership
 
-This checkpoint passes the complete host and native build matrices and linked
-resource inspection. Matched local packaging is pending; it is not installed.
+This checkpoint passes the complete host and native build matrices, linked
+resource inspection and matched local package verification. It is not installed.
 The connected device now runs rev126 after verified paired installation and
 the owner's targeted acceptance of the Recon controls, label and priority.
 The full Marauder port remains unfinished.
@@ -83,7 +83,7 @@ Focused validation passes 4,865 composite checks through the actual C5 worker,
 dispatcher, S3 framing/validation and production UI, plus 18,827 native scoped
 service assertions. All 136 host suites and all five native targets pass on
 the same unchanged source/configuration inputs. Linked resource inspection
-passes; matched packaging and physical survey acceptance remain pending.
+passes; physical survey acceptance remains pending.
 No device, network transmission, publication or pull-request operation is part
 of the offline reproduction or implementation.
 
@@ -125,3 +125,13 @@ debug information. That typedef has no linked debug entry because S3 transmits
 the scalar directly. The corrected helper explicitly records that absence;
 it does not call it a zero-size measurement. The failed helper output is
 retained separately and the successful audit binds the same final ELFs.
+
+The final receipts bind 1,122 unchanged inputs. Local source commit
+`3396ab623df8a1ab3d8f4b4713030d9fa1338174` produced matched package
+`cerberus-unchained-0.1.0-dev.rev127-20261102T000402Z`. Its manifest SHA-256 is
+`05fe827347deda50151c333f29a5159d4cf50c7630884d34493aa370dfd7bb4f`.
+The packaged S3, onboard C5 and temporary bridge applications match the retained
+native matrix hashes. Package verification does not select a public release,
+flash the device or establish physical survey acceptance; rev126 remains
+installed. The next agreed major milestone is the passive Probe Sniff workflow,
+followed by an update to existing Unchained PR #1 and a requested pause.
