@@ -29,14 +29,19 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source version: `0.1.0-dev.rev136`, targeting onboard C5 protocol
-firmware revision 74. Rev135 remains installed with verified paired writes and
-boot checks; 2.4 GHz Packet Count reception, matching, Stop/Back and the next
-split Wi-Fi scan are confirmed. Rev136's recorder memory optimization passes
-the full local host/native matrix and package verification, but has not been
-flashed. A public binary release has not been selected.**
-The web installer remains unavailable until a matched release is deliberately selected.
-Sentinel 1.0.0 binaries are not Unchained firmware.
+**Current experimental release: `0.1.0-dev.rev136`, paired with onboard C5
+firmware revision 74 and protocol 2.**
+
+[Install with the web flasher](https://463n7.github.io/Cerberus-unchained/) or
+[download the matched package and checksums](https://github.com/463N7/Cerberus-unchained/releases/tag/v0.1.0-dev.rev136).
+The guided installer programs the bridge, C5 and final S3 application using one
+USB cable. Open it directly in desktop Chrome or Edge.
+
+Native builds, matched packaging, installer checks and the complete Ubuntu/Windows
+host checks pass. Rev136 remains experimental and has not received a full hardware
+acceptance run. Earlier rev135 device evidence covers specific receive and cleanup
+paths; see [the checkpoint](docs/DUAL_RADIO_REV136.md) for remaining scope and
+[the flasher guide](docs/WEB_FLASHER.md) for installation and recovery.
 
 ## Build and validation
 

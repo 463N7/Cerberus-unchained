@@ -11,14 +11,16 @@ license notices are bundled locally. No account or desktop application is needed
 
 ## Current publication state
 
-The rev136 GitHub prerelease is prepared as a **draft**. The redesigned flasher
-is a **local preview**, pending the owner's requested visual review. No workflow
-deploys it automatically. Pushing this source branch or passing web CI does not
-publish a website. The download link will become public when the release is
-published.
+The owner approved publication on 2026-11-03. The public endpoints are:
 
-Publish to an Unchained-specific destination after review. The existing Sentinel
-flasher has its own audience, firmware selection and history.
+- [Cerberus Unchained web flasher](https://463n7.github.io/Cerberus-unchained/)
+- [rev136 experimental prerelease and matched package](https://github.com/463N7/Cerberus-unchained/releases/tag/v0.1.0-dev.rev136)
+
+GitHub Pages serves the verified static files from this repository's `gh-pages`
+branch at its root, with `.nojekyll` present. Source development remains on
+`main`. Pushing source or passing web CI does not update the live website;
+publication requires updating the dedicated static branch. The existing Sentinel
+flasher retains its own destination.
 
 ## Supported hardware and browser
 
@@ -80,8 +82,10 @@ Run `npm --prefix web run dev -- --port 4173` for local preview. Review the page
 release notes, supported hardware, consent, disabled/error states and recovery
 controls. No preview or automated browser check should initiate a physical flash.
 
-Publish only the verified **contents of `web/dist/`** to the chosen static HTTPS
-host. Relative build URLs support a GitHub Pages project path. Preserve required
+Publish only the verified **contents of `web/dist/`** to the `gh-pages` branch
+root and retain `.nojekyll`. Relative build URLs support the GitHub Pages project
+path. Disable Git line-ending conversion in the publication checkout and verify
+the committed release bytes before pushing. Preserve required
 font, dependency and firmware notices. Never publish build logs, board reports,
 backups, `.git`, credentials, toolchains or the workspace as the site.
 
