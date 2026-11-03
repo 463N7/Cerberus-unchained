@@ -29,10 +29,11 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source version: `0.1.0-dev.rev133` (in development), targeting onboard
-C5 protocol firmware revision 74. No Unchained binary release is selected yet.**
-The installer stays unavailable until an Unchained matched image set is built
-and deliberately selected. Sentinel 1.0.0 binaries are not Unchained firmware.
+**Current source version: `0.1.0-dev.rev133`, targeting onboard C5 protocol
+firmware revision 74. The locally installed development build passes host/native
+and matched-package checks; a public binary release has not been selected.**
+The web installer remains unavailable until a matched release is deliberately selected.
+Sentinel 1.0.0 binaries are not Unchained firmware.
 
 ## Build and validation
 
@@ -61,13 +62,23 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 
 ## Development status
 
-Rev133 adds a selected AP/client Packet Count workflow with a separate target
-list, disjoint S3/C5 channel coverage, cumulative per-target counts and optional
-per-receiver PCAPNG files on SD. Exact session ownership, immutable transfer
-pins, recording drain and source-clock validity are checked independently.
-The [rev133 checkpoint](docs/DUAL_RADIO_REV133.md) records validation and remaining
-physical acceptance; source implementation does not establish full feature
-parity. Rev132 is the installed baseline while this candidate is validated.
+Rev133 adds passive **Packet Count** from a selected Wi-Fi AP or observed
+client, with a separate list of up to 16 targets, explicit Start/Stop and
+optional per-receiver PCAPNG files on SD. Multiple-channel plans split coverage
+between S3 and C5 without overlapping channel assignments; one fixed channel
+uses C5 reception while S3 handles control, analysis and storage. Totals count
+delivered observations, not packets per second, unique packets or proven
+associations. Count-only mode allocates no raw recording queues or worker.
+
+All 157 host suites, five native targets, the linked resource audit and matched
+package verification pass on 1,230 unchanged inputs. The
+[rev133 checkpoint](docs/DUAL_RADIO_REV133.md) records exact package and resource
+costs. The matched rev133 pair is installed with verified writes, mounted SD
+and two passing sampled boot checks. This establishes installation, not live
+Packet Count acceptance.
+Physical Packet Count/recording acceptance, rev132 Mesh Save/Open and Locate
+acceptance remain pending. Counter CSV, serial capture and full parity are
+unfinished.
 
 Rev132 implements native Mesh saved maps: portable `.MSH` files, asynchronous
 SD save/open and historical observation browsing with CSV export. All 151 host

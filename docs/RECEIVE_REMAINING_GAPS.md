@@ -2,13 +2,13 @@
 
 Latest source audit, 2026-11-02: the live GitHub `develop` commit resolves to
 `79cc6bcba1db6679baee1dab2b0c1ad5010e6363`, still matching the pinned source.
-Installed [rev132](DUAL_RADIO_REV132.md) passes the complete host/native matrix,
-matched packaging, installation and sampled paired boot checks. The owner has
+Installed [rev133](DUAL_RADIO_REV133.md) passes 157 host suites, five native
+targets, its resource audit and matched package verification on 1,230 unchanged
+inputs, plus verified paired writes and sampled boot checks. The owner has
 accepted rev131's Mesh menu-first navigation and Back. Historical Mesh Save/Open,
-real Mesh reception and Locate acceptance remain pending. Rev133 is developing
-[selected AP/client Packet Count](DUAL_RADIO_REV133.md); its source checks and
-physical acceptance remain separate. Earlier audit history below keeps its
-original scope.
+real Mesh reception and Locate acceptance remain pending. Physical Packet Count
+and recording acceptance remain separate from the completed installation.
+Earlier audit history keeps its original scope.
 
 This source audit used Cerberus `41b65fdec1f2dc1ccdb01d73e56887dee5d9194e`
 and the clean pinned Marauder develop checkout
@@ -115,19 +115,32 @@ target's count and appends matching frames to the capture buffer. Its
 shows per-selected-target totals. That first-match behavior is not complete
 per-endpoint accounting.
 
-Cerberus's packet monitor and Channel Survey aggregate channel activity.
-Selected-BSSID capture already exposes whole-job heard/written/drop counters;
-those must not be erased from the parity assessment. Neither supplies the
-distinct selected-AP/station counting view described above. A future receive
-implementation should bind frozen target identity and channel, distinguish
-observed source/destination roles, preserve unknown signal and dropped/gapped
-coverage, and provide exact Start/Stop/Back cleanup. C5 can count bounded clear
-headers while S3 presents the selected target and history. No association or
-physical-device identity should be inferred from a matching header address.
+Rev133 implements this distinct selected-target workflow. A frozen AP or
+observed-client detail seeds a separate list of up to 16 role/MAC targets.
+Opening the page does not start RF. Each target independently counts immediate
+transmitter/receiver matches once per callback, with a separate global union
+count and BSSID-context count. An AP match cannot consume a client's count.
+RSSI updates only for transmissions from the target. Retry, protected and
+fragmented frames remain subsets; totals are neither PPS nor unique packets
+or authenticated association evidence.
 
-This is an identified gap, not an implemented feature. Parser/role/clock and
-session regressions, frozen selection and export tests, plus real receive/count
-accuracy checks are required. A channel graph cannot stand in for this outcome.
+Multi-channel plans partition reception across S3 2.4 GHz and C5's remaining
+2.4/5 GHz channels. A single channel uses C5 reception and S3 control/analysis.
+Only definite clean S3 admission failure permits C5 fallback. Manual retunes
+drain the previous segment before accumulating its totals. Source clocks,
+coverage, failed tunes and recording losses retain separate meanings.
+Count-only operation allocates no raw packet queue or recorder. Explicit
+recording adds bounded per-source queues and separate S3/C5 PCAPNG files on SD;
+queue or file failure does not rewrite counter totals as saved packets.
+
+The complete 157-suite host matrix, five native builds, linked resource audit
+and matched package verification pass on 1,230 unchanged inputs. The matched
+rev133 pair is installed with verified writes and sampled boot checks. Physical
+counting and recording accuracy, repeated Stop/Back/retune, split coverage, real SD contents
+and sustained-load behavior still need acceptance. Counter CSV export and the
+upstream serial capture option remain unimplemented. Packet Monitor, Channel
+Survey and selected-BSSID capture remain separate workflows; none substitutes
+for this selected-target feature or establishes full parity.
 
 ## GPS Data and NMEA presentation
 
