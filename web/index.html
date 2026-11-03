@@ -67,8 +67,19 @@
       </div>
       <details class="technical"><summary><span aria-hidden="true">&gt;_</span> Installation log <span class="log-caption">LOCAL SESSION OUTPUT</span></summary><pre id="log" aria-label="Installation log">Waiting for firmware verification…</pre></details>
     </section>
+    <section id="sd-assets" class="sd-assets" aria-labelledby="sd-title">
+      <div class="sd-heading"><div><p class="eyebrow">02 / SD CARD</p><h2 id="sd-title">Set up your SD card.</h2><p class="sd-intro">Add vendor names, the optional portal page, help and sample scripts. Firmware flashing updates the chips; these files are copied to your card separately.</p></div><div class="sd-download"><a class="download-button" href="./downloads/cerberus-unchained-sd-assets-rev136.zip" download>Download SD assets <span aria-hidden="true">↓</span></a><span class="micro">REV136 ASSET PACK · 1.1 MB ZIP</span><a class="text-link" href="./downloads/cerberus-unchained-sd-assets-rev136.zip.sha256" download>SHA-256 checksum ↓</a></div></div>
+      <ol class="sd-steps">
+        <li><span class="guide-mark" aria-hidden="true">01—</span><h3>Download and extract.</h3><p>Save the ZIP to your computer and extract it. Inside is a folder named <code>CERBERUS</code>.</p></li>
+        <li><span class="guide-mark" aria-hidden="true">02—</span><h3>Copy to the card.</h3><p>Power Cerberus off and use a card reader with a <strong>FAT32 microSD card</strong>. Back up an existing card, then copy the <code>CERBERUS</code> folder to its top level. Merge with an existing folder, keeping your logs, recordings and custom files.</p></li>
+        <li><span class="guide-mark" aria-hidden="true">03—</span><h3>Eject, insert and start.</h3><p>Safely eject the card from your computer. Insert it while Cerberus is powered off, then turn the device on.</p></li>
+      </ol>
+      <div class="sd-location"><span class="micro">CHECK THE FOLDER LOCATION</span><p><code>SD card / CERBERUS / RECON.DB</code></p><span>Copy the extracted folder itself, so you don’t end up with <code>CERBERUS/CERBERUS</code>.</span></div>
+      <p class="sd-footnote">Boot and basic scanning work without this pack. Recordings and saved maps are created by the firmware on the card.</p>
+      <details class="sd-usb"><summary>Already using Cerberus USB SD mode?</summary><p>After installing the firmware, you can copy the extracted files through its USB SD drive instead of using a card reader. Eject that drive in your computer, then select <strong>RETURN SD TO FIRMWARE</strong> on Cerberus before using SD features.</p></details>
+    </section>
     <section id="release-notes" class="release-section" aria-labelledby="release-title">
-      <div class="release-overview"><p class="eyebrow">02 / FIRMWARE</p><h2 id="release-title">More signal.<br> More to explore.</h2><p class="section-copy">rev136 brings the expanded Unchained toolset to the production Cerberus.</p><a class="text-link" id="github-release" href="https://github.com/463N7/Cerberus-unchained/releases/tag/v0.1.0-dev.rev136" target="_blank" rel="noopener noreferrer">Download package &amp; full release notes ↗</a><p class="release-caution">Experimental release. Automated checks pass; full hardware and feature acceptance remains in progress.</p></div>
+      <div class="release-overview"><p class="eyebrow">03 / FIRMWARE</p><h2 id="release-title">More signal.<br> More to explore.</h2><p class="section-copy">rev136 brings the expanded Unchained toolset to the production Cerberus.</p><a class="text-link" id="github-release" href="https://github.com/463N7/Cerberus-unchained/releases/tag/v0.1.0-dev.rev136" target="_blank" rel="noopener noreferrer">Download package &amp; full release notes ↗</a><p class="release-caution">Experimental release. Automated checks pass; full hardware and feature acceptance remains in progress.</p></div>
       <div class="feature-list">
         <article><span class="feature-index">[01]</span><div><h3>Two radios. A wider view.</h3><p>Combined 2.4 / 5 GHz Wi-Fi discovery, complementary BLE reception and the Recon Dashboard and Radar.</p></div><span class="feature-symbol" aria-hidden="true">⌁</span></article>
         <article><span class="feature-index">[02]</span><div><h3>Follow the mesh.</h3><p>Passive 802.15.4 observation, selected-source Locate, saved maps and CSV export.</p></div><span class="feature-symbol" aria-hidden="true">⌘</span></article>
@@ -76,7 +87,7 @@
       </div>
     </section>
     <section id="help" class="field-guide" aria-labelledby="help-title">
-      <div class="section-heading"><div><p class="eyebrow">03 / FIELD GUIDE</p><h2 id="help-title">Before you connect.</h2></div><span class="micro">A LITTLE PREP GOES A LONG WAY</span></div>
+      <div class="section-heading"><div><p class="eyebrow">04 / FIELD GUIDE</p><h2 id="help-title">Before you connect.</h2></div><span class="micro">A LITTLE PREP GOES A LONG WAY</span></div>
       <div class="bottom-grid">
         <div><span class="guide-mark" aria-hidden="true">01—</span><h3>Bring the right board.</h3><p>Production Cerberus with an ESP32-S3, 16 MB flash, 2 MB PSRAM and onboard C5. No expansion board is required. Images are checked against the selected processor before writing.</p></div>
         <div><span class="guide-mark" aria-hidden="true">02—</span><h3>Give it a few minutes.</h3><p>The guided flow installs a temporary bridge, the C5 radio, then the S3 application. Select the same board when USB reconnects. The radio step takes several minutes.</p></div>

@@ -35,6 +35,19 @@ complete physical installation and recovery check when qualifying the installer.
 
 ## Matched release preparation
 
+The page includes an SD asset download and setup section directly after the
+installer. `web/public/downloads/cerberus-unchained-sd-assets-rev136.zip` contains
+the validated `CERBERUS` folder, with a separate archive SHA-256 file. The pack
+provides the vendor database, optional portal page, help and sample scripts;
+boot and basic scans do not require it. Captures and saved maps are generated
+on the card by the firmware. See [the SD guide](../sdcard/README.md) for copy steps.
+
+Build the pack with `python tools/build_sd_resources.py`, then copy the resulting
+ZIP from `artifacts/sd-resources/` to a new versioned public download filename and
+write its `.sha256` file. Check every ZIP entry against `CERBERUS/RESOURCES.JSON`,
+verify the database, and retain notices. Published download names are immutable.
+Asset ZIPs and checksums are also attached to the corresponding GitHub prerelease.
+
 Build the three onboard targets from unchanged firmware inputs:
 
 ```sh
