@@ -20,10 +20,13 @@ idf_component_register(
         "fragment_transfer.c"
         "ieee802154_scanner.c"
         "wifi_scanner.c"
+        "../../shared/wifi_packet_count.c"
         "wifi_capture_service.c"
         "../../shared/cerberus_watch_capture.c"
         "../../shared/remote_id_channel_plan.c"
         "../../shared/mac_observation.c"
+        "../../shared/mesh_mac.c"
+        "../../shared/probe_sniff_core.c"
         "../../shared/sentinel_watch_protocol.c"
     INCLUDE_DIRS
         "."

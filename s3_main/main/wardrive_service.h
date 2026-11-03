@@ -2,6 +2,7 @@
 
 #include "esp_err.h"
 #include "wardrive_gps_core.h"
+#include "wardrive_recent.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -71,6 +72,35 @@ typedef struct {
     char last_file_name[24];
 } cerberus_wardrive_status_t;
 
+/* A bounded, value-only view of processed AP/BLE results. Receipt is processing
+ * uptime, not RF time. APPENDED outcomes do not establish SD durability. The
+ * history survives worker cleanup; allocation failure affects only this view. */
+typedef struct {
+    uint64_t session_id, revision, events;
+    uint32_t clock_faults;
+    uint8_t count, retained_events;
+    bool available, worker_active;
+    cerberus_wardrive_state_t state;
+    esp_err_t error, view_error;
+} cerberus_wardrive_recent_status_t;
+
+typedef struct {
+    uint64_t session_id, revision;
+    uint8_t count, retained_events;
+    bool available, worker_active;
+    cerberus_wardrive_state_t state;
+    esp_err_t error, view_error;
+    cerberus_wardrive_recent_row_t rows[CERBERUS_WARDRIVE_RECENT_VISIBLE];
+} cerberus_wardrive_recent_snapshot_t;
+
+/* Both getters perform only bounded copies under the service lock. They do
+ * not allocate, read SD/GPS, poll radios, or return producer-owned pointers. */
+void cerberus_wardrive_copy_recent(cerberus_wardrive_recent_snapshot_t *out);
+void cerberus_wardrive_get_recent_status(cerberus_wardrive_recent_status_t *out);
+/* Fails while a Start is admitted or its worker is active. IDs are not reused
+ * after Clear. This frees only retained history, never worker-owned memory. */
+esp_err_t cerberus_wardrive_clear_recent(void);
+
 /* Start requires exclusive access to the onboard C5 scan and S3 BLE scanner.
  * The UI must suspend/drain Recon before calling. R1-R6 are opt-in; enabling
  * them does not imply that expansion radios are installed. GPS is opt-in;
@@ -81,6 +111,9 @@ esp_err_t cerberus_wardrive_start(bool include_expansions, bool enable_gps);
 /* Stop is asynchronous. Both terminal states mean the worker has closed its
  * SD file. STOPPED confirms release of all started scans; ERROR reports a
  * radio or storage fault, including an expansion STOP that remains uncertain.
+ * A held or uncertain accepted S3 BLE attachment keeps the worker and its
+ * streams in STOPPING, including after a cleanup timeout is reported. Only
+ * exact release or authoritative absence permits terminal cleanup.
  * A USB route may wait for either terminal state before handoff. */
 void cerberus_wardrive_request_stop(void);
 esp_err_t cerberus_wardrive_wait_stopped(uint32_t timeout_ms);

@@ -8,9 +8,19 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static unsigned tick, held, host_epoch;
 static unsigned mutex_takes, allocations;
+static unsigned frees, host_releases;
+static bool fail_host_release;
+static cerberus_s3_ble_host_lease_t current_host_lease;
+static uint64_t next_host_token;
+static void (*release_before)(void);
+static void (*infer_before)(void);
+static size_t available_internal = 128U * 1024U;
+static cerberus_s3_wifi_owner_t simulated_wifi_owner;
+static void (*claim_before)(void), (*claim_after)(void);
 static bool fail_discovery_lock, fail_discovery_allocation;
 static bool discovery_clock_rollback;
 static unsigned clock_reads;
@@ -45,23 +55,50 @@ int64_t esp_timer_get_time(void)
     }
     return value;
 }
-size_t heap_caps_get_free_size(unsigned caps) { (void)caps; return 128U * 1024U; }
+size_t heap_caps_get_free_size(unsigned caps) { (void)caps; return available_internal; }
 void *heap_caps_calloc(size_t n, size_t size, unsigned caps)
 { (void)caps; ++allocations;
   if (fail_discovery_allocation) { fail_discovery_allocation=false; return NULL; }
   return calloc(n, size); }
-void heap_caps_free(void *pointer) { free(pointer); }
+void heap_caps_free(void *pointer) { if (pointer) ++frees; free(pointer); }
 const char *esp_err_to_name(esp_err_t err) { (void)err; return "mock"; }
-cerberus_s3_wifi_owner_t cerberus_s3_wifi_owner(void) { return CERBERUS_S3_WIFI_NONE; }
+cerberus_s3_wifi_owner_t cerberus_s3_wifi_owner(void) { return simulated_wifi_owner; }
 cerberus_s3_ble_owner_t cerberus_s3_ble_host_owner(void) { return owner; }
 bool cerberus_s3_ble_host_initialized(void) { return true; }
 unsigned cerberus_s3_ble_host_epoch(void) { return host_epoch; }
-esp_err_t cerberus_s3_ble_host_claim(cerberus_s3_ble_owner_t requested)
-{ if (owner) return ESP_ERR_INVALID_STATE; owner = requested; return ESP_OK; }
-esp_err_t cerberus_s3_ble_host_release(cerberus_s3_ble_owner_t requested)
-{ if (owner != requested) return ESP_ERR_INVALID_STATE; owner = CERBERUS_S3_BLE_OWNER_NONE; return ESP_OK; }
+bool cerberus_s3_ble_host_lease_valid(const cerberus_s3_ble_host_lease_t *lease)
+{
+    return lease && lease->token && lease->token==current_host_lease.token &&
+        lease->epoch==host_epoch && lease->epoch==current_host_lease.epoch &&
+        lease->owner==owner && lease->owner==current_host_lease.owner;
+}
+esp_err_t cerberus_s3_ble_host_claim(cerberus_s3_ble_owner_t requested,
+    cerberus_s3_ble_host_lease_t *lease)
+{
+    if (!lease) return ESP_ERR_INVALID_ARG;
+    memset(lease,0,sizeof(*lease));
+    if (claim_before) claim_before();
+    if (owner) return ESP_ERR_INVALID_STATE;
+    owner=requested;
+    current_host_lease=(cerberus_s3_ble_host_lease_t){++next_host_token,host_epoch,requested};
+    *lease=current_host_lease;
+    if (claim_after) claim_after();
+    if (!cerberus_s3_ble_host_lease_valid(lease)) {
+        memset(lease,0,sizeof(*lease));return ESP_ERR_INVALID_STATE;
+    }
+    return ESP_OK;
+}
+esp_err_t cerberus_s3_ble_host_release(const cerberus_s3_ble_host_lease_t *lease)
+{
+    ++host_releases;
+    if (release_before) release_before();
+    if (!cerberus_s3_ble_host_lease_valid(lease)) return ESP_ERR_INVALID_STATE;
+    if (fail_host_release) return ESP_ERR_TIMEOUT;
+    owner=CERBERUS_S3_BLE_OWNER_NONE;current_host_lease=(cerberus_s3_ble_host_lease_t){0};
+    return ESP_OK;
+}
 int ble_hs_id_infer_auto(int privacy, uint8_t *type)
-{ (void)privacy; *type = 0; return 0; }
+{ (void)privacy; if (infer_before) infer_before(); *type = 0; return 0; }
 int ble_gap_disc(uint8_t type, int32_t duration, const struct ble_gap_disc_params *params,
     int (*callback)(struct ble_gap_event *, void *), void *arg)
 { (void)type; assert(duration == 8000 && params->passive == !expected_active && !radio_active);
@@ -357,6 +394,21 @@ static void check_wardrive_atomic_copy(void)
     puts("Wardrive completed-bank copy: 28-byte evidence; one lock, no RF/allocation, paired source validation and atomic failure checks passed.");
 }
 
+/* Parser fixtures may inject a scan-response callback into this passive
+ * procedure. That tests receive interpretation, never active scan behavior. */
+static esp_err_t test_analyzer_start(cerberus_ble_scan_status_payload_t *status)
+{
+    cerberus_s3_ble_analyzer_state_t state;
+    esp_err_t error=cerberus_s3_ble_scanner_analyzer_start(&state);
+    *status=state.scan;return error;
+}
+static esp_err_t test_analyzer_stop(cerberus_ble_scan_status_payload_t *status)
+{
+    cerberus_s3_ble_analyzer_state_t state;
+    esp_err_t error=cerberus_s3_ble_scanner_analyzer_stop(&state);
+    *status=state.scan;return error;
+}
+
 static void check_hc_peak_callbacks(void)
 {
     cerberus_ble_scan_status_payload_t status;
@@ -364,8 +416,8 @@ static void check_hc_peak_callbacks(void)
     const uint8_t hc03[]={6,9,'H','C','-','0','3'},hc05[]={6,9,'H','C','-','0','5'},
         hc06[]={6,9,'H','C','-','0','6'},ordinary[]={2,1,6};
     assert(cerberus_s3_ble_scanner_analyzer_begin()==ESP_OK);
-    expected_active=true;
-    assert(cerberus_s3_ble_scanner_start_active(&status)==ESP_OK);pump();
+    expected_active=false;
+    assert(test_analyzer_start(&status)==ESP_OK);pump();
     emit_hc_report(hc03,sizeof(hc03),127,false,1U,3U);
     assert(cerberus_s3_ble_scanner_analyzer_status(&view)==ESP_OK && view.last_hc_name==CERBERUS_BLE_HC_03);
     emit_hc_report(hc05,sizeof(hc05),-50,false,1U,3U);
@@ -624,6 +676,12 @@ static void check_watch_timing_callbacks(void)
 #include "s3_ble_mac_monitor_check.h"
 #include "s3_ble_discovery_native_check.h"
 
+#include "s3_ble_analyzer_binding_check.h"
+#include "s3_ble_track_binding_check.h"
+#include "s3_ble_passive_binding_check.h"
+#include "s3_ble_wardrive_binding_check.h"
+#include "s3_ble_host_binding_check.h"
+
 int main(void)
 {
     check_discovery_initial_diagnostics();
@@ -687,7 +745,7 @@ int main(void)
         view.active && view.total_events == 0U);
     uint8_t target[6] = {1, 2, 3, 4, 5, 6};
     assert(cerberus_s3_ble_scanner_track_begin(target, 1U) == ESP_ERR_INVALID_STATE);
-    assert(cerberus_s3_ble_scanner_start(&status) == ESP_OK);
+    assert(test_analyzer_start(&status) == ESP_OK);
     pump();
     assert(cerberus_s3_ble_scanner_analyzer_begin() == ESP_ERR_INVALID_STATE);
     uint8_t meta_ad[] = {3U, 0xFFU, 0x5FU, 0xFDU};
@@ -717,10 +775,10 @@ int main(void)
     tick += CERBERUS_BLE_ANALYZER_BUCKET_MS;
     assert(cerberus_s3_ble_scanner_analyzer_status(&view) == ESP_OK &&
         view.history_count == 1U && view.history[0] == 1U);
-    assert(cerberus_s3_ble_scanner_stop(&status) == ESP_OK);
+    assert(test_analyzer_stop(&status) == ESP_OK);
     pump();
     assert(owner == CERBERUS_S3_BLE_OWNER_NONE);
-    assert(cerberus_s3_ble_scanner_start(&status) == ESP_OK);
+    assert(test_analyzer_start(&status) == ESP_OK);
     pump();
 #if FAKE_EXT_SCAN
     adv.ext_disc.props = BLE_HCI_ADV_SCAN_RSP_MASK;
@@ -876,8 +934,8 @@ int main(void)
     /* Real callback/getter publication refreshes iBeacon payloads and binds
      * response metadata without changing the separately captured original. */
     assert(cerberus_s3_ble_scanner_analyzer_begin()==ESP_OK);
-    expected_active=true;
-    assert(cerberus_s3_ble_scanner_start_active(&status)==ESP_OK);
+    expected_active=false;
+    assert(test_analyzer_start(&status)==ESP_OK);
     pump();
     uint8_t beacon_a[27]={26U,0xffU,0x4cU,0U,2U,0x15U};
     beacon_a[23]=0x11U;beacon_a[26]=0x80U;
@@ -937,5 +995,10 @@ int main(void)
     check_watch_timing_callbacks();
     check_mac_monitor();
     check_discovery_native();
+    check_analyzer_binding();
+    check_track_binding();
+    check_passive_binding();
+    check_wardrive_binding();
+    check_host_binding();
     puts("S3 BLE event checks passed: finite duration, stale callbacks, reset reconciliation, 256-start byte wrap with fresh records, and safe rearm.");
 }

@@ -12,6 +12,13 @@ extern "C" {
 #endif
 
 esp_err_t cerberus_wifi_scanner_init(void);
+esp_err_t cerberus_wifi_packet_count_exchange(uint8_t command,const void *request,size_t request_size,void *reply,size_t reply_size);
+void cerberus_wifi_probe_sniff_info(cerberus_probe_sniff_control_t *out);
+esp_err_t cerberus_wifi_probe_sniff_start(const cerberus_probe_sniff_start_t *request,cerberus_probe_sniff_control_t *out);
+esp_err_t cerberus_wifi_probe_sniff_status(uint64_t session,cerberus_probe_sniff_control_t *out);
+esp_err_t cerberus_wifi_probe_sniff_stop(uint64_t session,cerberus_probe_sniff_control_t *out);
+esp_err_t cerberus_wifi_probe_sniff_release(uint64_t session,cerberus_probe_sniff_control_t *out);
+esp_err_t cerberus_wifi_probe_sniff_read(const cerberus_probe_sniff_read_t *request,cerberus_probe_sniff_chunk_t *out);
 esp_err_t cerberus_wifi_mac_start(const cerberus_mac_start_request_t *,cerberus_mac_status_t *);
 esp_err_t cerberus_wifi_mac_get_info(cerberus_mac_info_t *);
 esp_err_t cerberus_wifi_mac_get_status(const cerberus_mac_binding_t *,cerberus_mac_status_t *);
@@ -44,6 +51,13 @@ esp_err_t cerberus_wifi_station_stop(uint16_t job_id);
 void cerberus_wifi_station_status(uint16_t lease_job_id,cerberus_wifi_station_status_t *status);
 esp_err_t cerberus_wifi_station_result(const cerberus_wifi_station_query_t *query,cerberus_wifi_station_result_t *result);
 esp_err_t cerberus_wifi_scanner_start(void);
+esp_err_t cerberus_wifi_scanner_start_band(const cerberus_wifi_scan_band_request_t *request,
+    cerberus_wifi_scan_band_response_t *response);
+esp_err_t cerberus_wifi_scanner_band_info(cerberus_wifi_scan_band_response_t *response);
+esp_err_t cerberus_wifi_scanner_band_status(const cerberus_wifi_scan_band_request_t *request,
+    cerberus_wifi_scan_band_response_t *response);
+esp_err_t cerberus_wifi_scanner_band_stop(const cerberus_wifi_scan_band_request_t *request,
+    cerberus_wifi_scan_band_response_t *response);
 esp_err_t cerberus_wifi_probe_get_status(uint8_t generation, cerberus_wifi_probe_status_t *out);
 esp_err_t cerberus_wifi_probe_get_result_chunk(const cerberus_wifi_probe_query_t *query,
     cerberus_wifi_probe_chunk_t *out);
@@ -65,6 +79,21 @@ esp_err_t cerberus_wifi_watch_get_motion_timing(const cerberus_watch_scan_data_r
     cerberus_watch_scan_timing_payload_t *out);
 esp_err_t cerberus_wifi_scanner_stop(void);
 esp_err_t cerberus_wifi_channel_survey_start(uint8_t band);
+/* Legacy wire control cannot cancel a scoped held survey. Trusted native
+ * radio arbitration continues to use preempt(). */
+esp_err_t cerberus_wifi_channel_survey_legacy_stop(void);
+void cerberus_wifi_channel_survey_session_info(cerberus_wifi_channel_survey_session_status_t *out);
+esp_err_t cerberus_wifi_channel_survey_session_start(const cerberus_wifi_channel_survey_session_start_t *request,
+    cerberus_wifi_channel_survey_session_status_t *out);
+esp_err_t cerberus_wifi_channel_survey_session_stop(uint64_t session_id,
+    cerberus_wifi_channel_survey_session_status_t *out);
+esp_err_t cerberus_wifi_channel_survey_session_status(uint64_t session_id,
+    cerberus_wifi_channel_survey_session_status_t *out);
+esp_err_t cerberus_wifi_channel_survey_session_read(const cerberus_wifi_channel_survey_session_read_t *request,
+    cerberus_wifi_channel_survey_session_chunk_t *out);
+/* Explicit background handoff: waits at most one second for the worker, then
+ * retries a retained failed disable. Failure never releases radio exclusion.
+ * This trusted native arbiter is deliberately separate from scoped wire Stop. */
 esp_err_t cerberus_wifi_channel_survey_preempt(void);
 void cerberus_wifi_channel_survey_get_status(
     cerberus_wifi_channel_survey_status_payload_t *status);

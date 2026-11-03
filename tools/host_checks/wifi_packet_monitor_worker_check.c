@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <setjmp.h>
 #include <stdatomic.h>
+static atomic_bool packet_count_radio_reserved;
 #include <stdio.h>
 #include <string.h>
 
@@ -31,13 +32,17 @@ typedef struct {
     bool show_hidden;
     unsigned scan_type;
     struct { unsigned passive; } scan_time;
+    struct { uint16_t ghz_2_channels; uint32_t ghz_5_channels; } channel_bitmap;
 } wifi_scan_config_t;
 
 static unsigned scanner_mutex = 1U;
 static TaskHandle_t scanner_task_handle = &scanner_mutex;
 static bool scanner_ready = true, station_reserved, scan_cancelled;
+static uint8_t scan_band;
 static cerberus_wifi_scan_status_payload_t scan_status;
 static cerberus_wifi_defense_status_payload_t defense_status;
+/* Separate passive Probe owner; the actual admission body below checks it. */
+static atomic_bool probe_sniff_radio_reserved;
 static atomic_bool capture_radio_reserved;
 static cerberus_wifi_packet_monitor_status_payload_t packet_monitor_status;
 static cerberus_wifi_packet_monitor_ring_t packet_monitor_ring;
@@ -61,7 +66,7 @@ static uint64_t watch_capture_deadline_us;
 static atomic_bool remote_id_radio_reserved;
 static atomic_bool csi_radio_reserved;
 static atomic_bool mac_radio_reserved;
-static unsigned mac_polls;
+static unsigned mac_polls,probe_polls;
 static void mac_worker_tick(void) { assert(atomic_load(&mac_radio_reserved)); ++mac_polls; }
 static unsigned csi_polls;
 static void csi_worker_tick(void) { assert(atomic_load(&csi_radio_reserved)); ++csi_polls; }
@@ -87,7 +92,7 @@ static void xTaskNotifyGive(TaskHandle_t task)
 { assert(task == scanner_task_handle); ++notifications; }
 static void ulTaskNotifyTake(unsigned clear, unsigned timeout)
 {
-    assert(clear == pdTRUE && timeout == portMAX_DELAY && !locked);
+    assert(clear == pdTRUE && (timeout == portMAX_DELAY || timeout == 250U) && !locked);
     if (!notifications) longjmp(worker_done, 1);
     notifications = 0U;
 }
@@ -97,6 +102,10 @@ static void vTaskDelayUntil(TickType_t *last, TickType_t period);
 static void vTaskDelay(TickType_t delay)
 {
     if (delay == 20U) {
+        if(atomic_load(&packet_count_radio_reserved)){clock_ms+=delay;atomic_store(&packet_count_radio_reserved,false);return;}
+        if (atomic_load(&probe_sniff_radio_reserved)) {
+            clock_ms += delay;atomic_store(&probe_sniff_radio_reserved,false);return;
+        }
         if (atomic_load(&mac_radio_reserved)) {
             clock_ms += delay; atomic_store(&mac_radio_reserved, false); return;
         }
@@ -178,6 +187,8 @@ static void cerberus_watch_capture_begin_with_epoch(void *capture, unsigned radi
 static esp_err_t esp_wifi_scan_start(const wifi_scan_config_t *config, bool block)
 {
     assert(block && config->show_hidden && config->scan_type == WIFI_SCAN_TYPE_PASSIVE);
+    assert(config->channel_bitmap.ghz_2_channels == cerberus_wifi_scan_band_2g_bitmap(scan_band));
+    assert(config->channel_bitmap.ghz_5_channels == cerberus_wifi_scan_band_5g_bitmap(scan_band));
     assert(!atomic_load(&packet_monitor_radio_reserved)); ++ap_scans; return ESP_OK;
 }
 static void finish_scan(esp_err_t error)
@@ -188,6 +199,11 @@ static void finish_scan(esp_err_t error)
 static void scan_observation_arm(uint8_t generation, bool available)
 { assert(generation == scan_status.generation && available); }
 static void scan_observation_finish(bool keep) { assert(keep); }
+static bool probe_sniff_retained(void){return false;}
+static bool packet_count_retained(void){return atomic_load(&packet_count_radio_reserved);}
+static unsigned count_polls;
+static void packet_count_worker_tick(void){if(atomic_load(&packet_count_radio_reserved))++count_polls;}
+static void probe_sniff_worker_tick(void){if(atomic_load(&probe_sniff_radio_reserved))++probe_polls;}
 #include "wifi_scan_worker_impl.h"
 
 static void dispatch(void)
@@ -198,7 +214,9 @@ static void dispatch(void)
 static void reset(void)
 {
     assert(!locked);
+    atomic_store(&packet_count_radio_reserved,false);count_polls=0;
     memset(&scan_status, 0, sizeof(scan_status));
+    scan_band = CERBERUS_WIFI_SCAN_BAND_ALL;
     memset(&probe_capture, 0, sizeof(probe_capture));
     memset(&relation_capture, 0, sizeof(relation_capture));atomic_store(&relation_receiving,false);
     memset(&packet_monitor_status, 0, sizeof(packet_monitor_status));
@@ -207,6 +225,7 @@ static void reset(void)
     atomic_store(&packet_monitor_cancelled, false);
     atomic_store(&capture_radio_reserved, false);
     atomic_store(&remote_id_radio_reserved, false);
+    atomic_store(&probe_sniff_radio_reserved,false);probe_polls=0U;
     atomic_store(&csi_radio_reserved, false); csi_polls = 0U;
     atomic_store(&mac_radio_reserved, false); mac_polls = 0U;
     remote_polls = 0U;
@@ -230,6 +249,26 @@ static void run_ap_and_capture(void)
 }
 int main(void)
 {
+    /* A band request affects only this worker's stack-local scan config.
+     * Completion and the next default scan cannot strand the persistent band. */
+    reset(); scan_band = CERBERUS_WIFI_SCAN_BAND_5G;
+    run_ap_and_capture();
+    assert(current_band == 9 && current_channel == 6U && current_second == 2);
+    scan_band = CERBERUS_WIFI_SCAN_BAND_ALL; ap_scans = capture_polls = 0U;
+    run_ap_and_capture();
+    assert(current_band == 9 && current_channel == 6U && current_second == 2);
+    reset(); atomic_store(&probe_sniff_radio_reserved,true);
+    assert(cerberus_wifi_packet_monitor_start(36U)==ESP_ERR_INVALID_STATE&&!notifications&&!enable_calls);
+    xTaskNotifyGive(scanner_task_handle);dispatch();
+    assert(probe_polls==2U&&!atomic_load(&probe_sniff_radio_reserved));
+    assert(!ap_scans&&!capture_polls&&!remote_polls&&!csi_polls&&!mac_polls&&!station_calls&&!enable_calls);
+    run_ap_and_capture();
+    reset(); atomic_store(&packet_count_radio_reserved,true);
+    assert(cerberus_wifi_packet_monitor_start(36U)==ESP_ERR_INVALID_STATE&&!notifications&&!enable_calls);
+    xTaskNotifyGive(scanner_task_handle);dispatch();
+    assert(count_polls==2U&&!atomic_load(&packet_count_radio_reserved));
+    assert(!ap_scans&&!capture_polls&&!remote_polls&&!csi_polls&&!mac_polls&&!station_calls&&!enable_calls);
+    run_ap_and_capture();
     reset(); atomic_store(&mac_radio_reserved, true);
     unsigned prior_preempts=survey_preempts;
     assert(cerberus_wifi_packet_monitor_start(36U) == ESP_ERR_INVALID_STATE && !notifications && !enable_calls);

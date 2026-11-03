@@ -49,6 +49,8 @@ int main(void)
     cerberus_wardrive_gps_snapshot_t gps = {
         .state = CERBERUS_WARDRIVE_GPS_FRESH,
         .coordinates_valid = true,
+        .satellites_valid = true, .hdop_valid = true,
+        .satellites = 12, .hdop = 0.5f, .gga_age_ms = 123,
     };
     esp_err_t error = 99;
     start_result = 77;
@@ -59,6 +61,9 @@ int main(void)
     assert(gps.state == CERBERUS_WARDRIVE_GPS_ABSENT);
     assert(!gps.coordinates_valid && gps.sentence_age_ms == UINT32_MAX);
     assert(gps.fix_age_ms == UINT32_MAX && error == ESP_OK);
+    assert(gps.utc_age_ms == UINT32_MAX && gps.gga_age_ms == UINT32_MAX);
+    assert(!gps.satellites_valid && !gps.hdop_valid && !gps.utc_valid);
+    assert(gps.satellites == 0 && gps.hdop == 0.0f);
     assert(stop_optional_gps(false) == ESP_OK);
     assert(starts == 0U && stops == 0U && snapshots == 0U);
 

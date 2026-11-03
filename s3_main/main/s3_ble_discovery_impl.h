@@ -2,8 +2,7 @@
 
 static bool discovery_owns_host_locked(void)
 {
-    return scan_host_epoch == cerberus_s3_ble_host_epoch() &&
-        cerberus_s3_ble_host_owner() == CERBERUS_S3_BLE_OWNER_SCANNER;
+    return discovery_scan_epoch == scan_epoch && scan_owns_host_locked();
 }
 
 static bool discovery_pending_locked(void)
@@ -101,6 +100,7 @@ static bool discovery_row_valid(const cerberus_s3_ble_record_t *record,
         (record->uuid_length == 0U || record->uuid_length == 2U ||
          record->uuid_length == 4U || record->uuid_length == 16U) &&
         record->advertisement_length <= CERBERUS_BLE_ADVERTISEMENT_MAX_LENGTH &&
+        cerberus_s3_ble_response_storage_valid(source) &&
         source->generation == meta->status.generation &&
         source->address_type == record->address_type &&
         memcmp(source->address, record->address, 6U) == 0 &&
@@ -176,7 +176,7 @@ esp_err_t cerberus_s3_ble_scanner_stop_discovery(uint64_t expected_epoch,
         }
     } else if (!discovery_pending_locked() && discovery_owns_host_locked()) {
         /* Retry a failed host release only for this exact lease. */
-        error = cerberus_s3_ble_host_release(CERBERUS_S3_BLE_OWNER_SCANNER);
+        error = scan_release_host_locked();
     }
     bool valid = discovery_meta_locked(meta);
     xSemaphoreGive(scan_mutex);
