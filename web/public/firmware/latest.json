@@ -1,5 +1,4 @@
 {
-  "product": "Cerberus Unchained",
-  "status": "unavailable",
-  "message": "No Cerberus Unchained release is available yet. Installation is disabled."
+  "manifest": "cerberus-unchained-0.1.0-dev.rev136/manifest.json",
+  "sha256": "59093da33cd0c1cba131976de6695edb955979b0dd78b02423cc1a1a29295203"
 }
