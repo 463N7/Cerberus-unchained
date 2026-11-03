@@ -9,6 +9,9 @@
 #define WIFI_PACKET_COUNT_TICK_BUDGET_US 8000U
 #define WIFI_PACKET_COUNT_RETRY_MS 700U
 #define WIFI_PACKET_COUNT_KEEPALIVE_MS 1000U
+/* One operation may precede a due keepalive only with a recent exact STATUS.
+ * Keep at least half the native lease for delayed transport/worker scheduling. */
+#define WIFI_PACKET_COUNT_PROGRESS_MAX_MS (CERBERUS_PACKET_COUNT_LEASE_MS / 2U)
 #define WIFI_PACKET_COUNT_REFRESH_MS 500U
 enum { WIFI_PACKET_COUNT_SOURCE_S3, WIFI_PACKET_COUNT_SOURCE_C5, WIFI_PACKET_COUNT_SOURCES };
 enum { WIFI_PACKET_COUNT_FIXED, WIFI_PACKET_COUNT_SELECTED, WIFI_PACKET_COUNT_ALL };
@@ -80,6 +83,7 @@ typedef struct {
     bool faulted, final_valid, committed, clean_rejection, anchor_valid;
     bool cycle_final, after_summary;
     bool record_bound, release_attempted, clock_invalid;
+    bool progress_due;
 } wifi_packet_count_source_t;
 
 /* Keep this bounded workspace in optional PSRAM. A manual retune freezes and

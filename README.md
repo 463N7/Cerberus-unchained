@@ -29,9 +29,9 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source version: `0.1.0-dev.rev133`, targeting onboard C5 protocol
-firmware revision 74. The locally installed development build passes host/native
-and matched-package checks; a public binary release has not been selected.**
+**Current source version: `0.1.0-dev.rev134`, targeting onboard C5 protocol
+firmware revision 74. Rev133 is installed; rev134 validation is in progress.
+A public binary release has not been selected.**
 The web installer remains unavailable until a matched release is deliberately selected.
 Sentinel 1.0.0 binaries are not Unchained firmware.
 
@@ -61,6 +61,17 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev134 corrects Packet Count scheduling when slow UI ticks and transport calls
+would otherwise let status polling starve setup or counter reads. A recent,
+validated status reply permits one bounded progress operation before another
+keepalive. Stop, uncertain ownership and release retain their priority. The
+screen now explains the S3 analysis role for C5-only reception, distinguishes
+setup from reception and shows readout progress. A read-only `packet_count`
+diagnostic exposes copied controller state without controlling either radio.
+See [the rev134 checkpoint](docs/DUAL_RADIO_REV134.md). The reported rev133
+inactivity has a reproduced software failure path; its physical cause and the
+corrected on-device behavior still require verification.
 
 Rev133 adds passive **Packet Count** from a selected Wi-Fi AP or observed
 client, with a separate list of up to 16 targets, explicit Start/Stop and

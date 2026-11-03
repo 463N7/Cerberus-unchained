@@ -42,7 +42,7 @@ class SelectionChecks(unittest.TestCase):
 
     def test_four_shards_partition_exact_canonical_registry(self):
         names = runner.registered_checks()
-        self.assertEqual(len(names), 157)
+        self.assertEqual(len(names), 158)
         self.assertEqual(names.count("check_radio_worker.py"), 1)
         self.assertIn("check_radio_worker.py", runner.CHECKS)
         for name in ("check_mesh_mac.py", "check_mesh_observation.py", "check_mesh_link.py", "check_mesh_scan.py",
@@ -52,19 +52,19 @@ class SelectionChecks(unittest.TestCase):
             self.assertEqual(names.count(name), 1)
             self.assertIn(name, runner.CHECKS)
         parts = [runner.selected_checks(i, 4) for i in range(4)]
-        self.assertEqual([len(part) for part in parts], [40, 39, 39, 39])
+        self.assertEqual([len(part) for part in parts], [40, 40, 39, 39])
         self.assertEqual(set().union(*(set(part) for part in parts)), set(names))
         for index, part in enumerate(parts):
             self.assertEqual(part, tuple(name for ordinal, name in enumerate(names) if ordinal % 4 == index))
-            self.assertEqual(len(set(part) & set(runner.CHECKS)), [33, 33, 33, 32][index])
-            self.assertEqual(len(set(part) & set(runner.SERIAL_CHECKS)), [7, 6, 6, 7][index])
+            self.assertEqual(len(set(part) & set(runner.CHECKS)), [33, 33, 33, 33][index])
+            self.assertEqual(len(set(part) & set(runner.SERIAL_CHECKS)), [7, 7, 6, 6][index])
             for other in parts[index + 1:]:
                 self.assertFalse(set(part) & set(other))
         self.assertEqual(runner.selected_checks(), names)
 
     def test_invalid_or_partial_shard_arguments_reject(self):
         for index, count in ((None, 4), (0, None), (-1, 4), (4, 4), (0, 0),
-                             (0, 158), (True, 4), (0, True)):
+                             (0, 159), (True, 4), (0, True)):
             with self.subTest(index=index, count=count), self.assertRaises(ValueError):
                 runner.selected_checks(index, count)
 
@@ -137,7 +137,7 @@ class RunnerChecks(unittest.TestCase):
         status, receipt, commands = self.invoke()
         self.assertEqual(status, 0)
         self.assertEqual(receipt["format"], 1)
-        self.assertEqual(receipt["suite_set"], "rev133")
+        self.assertEqual(receipt["suite_set"], "rev134")
         self.assertEqual(receipt["status"], "passed")
         self.assertEqual(receipt["selection"]["mode"], "full")
         self.assertEqual([c["check"] for c in receipt["checks"]], list(runner.registered_checks()))
@@ -218,13 +218,13 @@ class AggregateChecks(unittest.TestCase):
                 (folder / log_name).write_bytes(content)
                 checks.append({"check": name, "exit_code": 0, "duration_seconds": 1.25,
                     "log": "artifacts/host-checks/" + log_name, "log_sha256": verifier.digest(content)})
-            receipt = {"format": 1, "status": "passed", "suite_set": "rev133", "platform": "win32",
+            receipt = {"format": 1, "status": "passed", "suite_set": "rev134", "platform": "win32",
                 "hardware_validated": False, "source_head": HEAD, "source_head_after": HEAD,
                 "source_clean": True, "source_clean_after": True,
                 "execution": EXECUTION,
                 "inputs_changed": [], "inputs_after": self.inputs, "python_version": "3.13.16",
                 "ziglang_version": "0.14.1", "registry_sha256": runner.registry_sha256(),
-                "registered_suite_count": 157, "checks": checks,
+                "registered_suite_count": 158, "checks": checks,
                 "selection": {"mode": "shard", "shard_index": index, "shard_count": 4,
                     "selected_names": names, "selected_suite_count": len(names)}}
             path = folder / "host-checks.json"
@@ -249,8 +249,8 @@ class AggregateChecks(unittest.TestCase):
     def test_complete_logs_and_shards_pass_in_any_artifact_order(self):
         report = self.verify(list(reversed(self.paths)))
         self.assertEqual(report["status"], "passed")
-        self.assertEqual(report["verified_suite_count"], 157)
-        self.assertEqual(report["suite_seconds_sum"], 157 * 1.25)
+        self.assertEqual(report["verified_suite_count"], 158)
+        self.assertEqual(report["suite_seconds_sum"], 158 * 1.25)
         self.assertEqual([r["shard_index"] for r in report["receipts"]], [0, 1, 2, 3])
         self.assertEqual(report["inputs_sha256"], verifier.canonical_digest(self.inputs))
         for row, path in zip(report["receipts"], self.paths):

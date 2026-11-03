@@ -68,7 +68,7 @@ def verify(receipt_paths: list[Path], expected_head: str,
         require(isinstance(receipt, dict), f"{path}: receipt is not an object")
         require(type(receipt.get("format")) is int and receipt["format"] == 1,
                 f"{path}: unsupported receipt format")
-        require(receipt.get("status") == "passed" and receipt.get("suite_set") == "rev133",
+        require(receipt.get("status") == "passed" and receipt.get("suite_set") == "rev134",
                 f"{path}: shard did not pass the current suite set")
         require(receipt.get("hardware_validated") is False, f"{path}: unexpected hardware claim")
         require(receipt.get("platform") == "win32", f"{path}: not a Windows shard")
@@ -138,8 +138,8 @@ def verify(receipt_paths: list[Path], expected_head: str,
         evidence.append({"receipt": str(path), "sha256": digest(raw), "shard_index": index,
                          "suite_count": len(selected), "suite_seconds_sum": round(duration, 6)})
     require(indices == set(range(SHARD_COUNT)), "Missing Windows shard")
-    require(covered == set(names), "Windows shards do not cover all 157 registered suites")
-    return {"format": 1, "status": "passed", "suite_set": "rev133", "platform": "win32",
+    require(covered == set(names), "Windows shards do not cover all 158 registered suites")
+    return {"format": 1, "status": "passed", "suite_set": "rev134", "platform": "win32",
             "hardware_validated": False, "source_head": expected_head, "registry_sha256": registry,
             "execution": expected_execution,
             "shard_count": SHARD_COUNT, "verified_suite_count": len(covered),

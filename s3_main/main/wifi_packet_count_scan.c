@@ -193,6 +193,7 @@ static bool accept(wifi_packet_count_source_t *v, const cerberus_packet_count_co
     if (cmd != CERBERUS_PACKET_COUNT_COMMAND_PEEK) v->revision_floor = r->sequence;
     if (cmd == CERBERUS_PACKET_COUNT_COMMAND_STATUS || cmd == CERBERUS_PACKET_COUNT_COMMAND_BEGIN ||
         cmd == CERBERUS_PACKET_COUNT_COMMAND_START) v->last_status_ms = now;
+    if (cmd == CERBERUS_PACKET_COUNT_COMMAND_STATUS) v->progress_due = true;
     if (r->flags&CERBERUS_PACKET_COUNT_CLOCK_INVALID) {
         v->clock_invalid=true;
         v->published.row_anchor_valid=v->staging.row_anchor_valid=0;
@@ -345,7 +346,9 @@ static unsigned step(wifi_packet_count_scan_t *scan,unsigned source,uint64_t now
     cerberus_packet_count_target_t target={0}; cerberus_packet_count_peek_t peek={0};
     if (v->attempted&&v->stop&&(!v->have_control||(v->remote.flags&CERBERUS_PACKET_COUNT_HELD))) cmd=CERBERUS_PACKET_COUNT_COMMAND_STOP;
     else if (v->release_attempted) cmd=CERBERUS_PACKET_COUNT_COMMAND_RELEASE;
-    else if (v->attempted&&(!v->have_control||now-v->last_status_ms>=WIFI_PACKET_COUNT_KEEPALIVE_MS)) cmd=CERBERUS_PACKET_COUNT_COMMAND_STATUS;
+    else if (v->attempted&&(!v->have_control||
+        (now-v->last_status_ms>=WIFI_PACKET_COUNT_KEEPALIVE_MS&&
+         (!v->progress_due||now-v->last_status_ms>=WIFI_PACKET_COUNT_PROGRESS_MAX_MS)))) cmd=CERBERUS_PACKET_COUNT_COMMAND_STATUS;
     else if (v->close&&v->attempted) cmd=CERBERUS_PACKET_COUNT_COMMAND_RELEASE;
     else if (v->faulted) return 0; /* Close explicitly releases an invalid final projection. */
     else switch(v->phase) {
@@ -362,6 +365,7 @@ static unsigned step(wifi_packet_count_scan_t *scan,unsigned source,uint64_t now
         request=&peek;request_size=sizeof(peek);break;
     case WIFI_COUNT_READ: {
         cerberus_packet_count_read_t read={q.session_id,v->pin,v->part};cerberus_packet_count_chunk_t chunk;
+        v->progress_due=false;
         error=exchange(t,source,CERBERUS_PACKET_COUNT_COMMAND_READ,&read,sizeof(read),&chunk,sizeof(chunk));
         if(error!=ESP_OK){v->error=error;v->next_action_ms=later(now,WIFI_PACKET_COUNT_RETRY_MS);return 1;}
         if(chunk.session_id!=q.session_id||chunk.pin!=v->pin||chunk.part!=v->part){fault(v,ESP_ERR_INVALID_RESPONSE,now);return 1;}
@@ -380,6 +384,11 @@ static unsigned step(wifi_packet_count_scan_t *scan,unsigned source,uint64_t now
         v->record_bound=false;
     }
     if (cmd==CERBERUS_PACKET_COUNT_COMMAND_RELEASE) v->release_attempted=true;
+    /* A slow STATUS can consume a whole UI tick. Grant one bounded phase
+     * operation after a validated reply, not an extra blocking exchange.
+     * Consume the credit even on failure; uncertain BEGIN/START and retry
+     * backoff still require their existing status/cleanup paths. */
+    v->progress_due=false;
     uint8_t phase=v->phase;
     int64_t anchor=t->clock_us(t->context);
     error=exchange(t,source,cmd,request,request_size,&r,sizeof(r));

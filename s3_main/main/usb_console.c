@@ -18,6 +18,7 @@
 #include "remote_id_diagnostics.h"
 #include "wifi_readout_diagnostics.h"
 #include "dual_wifi_diagnostics.h"
+#include "wifi_packet_count_diagnostics.h"
 #include "wifi_multissid_session.h"
 #include "wifi_pinescan_session.h"
 #include "ble_test.h"
@@ -81,6 +82,7 @@ static __attribute__((noinline)) void print_network(void);
 static __attribute__((noinline)) void print_wifi_seen(void);
 static __attribute__((noinline)) void print_wifi_readout(void);
 static __attribute__((noinline)) void print_wifi_dual(void);
+static __attribute__((noinline)) void print_packet_count(void);
 static __attribute__((noinline)) void print_recon_record(void);
 static __attribute__((noinline)) void print_ble_archive(void);
 static __attribute__((noinline)) void print_remote_id(void);
@@ -156,6 +158,7 @@ static void print_help(void)
         "wifi_seen Read completed Wi-Fi source-age coverage without scanning\r\n"
         "wifi_readout Read local UI AP transfer metrics without SPI or scanning\r\n"
         "wifi_dual Read UI-published split Wi-Fi state without SPI or scanning\r\n"
+        "packet_count Read copied Count setup/progress without radio access\r\n"
         "remote_id Read published Remote ID session counts without scanning\r\n"
         "stations Read passive station capture without renewing its lease\r\n"
         "reports  Read the first 32 SD log names and network CSVs\r\n"
@@ -753,6 +756,98 @@ static void print_wifi_dual(void)
         v->s3_status_valid ? 1U : 0U, v->s3_job, v->scan_s3_job, (unsigned)v->s3_state,
         (unsigned)v->s3_wifi_owner, v->s3_radio_owned ? 1U : 0U,
         v->scan_s3_owned ? 1U : 0U, v->s3_cleanup_error, v->c5_may_own ? 1U : 0U);
+}
+
+static void print_packet_count(void)
+{
+    wifi_packet_count_diagnostics_t snapshot;
+    wifi_packet_count_diagnostics_get(&snapshot);
+    console_printf("packet_count_scope=ui_published_scalars_no_radio\r\n"
+        "packet_count_available=%u\r\npacket_count_allocated=%u\r\n"
+        "packet_count_publication_sequence=%" PRIu64 "\r\npacket_count_published_ms=%" PRIu64 "\r\n"
+        "packet_count_time_valid=%u\r\npacket_count_sequence_saturated=%u\r\n",
+        snapshot.available ? 1U : 0U, snapshot.allocated ? 1U : 0U,
+        snapshot.publication_sequence, snapshot.published_ms,
+        snapshot.time_valid ? 1U : 0U, snapshot.sequence_saturated ? 1U : 0U);
+    if (!snapshot.available || !snapshot.allocated) return;
+    console_printf("packet_count_last_tick_ms=%" PRIu64 "\r\npacket_count_start_pending=%u\r\n"
+        "packet_count_requested=%u\r\npacket_count_closing=%u\r\npacket_count_retuning=%u\r\n"
+        "packet_count_frozen=%u\r\npacket_count_fallback=%u\r\npacket_count_recording=%u\r\n"
+        "packet_count_targets=%u\r\npacket_count_dwell_ms=%u\r\npacket_count_channel_mask=%016" PRIx64 "\r\n",
+        snapshot.last_tick_ms, snapshot.start_pending ? 1U : 0U, snapshot.requested ? 1U : 0U,
+        snapshot.closing ? 1U : 0U, snapshot.retuning ? 1U : 0U, snapshot.frozen ? 1U : 0U,
+        snapshot.fallback ? 1U : 0U, snapshot.recording ? 1U : 0U,
+        (unsigned)snapshot.target_count, (unsigned)snapshot.dwell_ms, snapshot.channel_mask);
+    console_printf("packet_count_segments=%" PRIu32 "\r\npacket_count_interruptions=%" PRIu32 "\r\n"
+        "packet_count_tick_gap_valid=%u\r\npacket_count_tick_gap_ms=%" PRIu64 "\r\n"
+        "packet_count_max_tick_gap_ms=%" PRIu64 "\r\n"
+        "packet_count_ui_error=%" PRId32 "\r\npacket_count_error=%" PRId32 "\r\n"
+        "packet_count_s3_admission_error=%" PRId32 "\r\npacket_count_job=%" PRIu64 "\r\n"
+        "packet_count_record_valid=%u\r\n",
+        snapshot.segments, snapshot.interruptions, snapshot.tick_gap_valid ? 1U : 0U,
+        snapshot.tick_gap_ms, snapshot.max_tick_gap_ms, snapshot.ui_error, snapshot.error,
+        snapshot.s3_admission_error, snapshot.job, snapshot.record_valid ? 1U : 0U);
+    if (snapshot.record_valid)
+        console_printf("packet_count_record_busy=%u\r\npacket_count_record_ready=%u\r\n"
+            "packet_count_record_finishing=%u\r\npacket_count_record_error=%" PRId32 "\r\n",
+            snapshot.record_busy ? 1U : 0U, snapshot.record_ready ? 1U : 0U,
+            snapshot.record_finishing ? 1U : 0U, snapshot.record_error);
+    else console_printf("packet_count_record_state=unknown\r\n");
+    static const char *const phases[] = {
+        "idle", "info", "begin", "targets", "start", "poll", "peek", "read", "final_poll", "release"};
+    for (unsigned i = 0; i < WIFI_PACKET_COUNT_SOURCES; ++i) {
+        const char *name = i == WIFI_PACKET_COUNT_SOURCE_S3 ? "s3" : "c5";
+        const wifi_packet_count_source_diagnostics_t *s = &snapshot.source[i];
+        console_printf("packet_count_%s_phase=%u:%s\r\npacket_count_%s_requested_session=%016" PRIx64 "\r\n"
+            "packet_count_%s_accepted_session=%016" PRIx64 "\r\npacket_count_%s_channel_mask=%016" PRIx64 "\r\n"
+            "packet_count_%s_attempted=%u\r\npacket_count_%s_accepted=%u\r\npacket_count_%s_start_attempted=%u\r\n"
+            "packet_count_%s_control_valid=%u\r\n",
+            name, (unsigned)s->phase, s->phase < sizeof(phases)/sizeof(phases[0]) ? phases[s->phase] : "unknown",
+            name, s->requested_session, name, s->accepted_session, name, s->channel_mask,
+            name, s->attempted ? 1U : 0U, name, s->accepted ? 1U : 0U,
+            name, s->start_attempted ? 1U : 0U, name, s->control_valid ? 1U : 0U);
+        if (s->control_valid)
+            console_printf("packet_count_%s_state=%u\r\npacket_count_%s_flags=%02X\r\n"
+                "packet_count_%s_rx_active=%u\r\npacket_count_%s_channel=%u\r\n"
+                "packet_count_%s_configured=%04X\r\npacket_count_%s_remote_error=%" PRId32 "\r\n",
+                name, (unsigned)s->state, name, (unsigned)s->flags,
+                name, (s->flags & CERBERUS_PACKET_COUNT_RX_ACTIVE) ? 1U : 0U,
+                name, (unsigned)s->channel, name, (unsigned)s->configured, name, s->remote_error);
+        else console_printf("packet_count_%s_control=unknown\r\n", name);
+        console_printf("packet_count_%s_last_status_ms=%" PRIu64 "\r\npacket_count_%s_next_action_ms=%" PRIu64 "\r\n"
+            "packet_count_%s_last_progress_ms=%" PRIu64 "\r\npacket_count_%s_progress_time_valid=%u\r\n"
+            "packet_count_%s_pin=%08" PRIx32 "\r\npacket_count_%s_part=%u\r\npacket_count_%s_kind=%u\r\n"
+            "packet_count_%s_index=%u\r\npacket_count_%s_upload_index=%u\r\npacket_count_%s_targets=%u\r\n"
+            "packet_count_%s_revision_floor=%" PRIu32 "\r\npacket_count_%s_error=%" PRId32 "\r\n",
+            name, s->last_status_ms, name, s->next_action_ms, name, s->last_progress_ms,
+            name, s->progress_time_valid ? 1U : 0U, name, s->pin, name, (unsigned)s->part,
+            name, (unsigned)s->kind, name, (unsigned)s->index, name, (unsigned)s->upload_index,
+            name, (unsigned)s->target_count, name, s->revision_floor, name, s->error);
+        console_printf("packet_count_%s_stop=%u\r\npacket_count_%s_close=%u\r\npacket_count_%s_faulted=%u\r\n"
+            "packet_count_%s_clock_invalid=%u\r\npacket_count_%s_record_bound=%u\r\n"
+            "packet_count_%s_published_valid=%u\r\n",
+            name, s->stop ? 1U : 0U, name, s->close ? 1U : 0U, name, s->faulted ? 1U : 0U,
+            name, s->clock_invalid ? 1U : 0U, name, s->record_bound ? 1U : 0U, name, s->published_valid ? 1U : 0U);
+        if (s->published_valid)
+            console_printf("packet_count_%s_published_session=%016" PRIx64 "\r\npacket_count_%s_published_revision=%" PRIu32 "\r\n"
+                "packet_count_%s_published_frozen=%u\r\npacket_count_%s_callbacks=%" PRIu32 "\r\n"
+                "packet_count_%s_matched=%" PRIu32 "\r\npacket_count_%s_invalid_metadata=%" PRIu32 "\r\n"
+                "packet_count_%s_raw_dropped_full=%" PRIu32 "\r\npacket_count_%s_raw_dropped_other=%" PRIu32 "\r\n"
+                "packet_count_%s_published_error=%" PRId32 "\r\n",
+                name, s->published_session, name, s->published_revision, name, s->published_frozen ? 1U : 0U,
+                name, s->callbacks, name, s->matched, name, s->invalid_metadata,
+                name, s->raw_dropped_full, name, s->raw_dropped_other, name, s->published_error);
+        else console_printf("packet_count_%s_counters=unknown\r\n", name);
+        if (snapshot.record_valid)
+            console_printf("packet_count_%s_record_session=%016" PRIx64 "\r\npacket_count_%s_written=%" PRIu32 "\r\n"
+                "packet_count_%s_discarded=%" PRIu32 "\r\npacket_count_%s_transport_errors=%" PRIu32 "\r\n"
+                "packet_count_%s_recorder_bound=%u\r\npacket_count_%s_recorder_draining=%u\r\n"
+                "packet_count_%s_recorder_drained=%u\r\npacket_count_%s_record_loss_unknown=%u\r\n"
+                "packet_count_%s_record_error=%" PRId32 "\r\n",
+                name, s->record_session, name, s->written, name, s->discarded, name, s->transport_errors,
+                name, s->recorder_bound ? 1U : 0U, name, s->recorder_draining ? 1U : 0U,
+                name, s->recorder_drained ? 1U : 0U, name, s->record_loss_unknown ? 1U : 0U, name, s->record_error);
+    }
 }
 
 static void print_ble_archive(void)
@@ -1508,6 +1603,8 @@ static void execute_command(char *line)
         print_wifi_readout();
     } else if (strcmp(start, "wifi_dual") == 0) {
         print_wifi_dual();
+    } else if (strcmp(start, "packet_count") == 0) {
+        print_packet_count();
     } else if (strcmp(start, "recon_record") == 0) {
         print_recon_record();
     } else if (strcmp(start, "ble_archive") == 0) {

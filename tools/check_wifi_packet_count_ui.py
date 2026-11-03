@@ -10,6 +10,14 @@ import zlib
 root = Path(__file__).resolve().parents[1]
 out = root / "artifacts/wifi-packet-count-ui-checks"
 out.mkdir(parents=True, exist_ok=True)
+(out / "freertos").mkdir(exist_ok=True)
+(out / "freertos/FreeRTOS.h").write_text("""#pragma once
+#include <stdatomic.h>
+typedef struct { atomic_flag flag; } portMUX_TYPE;
+#define portMUX_INITIALIZER_UNLOCKED { ATOMIC_FLAG_INIT }
+#define portENTER_CRITICAL(m) do { while(atomic_flag_test_and_set_explicit(&(m)->flag,memory_order_acquire)) {} } while(0)
+#define portEXIT_CRITICAL(m) atomic_flag_clear_explicit(&(m)->flag,memory_order_release)
+""")
 display = (root / "s3_main/main/display.c").read_text()
 start = display.index("static const uint8_t *font5x7(")
 (out / "display_font.h").write_text(display[start:display.index("\nesp_err_t ", start)])
@@ -42,6 +50,7 @@ exe = out / ("count-ui.exe" if os.name == "nt" else "count-ui")
 subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-O1", "-Wall", "-Wextra", "-Werror",
     "-I", str(out), "-I", str(root / "tools/host_checks/stubs"), "-I", str(root / "s3_main/main"), "-I", str(root / "shared"),
     str(root / "tools/host_checks/wifi_packet_count_ui_check.c"), str(root / "s3_main/main/wifi_packet_count_scan.c"),
+    str(root / "s3_main/main/wifi_packet_count_diagnostics.c"),
     str(root / "shared/wifi_packet_count.c"), str(root / "s3_main/main/ui_widgets.c"), "-o", str(exe)], check=True, env=env)
 subprocess.run([str(exe), str(out)], check=True, env=env)
 

@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "checkpoint": "rev133-development",
-  "scope": "Rev132 is the installed baseline verified when the rev133 source checkpoint began. Its paired boot and SD mount passed; the owner accepted rev131 Mesh menu-first entry and Back controls. Historical Mesh Save/Open and real Mesh/Locate acceptance remain separate. Rev133 adds a development implementation of selected AP/client Packet Count with separate passive selections, disjoint C5/S3 coverage, bounded source ownership and optional per-radio PCAPNG. Exact source checks, complete build/package validation, installation and physical acceptance are recorded separately in DUAL_RADIO_REV133.md. Prior targeted acceptance remains in its checkpoint documentation. A read-only GitHub develop resolution on 2026-11-02 returned 79cc6bcba1db6679baee1dab2b0c1ad5010e6363. All mode status assignments remain unchanged and full Marauder parity is unfinished.",
+  "checkpoint": "rev134-development",
+  "scope": "Rev133 is the installed baseline; its paired boot and SD mount passed. The owner reported inactive Packet Count and a misleading S3 NOT ASSIGNED label. Rev134 corrects a reproduced controller starvation path, clarifies receiver and analysis roles, and adds read-only scalar diagnostics. Exact validation and installation evidence are recorded separately in DUAL_RADIO_REV134.md. The software reproduction does not establish the physical cause or corrected RF behavior. The owner accepted rev131 Mesh menu-first entry and Back controls; Mesh Save/Open and real Mesh/Locate acceptance remain separate. A read-only GitHub develop check on 2026-11-02 retained 79cc6bcba1db6679baee1dab2b0c1ad5010e6363. All mode status assignments remain unchanged and full Marauder parity is unfinished.",
   "status_definitions": {
     "partial": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open.",
     "pending": "The distinct upstream workflow has no verified implementation at this checkpoint.",
@@ -947,8 +947,8 @@
       "symbol": "WIFI_SCAN_PACKET_RATE",
       "family": "wifi_channel_and_signal",
       "status": "partial",
-      "cerberus_evidence": "docs/DUAL_RADIO_REV133.md",
-      "next_gap": "Rev133 adds the distinct selected AP/client Packet Count development workflow with independent target accounting, disjoint receiver coverage and optional per-source PCAPNG; exact validation is recorded in its checkpoint guide. Physical count/recording accuracy, sustained-load acceptance and serial-capture parity remain open. Counter CSV is an additional unimplemented export, not a substitute for raw packets.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV134.md",
+      "next_gap": "Rev133 implements selected AP/client Packet Count, independent target accounting, disjoint receiver coverage and optional per-source PCAPNG. Rev134 corrects a reproduced slow-tick scheduling stall and exposes setup/readout progress. The owner-reported inactivity still needs corrected physical verification. Count/recording accuracy, sustained-load acceptance and serial-capture parity remain open. Counter CSV is an additional unimplemented export, not a substitute for raw packets.",
       "s3_role": "Separate 2.4GHz passive receiver when useful, copied selection/controller UI, exact transport validation and optional dual-source SD recording. Physical acceptance remains pending.",
       "c5_role": "Capability74 scoped passive counter: bounded AP/STA selection, channel planning, validated headers and optional matched-frame FIFO. Actual RF acceptance remains pending.",
       "related_menu_entries": [],

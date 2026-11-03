@@ -3,6 +3,7 @@
  * rebind grants matching authority here. One optional UI-task PSRAM workspace. */
 #include "wifi_packet_count_scan.h"
 #include "wifi_packet_count_record.h"
+#include "wifi_packet_count_diagnostics.h"
 #include "s3_wifi_packet_count.h"
 #include "esp_heap_caps.h"
 
@@ -25,6 +26,7 @@ typedef struct {
 } wifi_packet_count_ui_store_t;
 static wifi_packet_count_ui_store_t *wifi_packet_count_ui;
 static esp_err_t wifi_packet_count_ui_error;
+static bool wifi_count_diagnostics_initialized;
 
 static esp_err_t wifi_count_exchange(void *context, unsigned source, uint8_t command,
     const void *request, size_t request_size, void *reply, size_t reply_size)
@@ -129,7 +131,12 @@ static void wifi_count_start_stop(void)
 static void wifi_packet_count_tick(uint64_t now, bool visible, bool picker_visible)
 {
     wifi_packet_count_ui_store_t *s=wifi_packet_count_ui;
-    if (!s) return;
+    if (!s) {
+        if (!wifi_count_diagnostics_initialized) {
+            wifi_packet_count_diagnostics_clear(now); wifi_count_diagnostics_initialized=true;
+        }
+        return;
+    }
     if (!visible && !(s->picking && picker_visible) && !s->closing) wifi_count_close(false);
     if (s->job && !s->job_retired) {
         wifi_packet_count_record_status_t status;
@@ -172,6 +179,8 @@ static void wifi_packet_count_tick(uint64_t now, bool visible, bool picker_visib
     if (s->closing && released && !s->job) {
         bool back=s->return_origin; uint8_t origin=s->origin;
         heap_caps_free(s); wifi_packet_count_ui=NULL;
+        wifi_packet_count_diagnostics_clear(now);
+        wifi_count_diagnostics_initialized=true;
         if (back && visible) {
             if (origin==UI_WIFI_MODE_OBSERVED_CLIENTS) wifi_mode=origin;
             else dual_wifi_live_open(false);
@@ -179,6 +188,9 @@ static void wifi_packet_count_tick(uint64_t now, bool visible, bool picker_visib
         }
         return;
     }
+    wifi_packet_count_diagnostics_publish(&s->scan,&s->recording,now,s->job,
+        s->start_pending,s->closing,s->error);
+    wifi_count_diagnostics_initialized=true;
     if (visible && now-s->last_draw_ms>=500U) {
         s->last_draw_ms=now; ESP_ERROR_CHECK(draw_detail_page());
     }
@@ -205,7 +217,42 @@ static const char *wifi_count_state(const wifi_packet_count_source_t *v)
     if (v->error!=ESP_OK) return "ERROR";
     if (v->published.frozen) return "FROZEN";
     if (v->remote.flags&CERBERUS_PACKET_COUNT_RX_ACTIVE) return "RECEIVING";
-    return v->phase==WIFI_COUNT_IDLE?"NOT ASSIGNED":"WAITING";
+    if (v->phase==WIFI_COUNT_INFO) return "CHECKING RADIO";
+    if (v->phase==WIFI_COUNT_BEGIN) return "RESERVING";
+    if (v->phase==WIFI_COUNT_TARGET) return "SETTING TARGETS";
+    if (v->phase==WIFI_COUNT_START) return "STARTING";
+    if (v->remote.state==CERBERUS_PACKET_COUNT_QUEUED) return "QUEUED";
+    if (v->phase==WIFI_COUNT_PEEK || v->phase==WIFI_COUNT_READ ||
+        v->phase==WIFI_COUNT_FINAL_POLL) return "READING COUNTERS";
+    return v->phase==WIFI_COUNT_IDLE?"IDLE":"WAITING";
+}
+static bool wifi_count_analysis_only(const wifi_packet_count_ui_store_t *s,unsigned source)
+{
+    const wifi_packet_count_source_t *v=&s->scan.sources[source];
+    return source==WIFI_PACKET_COUNT_SOURCE_S3 && !v->request.channel_mask &&
+        s->scan.sources[WIFI_PACKET_COUNT_SOURCE_C5].request.channel_mask &&
+        !v->faulted && !v->error;
+}
+/* Progress describes copied wire parts, not elapsed RF coverage or packets. */
+static bool wifi_count_readout(const wifi_packet_count_source_t *v,char *out,size_t size)
+{
+    if (v->phase==WIFI_COUNT_TARGET) {
+        snprintf(out,size,"TARGET %u/%u",(unsigned)v->upload_index+1U,v->request.target_count);
+        return true;
+    }
+    if (v->phase==WIFI_COUNT_PEEK || v->phase==WIFI_COUNT_READ) {
+        const char *kind=v->kind==CERBERUS_PACKET_COUNT_READ_SUMMARY?"SUMMARY":
+            v->kind==CERBERUS_PACKET_COUNT_READ_ROW?"TARGET":"CHANNEL";
+        unsigned parts=v->kind==CERBERUS_PACKET_COUNT_READ_SUMMARY?16U:
+            v->kind==CERBERUS_PACKET_COUNT_READ_ROW?12U:2U;
+        unsigned done=v->phase==WIFI_COUNT_READ?v->part:0U;
+        snprintf(out,size,"READ %.7s %u/%u",kind,done,parts);
+        return true;
+    }
+    if (v->phase==WIFI_COUNT_FINAL_POLL) {
+        snprintf(out,size,"VERIFYING READOUT"); return true;
+    }
+    return false;
 }
 static void wifi_count_paint_value(wifi_packet_count_ui_store_t *s,unsigned index,wifi_count_painted_t *out)
 {
@@ -263,9 +310,12 @@ static esp_err_t wifi_packet_count_draw(void)
     } else {
         for (unsigned radio=0;radio<2U;++radio) {
             const wifi_packet_count_source_t *v=&s->scan.sources[radio];
+            bool analysis=wifi_count_analysis_only(s,radio);
             unsigned x=8U+radio*156U;
             ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(x,60,148,50,UI_PANEL),TAG,"count source");
-            snprintf(line,sizeof(line),"%s %.19s",radio?"C5":"S3",wifi_count_state(v));
+            if (!analysis && !strcmp(wifi_count_state(v),"RECEIVING"))
+                snprintf(line,23U,"%s RECEIVING CH%u",radio?"C5":"S3",v->remote.channel);
+            else snprintf(line,sizeof(line),"%s %.19s",radio?"C5":"S3",analysis?"ANALYSIS":wifi_count_state(v));
             ESP_RETURN_ON_ERROR(cerberus_display_draw_text(x+6U,66,line,UI_TEXT,UI_PANEL,1),TAG,"count source state");
             uint64_t window=0; bool saturated=false;
             for (unsigned i=0;i<42U;++i) {
@@ -279,10 +329,15 @@ static esp_err_t wifi_packet_count_draw(void)
             wifi_count_short(window/1000000U,number,sizeof(number));
             char channel[4]="--";
             if (v->remote.channel) snprintf(channel,sizeof(channel),"%u",v->remote.channel);
-            snprintf(line,23U,"RX %.10ss%s CH%s",number,saturated?"+":"",channel);
+            if (analysis) snprintf(line,23U,"CONTROL / READOUT");
+            else if (s->scan.recording && wifi_count_readout(v,line,23U)) { /* retain queue loss line below */ }
+            else if (!v->published.valid && !v->completed.segments) snprintf(line,23U,"RX --s CH%s",channel);
+            else snprintf(line,23U,"RX %.10ss%s CH%s",number,saturated?"+":"",channel);
             ESP_RETURN_ON_ERROR(cerberus_display_draw_text(x+6U,80,line,UI_MUTED,UI_PANEL,1),TAG,"count duration");
-            if (!s->scan.recording) snprintf(line,sizeof(line),"COUNT ONLY");
-            else if (!v->published.valid) snprintf(line,sizeof(line),"Q -- / DROP --");
+            if (analysis && (!s->scan.recording || !v->completed.segments)) snprintf(line,23U,"NO CURRENT S3 RF");
+            else if (!s->scan.recording && wifi_count_readout(v,line,23U)) { /* copied-part progress */ }
+            else if (!s->scan.recording) snprintf(line,sizeof(line),v->published.valid?"COUNTERS VALIDATED":"AWAITING COUNTERS");
+            else if (!v->published.valid && !v->completed.segments) snprintf(line,sizeof(line),"Q -- / DROP --");
             else {
                 uint64_t dropped=v->completed.raw_dropped_full;
                 if(UINT64_MAX-dropped<v->completed.raw_dropped_other)dropped=UINT64_MAX;
@@ -333,7 +388,8 @@ static esp_err_t wifi_packet_count_draw(void)
     else if (s->scan.error!=ESP_OK) snprintf(line,sizeof(line),"%.48s",esp_err_to_name(s->scan.error));
     else if (s->scan.sources[0].error || s->scan.sources[1].error)
         snprintf(line,sizeof(line),"SOURCE ERROR S3=%X C5=%X",(unsigned)s->scan.sources[0].error,(unsigned)s->scan.sources[1].error);
-    else if (s->start_pending) snprintf(line,sizeof(line),"WAITING FOR RADIOS / SD READY");
+    else if (s->start_pending) snprintf(line,sizeof(line),s->record_enabled?
+        "WAITING FOR RADIO RELEASE / SD READY":"WAITING FOR PREVIOUS RADIO RELEASE");
     else if (s->recording.source[0].error || s->recording.source[1].error)
         snprintf(line,sizeof(line),"PCAP ERROR S3=%X C5=%X",(unsigned)s->recording.source[0].error,(unsigned)s->recording.source[1].error);
     else if (s->recording.source[0].transport_errors || s->recording.source[1].transport_errors)

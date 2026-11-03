@@ -18,7 +18,7 @@ enum {UI_PAGE_WIFI,UI_PAGE_OTHER,SENTINEL_SCAN_NONE};
 static unsigned current_page=UI_PAGE_WIFI;
 static ui_wifi_mode_t wifi_mode=UI_WIFI_MODE_DUAL;
 static unsigned live_session,live_ble_session;
-static bool oom,masked,prior_released=true,ordinary_busy;
+static bool oom,masked,prior_released=true,ordinary_busy,quiet_channel;
 static unsigned allocations,frees,ordinary_stops,record_starts,record_finishes,record_releases;
 static struct {unsigned firmware_version;} c5_status={74};
 typedef struct {bool cleanup;} cerberus_dual_wifi_status_t;
@@ -44,10 +44,25 @@ static esp_err_t draw_centered(uint16_t y,const char *text,uint16_t color,uint8_
 {CHECK(strlen(text)*6U*scale<=320U);return cerberus_display_draw_text((320U-strlen(text)*6U*scale)/2U,y,text,color,UI_BACKGROUND,scale);}
 static esp_err_t draw_header(const char *text){return draw_centered(20,text,UI_TEXT,2);}
 static esp_err_t draw_detail_page(void);
+static esp_err_t ui_exchange(unsigned source,uint8_t command,const void *q,size_t qn,void *r,size_t rn)
+{
+    esp_err_t error=exchange(&fake,source,command,q,qn,r,rn);
+    if (quiet_channel&&error==ESP_OK&&command==CERBERUS_PACKET_COUNT_COMMAND_START) {
+        /* This UI boundary starts a real empty model window, with no injected
+         * SDK frame. The shared controller fixture normally injects one. */
+        fake_source_t *f=&fake.source[source];
+        CHECK(cerberus_wifi_packet_count_init(&f->table,f->targets,f->begin.target_count,f->begin.channel_mask,f->begin.dwell_ms));
+        uint8_t channel=first_channel(f->begin.channel_mask);
+        cerberus_wifi_packet_count_attempt(&f->table,channel,true);
+        CHECK(cerberus_wifi_packet_count_window_begin(&f->table,channel,fake.clock));
+        reply(f,f->session,r);
+    }
+    return error;
+}
 esp_err_t cerberus_s3_wifi_packet_count_exchange(uint8_t c,const void*q,size_t qn,void*r,size_t rn)
-{return exchange(&fake,0,c,q,qn,r,rn);}
+{return ui_exchange(0,c,q,qn,r,rn);}
 static esp_err_t c5_spi_link_wifi_packet_count_exchange(uint8_t c,const void*q,size_t qn,void*r,size_t rn)
-{return exchange(&fake,1,c,q,qn,r,rn);}
+{return ui_exchange(1,c,q,qn,r,rn);}
 static wifi_packet_count_record_status_t record;
 static bool recorder_ready,recorder_fail,recorder_missing;
 esp_err_t wifi_packet_count_record_start(const wifi_packet_count_transport_t *t,uint64_t *job)
@@ -82,7 +97,8 @@ static void ui_ticks(unsigned n,bool visible)
 static void ui_reset(void)
 {
     if(wifi_packet_count_ui){free(wifi_packet_count_ui);wifi_packet_count_ui=NULL;}
-    reset();memset(&record,0,sizeof(record));oom=masked=ordinary_busy=recorder_ready=recorder_fail=recorder_missing=false;
+    wifi_count_diagnostics_initialized=false;
+    reset();memset(&record,0,sizeof(record));oom=masked=ordinary_busy=recorder_ready=recorder_fail=recorder_missing=quiet_channel=false;
     prior_released=true;wifi_mode=UI_WIFI_MODE_DUAL;current_page=UI_PAGE_WIFI;
     route_row=(cerberus_dual_wifi_row_t){.ap={.bssid={2,0,0,0,0,1},.channel=1,.ssid="TEST AP"},.source=1,.source_generation=44};
     relation_store=(wifi_relation_ui_store_t){.detail=true,.selected={.valid=true,.count=1,
@@ -152,6 +168,64 @@ static void painting(void)
     wifi_packet_count_tap(30,390);CHECK(wifi_packet_count_ui->scan.count==15U&&!wifi_packet_count_ui->detail);
     wifi_packet_count_tap(250,390);CHECK(!wifi_packet_count_ui->scan.count);
 }
+static void progress_and_diagnostics(const char *folder)
+{
+    ui_reset();
+    wifi_packet_count_tick((uint64_t)fake.clock/1000U,false,false);
+    wifi_packet_count_diagnostics_t diagnostic;
+    wifi_packet_count_diagnostics_get(&diagnostic);
+    CHECK(diagnostic.available&&!diagnostic.allocated&&!diagnostic.target_count);
+    uint64_t absent_sequence=diagnostic.publication_sequence;
+    ui_ticks(3,false);wifi_packet_count_diagnostics_get(&diagnostic);
+    CHECK(diagnostic.publication_sequence==absent_sequence);
+    route_ap();quiet_channel=true;prior_released=false;wifi_count_start_stop();ui_ticks(1,true);
+    wifi_packet_count_diagnostics_get(&diagnostic);
+    CHECK(diagnostic.allocated&&diagnostic.start_pending&&!diagnostic.source[1].attempted);
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"WAITING FOR PREVIOUS RADIO RELEASE"));
+    CHECK(!strstr(drawn,"SD READY"));
+    prior_released=true;fake.delay=9000;ui_ticks(1,true);
+    wifi_packet_count_source_t *v=&wifi_packet_count_ui->scan.sources[1];
+    CHECK(v->phase==WIFI_COUNT_BEGIN&&!fake.source[1].begin_calls);
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"S3 ANALYSIS")&&strstr(drawn,"NO CURRENT S3 RF"));
+    CHECK(strstr(drawn,"C5 RESERVING")&&strstr(drawn,"RX --s")&&strstr(drawn,"TOTAL --"));
+    ppm(folder,"count-c5-setup");
+    ui_ticks(1,true);CHECK(v->phase==WIFI_COUNT_TARGET&&v->accepted);
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"SETTING TARGETS")&&strstr(drawn,"TARGET 1/1"));
+    ui_ticks(1,true);CHECK(v->phase==WIFI_COUNT_START);
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"C5 STARTING"));
+    for(unsigned i=0;i<30U&&v->phase!=WIFI_COUNT_READ;++i)ui_ticks(1,true);
+    CHECK(v->phase==WIFI_COUNT_READ&&v->kind==CERBERUS_PACKET_COUNT_READ_SUMMARY&&!v->published.valid);
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"C5 RECEIVING")&&strstr(drawn,"READ SUMMARY 0/16"));
+    CHECK(strstr(drawn,"RX --s")&&strstr(drawn,"TOTAL --"));ppm(folder,"count-reading");
+    wifi_packet_count_ui->scan.recording=true;
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"READ SUMMARY 0/16")&&strstr(drawn,"Q -- / DROP --"));
+    wifi_packet_count_ui->scan.sources[0].completed.segments=1U;
+    wifi_packet_count_ui->scan.sources[0].completed.raw_dropped_full=7U;
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"S3 ANALYSIS")&&strstr(drawn,"Q0 / DROP 7"));
+    memset(&wifi_packet_count_ui->scan.sources[0].completed,0,sizeof(wifi_packet_count_ui->scan.sources[0].completed));
+    wifi_packet_count_ui->scan.recording=false;
+    ui_ticks(1,true);wifi_packet_count_diagnostics_get(&diagnostic);
+    CHECK(diagnostic.source[1].phase==WIFI_COUNT_READ&&diagnostic.source[1].part==1U);
+    CHECK(diagnostic.source[1].control_valid&&diagnostic.source[1].accepted_session==v->session);
+    CHECK(!diagnostic.source[1].published_valid&&!diagnostic.record_valid&&!diagnostic.source[0].channel_mask);
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"READ SUMMARY 1/16"));
+    /* A genuinely empty completed readout is a known zero, not missing data. */
+    fake.delay=0;ui_ticks(200,true);
+    CHECK(v->published.valid&&!v->published.rows[0].observations);
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"TOTAL 0 / TX 0 / RX 0"));
+    CHECK(!strstr(drawn,"TOTAL --"));ppm(folder,"count-validated-zero");
+    wifi_packet_count_diagnostics_get(&diagnostic);
+    CHECK(diagnostic.source[1].published_valid&&!diagnostic.source[1].callbacks);
+    v->remote.flags&=(uint8_t)~CERBERUS_PACKET_COUNT_RX_ACTIVE;
+    v->remote.state=CERBERUS_PACKET_COUNT_QUEUED;
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"C5 QUEUED"));
+    v->error=ESP_FAIL;CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"C5 ERROR")&&strstr(drawn,"SOURCE ERROR"));
+    v->error=ESP_OK;v->remote.state=CERBERUS_PACKET_COUNT_RUNNING;
+    v->remote.flags|=CERBERUS_PACKET_COUNT_RX_ACTIVE;
+    wifi_packet_count_back();ui_ticks(200,true);CHECK(!wifi_packet_count_ui);
+    wifi_packet_count_diagnostics_get(&diagnostic);
+    CHECK(diagnostic.available&&!diagnostic.allocated&&!diagnostic.source[1].accepted_session);
+}
 int main(int argc,char **argv)
-{CHECK(argc==2);controller_suite();route_and_lifecycle(argv[1]);recording_ui(argv[1]);painting();
+{CHECK(argc==2);controller_suite();route_and_lifecycle(argv[1]);recording_ui(argv[1]);painting();progress_and_diagnostics(argv[1]);
  printf("Packet Count actual UI: %u checks PASS; UI %zu bytes\n",checks,sizeof(wifi_packet_count_ui_store_t));return 0;}
