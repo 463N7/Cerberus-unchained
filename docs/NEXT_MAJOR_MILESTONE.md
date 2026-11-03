@@ -1,4 +1,21 @@
-# Rev128 pause and resumed priorities
+# Rev136 contribution checkpoint and resumption priorities
+
+The owner requested one additional optimization, a saved checkpoint and a PR
+update. Rev136 reuses the optional Packet Count recorder scratch, reducing its
+native S3 context from 8,424 to 4,328 bytes. All 158 host suites, five native
+targets, linked resource comparison and matched-package verification pass.
+The current contribution updates existing Unchained PR #1; see
+[the exact checkpoint](DUAL_RADIO_REV136.md).
+
+Rev135 remains installed. Its 2.4 GHz Packet Count reception/matching, Stop,
+Back and a fresh split S3/C5 Wi-Fi scan are confirmed. Rev136 has not been
+flashed. Next work should preserve that known baseline and complete optional
+recording and 5 GHz Count acceptance before making wider performance claims.
+USB packet export remains pending; the unfinished local draft is excluded from
+the checkpoint. Mesh Save/Open/Locate reception and full Marauder parity remain
+unfinished. GPS and the six-C5 backboard stay deferred until hardware is present.
+
+## Historical rev128 stopping point
 
 The rev128 milestone and requested PR update were completed at `7248b50`, and
 the goal was paused. The owner resumed the goal on 2026-11-02. The historical

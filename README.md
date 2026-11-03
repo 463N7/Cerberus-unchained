@@ -32,8 +32,9 @@ imply upstream endorsement of Cerberus Unchained.
 **Current source version: `0.1.0-dev.rev136`, targeting onboard C5 protocol
 firmware revision 74. Rev135 remains installed with verified paired writes and
 boot checks; 2.4 GHz Packet Count reception, matching, Stop/Back and the next
-split Wi-Fi scan are confirmed. Rev136's recorder memory optimization is under
-validation. A public binary release has not been selected.**
+split Wi-Fi scan are confirmed. Rev136's recorder memory optimization passes
+the full local host/native matrix and package verification, but has not been
+flashed. A public binary release has not been selected.**
 The web installer remains unavailable until a matched release is deliberately selected.
 Sentinel 1.0.0 binaries are not Unchained firmware.
 
@@ -68,8 +69,9 @@ Rev136 reuses Packet Count's raw-frame scratch for in-place PCAPNG encoding,
 removing a second 4,096-byte buffer from the optional S3 recording worker.
 Frame limits, source/session ownership, one-time append/ACK semantics and
 count-only behavior are unchanged. Focused tests inspect complete serialized
-payloads, chunk boundaries, maximum frames and lost-ACK retries. Native resource
-measurement and full validation are recorded in
+payloads, chunk boundaries, maximum frames and lost-ACK retries. Native worker
+size falls from 8,424 to 4,328 bytes without fixed RAM growth. All 158 host
+suites, five native targets and matched-package verification pass. Evidence is in
 [the rev136 checkpoint](docs/DUAL_RADIO_REV136.md). USB export remains pending.
 
 Rev135 corrects the C5 callback payload extent in Packet Count and Probe Sniff
