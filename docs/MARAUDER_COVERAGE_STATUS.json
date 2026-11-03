@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "checkpoint": "rev135-development",
-  "scope": "Rev134 is the installed baseline. Its live Packet Count diagnostics show every callback rejected at the metadata gate on both channel 48 and channel 10, before address matching. Rev135 corrects Count and Probe Sniff payload extent to the installed ESP-IDF 6.0.1 callback contract and clarifies S3 processing and metadata-rejection display. Exact validation and installation evidence are recorded separately in DUAL_RADIO_REV135.md; corrected physical reception remains pending. Prior targeted acceptance remains in its checkpoint documentation, and Mesh Save/Open and real Mesh/Locate acceptance remain separate. A read-only GitHub develop check on 2026-11-02 retained 79cc6bcba1db6679baee1dab2b0c1ad5010e6363. All mode status assignments remain unchanged and full Marauder parity is unfinished.",
+  "checkpoint": "rev136-development",
+  "scope": "Rev135 remains installed. Its 2.4 GHz Packet Count reception, selected-address matching, Stop/Back and subsequent split Wi-Fi scan are accepted with live diagnostics. Rev136 reuses the recording worker scratch for in-place PCAPNG encoding to remove a 4096-byte optional allocation without changing frame limits or radio ownership. Exact validation and installed-versus-candidate evidence are recorded separately in DUAL_RADIO_REV136.md. Mesh Save/Open and real Mesh/Locate reception remain separate. The read-only GitHub develop check retained 79cc6bcba1db6679baee1dab2b0c1ad5010e6363. All mode status assignments remain unchanged and full Marauder parity is unfinished.",
   "status_definitions": {
     "partial": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open.",
     "pending": "The distinct upstream workflow has no verified implementation at this checkpoint.",
@@ -947,10 +947,10 @@
       "symbol": "WIFI_SCAN_PACKET_RATE",
       "family": "wifi_channel_and_signal",
       "status": "partial",
-      "cerberus_evidence": "docs/DUAL_RADIO_REV135.md",
-      "next_gap": "Selected AP/client Packet Count, disjoint receiver coverage and optional per-source PCAPNG exist. Rev134 diagnostics establish native metadata rejection on both bands; rev135 corrects the extra dump-length assumption to the SDK callback contract. Corrected physical reception, count/recording accuracy, sustained-load acceptance and serial-capture parity remain open. Counter CSV is an additional unimplemented export, not a substitute for raw packets.",
-      "s3_role": "Separate 2.4GHz passive receiver when useful, copied selection/controller UI, exact transport validation and optional dual-source SD recording. Physical acceptance remains pending.",
-      "c5_role": "Capability74 scoped passive counter: bounded AP/STA selection, channel planning, validated headers and optional matched-frame FIFO. Actual RF acceptance remains pending.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV136.md",
+      "next_gap": "Selected AP/client Packet Count, disjoint receiver coverage and optional per-source PCAPNG exist. Rev135 fixes native receive-length handling, with live 2.4 GHz matches, Stop/Back and a new split scan confirmed. Rev136 removes the separate 4096-byte recording scratch through in-place serialization. 5 GHz Count, SD recording accuracy and sustained-load acceptance remain open. USB/serial capture and counter CSV are pending; CSV cannot substitute for raw packets.",
+      "s3_role": "Separate 2.4 GHz passive receiver when useful, copied selection/controller UI, exact transport validation and optional dual-source SD recording with one reused packet scratch. Installed rev135 Stop/Back/rescan is confirmed; rev136 allocation optimization needs native validation.",
+      "c5_role": "Capability74 scoped passive counter: bounded AP/STA selection, channel planning, validated headers and optional matched-frame FIFO. Installed rev135 channel-11 reception and matching are confirmed; 5 GHz Count acceptance remains pending.",
       "related_menu_entries": [],
       "related_cli_commands": [],
       "status_detail": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open."

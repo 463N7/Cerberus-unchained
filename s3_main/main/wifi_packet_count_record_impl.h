@@ -13,7 +13,10 @@ typedef struct {
     wifi_packet_count_transport_t transport;
     uint64_t job;
     packet_count_record_stream_t source[2];
-    uint8_t frame[CERBERUS_WIFI_PCAP_FRAME_MAX];
+    /* Raw chunks enter block first. After CRC validation the serializer moves
+     * them in place to make room for PCAPNG/radiotap headers. The current
+     * source owns this scratch through ACK, so no second frame buffer is
+     * needed and an ACK retry must never serialize or append it again. */
     uint8_t block[CERBERUS_WIFI_PCAP_RECORD_MAX_SIZE];
     unsigned current;
 } packet_count_record_context_t;
@@ -179,7 +182,7 @@ static void packet_count_record_step(packet_count_record_context_t *context)
                 if (!stream->sequence || stream->sequence > CERBERUS_PACKET_COUNT_SEQUENCE_MAX ||
                     (stream->sequence != stream->consumed && stream->sequence != stream->consumed + 1U) ||
                     stream->length < 24U ||
-                    stream->length > sizeof(context->frame) ||
+                    stream->length > CERBERUS_WIFI_PCAP_FRAME_MAX ||
                     cerberus_packet_count_get(m + 6U, 2U) != stream->length ||
                     !cerberus_wifi_packet_count_channel_bit(m[20]) ||
                     (m[22] & ~3U) || m[23] || m[24] || m[25] || m[26] || m[27] ||
@@ -207,16 +210,16 @@ static void packet_count_record_step(packet_count_record_context_t *context)
         if (error == ESP_OK) for (size_t i = amount; i < sizeof(reply.data); ++i)
             if (reply.data[i]) error = ESP_ERR_INVALID_RESPONSE;
         if (error == ESP_OK) {
-            memcpy(context->frame + offset, reply.data, amount);
+            memcpy(context->block + offset, reply.data, amount);
             if (offset + amount < stream->length) ++stream->part;
             else {
-                bool crc_ok = cerberus_protocol_crc32(context->frame, stream->length) == stream->crc;
+                bool crc_ok = cerberus_protocol_crc32(context->block, stream->length) == stream->crc;
                 cerberus_wifi_pcap_metadata_t metadata = {
                     .channel = stream->metadata[20], .rssi_dbm = (int8_t)stream->metadata[21],
                     .rssi_known = (stream->metadata[22] & 2U) != 0U,
                     .time_kind = CERBERUS_WIFI_PCAP_TIME_MONOTONIC,
                     .capture_time_us = cerberus_packet_count_get(stream->metadata + 8U, 8U)};
-                size_t length = crc_ok ? cerberus_wifi_pcapng_record(&metadata, context->frame,
+                size_t length = crc_ok ? cerberus_wifi_pcapng_record(&metadata, context->block,
                     stream->length, stream->length, context->block, sizeof(context->block)) : 0U;
                 /* Mark before any append: an uncertain ACK/partial SD write
                  * cannot append this sequence a second time. */

@@ -29,11 +29,11 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source version: `0.1.0-dev.rev135`, targeting onboard C5 protocol
-firmware revision 74. Rev135 is installed with verified paired writes and boot
-checks; 2.4 GHz Packet Count reception and matching are confirmed, with exit
-and next-scan acceptance in progress. A public binary release has not been
-selected.**
+**Current source version: `0.1.0-dev.rev136`, targeting onboard C5 protocol
+firmware revision 74. Rev135 remains installed with verified paired writes and
+boot checks; 2.4 GHz Packet Count reception, matching, Stop/Back and the next
+split Wi-Fi scan are confirmed. Rev136's recorder memory optimization is under
+validation. A public binary release has not been selected.**
 The web installer remains unavailable until a matched release is deliberately selected.
 Sentinel 1.0.0 binaries are not Unchained firmware.
 
@@ -64,6 +64,14 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 
 ## Development status
 
+Rev136 reuses Packet Count's raw-frame scratch for in-place PCAPNG encoding,
+removing a second 4,096-byte buffer from the optional S3 recording worker.
+Frame limits, source/session ownership, one-time append/ACK semantics and
+count-only behavior are unchanged. Focused tests inspect complete serialized
+payloads, chunk boundaries, maximum frames and lost-ACK retries. Native resource
+measurement and full validation are recorded in
+[the rev136 checkpoint](docs/DUAL_RADIO_REV136.md). USB export remains pending.
+
 Rev135 corrects the C5 callback payload extent in Packet Count and Probe Sniff
 to follow the installed ESP-IDF 6.0.1 contract. Live rev134 diagnostics found
 all 1,926 callbacks rejected on channel 48 and all 5,267 rejected on channel 10
@@ -76,8 +84,9 @@ processing role and shows a validated metadata-rejection warning. See
 native targets and package checks pass without fixed RAM growth. The owner
 confirmed increasing displayed totals; the same live channel-11 session
 advanced from 873 to 2,748 valid frames and 262 to 854 selected matches, with
-zero metadata rejections. Exit/next-scan checks, 5 GHz, optional recording and
-Probe Sniff acceptance remain pending.
+zero metadata rejections. Stop, Back and a fresh split scan also passed; the
+new scan retained 19 APs across both chips without fallback. The 5 GHz Count
+path, optional recording and Probe Sniff acceptance remain pending.
 
 Rev134 corrects Packet Count scheduling when slow UI ticks and transport calls
 would otherwise let status polling starve setup or counter reads. A recent,

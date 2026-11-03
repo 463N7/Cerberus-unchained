@@ -129,7 +129,14 @@ retained Wi-Fi summary still described the first completed scan (one C5 scan,
 not independently establish a new scan after release. A specific Scan Again
 check, leaving the AP list open, has been requested.
 
-The remaining physical check is Back followed by another Wi-Fi scan.
+The subsequent explicit Scan Again check passed. In
+`artifacts/device-rev135/packet-count-fresh-rescan`, C5 successful scans and
+the dual-scan generation both advanced from one to two, failed scans remained
+zero, and 19 APs were retained (10 from S3 and nine from C5). The completed scan
+used split coverage without fallback or source/UI errors, and Packet Count's
+workspace was absent. This independently corroborates the owner's final
+Back/rescan report; the earlier ambiguous capture is retained above.
+
 The 5 GHz band, optional recording and Probe Sniff need their own acceptance.
 Full Marauder parity, serial capture, Mesh Save/Open and
 Locate reception, GPS and expansion-board validation remain unfinished.

@@ -43,7 +43,24 @@ static esp_err_t cerberus_storage_packet_count_begin(uint64_t job,char name[8])
 static esp_err_t cerberus_storage_packet_count_open(uint64_t job,unsigned source,const uint8_t *data,size_t length)
 {CHECK(job==storage_job&&source<2&&length==68&&data[0]==0x0a);if(sd_fail||open_fail)return ESP_FAIL;++open_files;return ESP_OK;}
 static esp_err_t cerberus_storage_packet_count_append(uint64_t job,unsigned source,const uint8_t *data,size_t length)
-{CHECK(job==storage_job&&source<2&&length>=40&&data[0]==3);++appends[source];return sd_fail||append_fail?ESP_FAIL:ESP_OK;}
+{
+    CHECK(job==storage_job&&source<2&&length>=40&&data[0]==3);
+    /* Inspect the actual worker's bytes at the storage boundary. In-place
+     * serialization must preserve every raw byte, including chunk/padding
+     * boundaries and a full 4096-byte frame, across alternating sources. */
+    size_t captured=16U+frame_length,padded=(captured+3U)&~(size_t)3U;
+    CHECK(length==16U+padded);
+    CHECK(cerberus_packet_count_get(data+4,4)==length);
+    CHECK(cerberus_packet_count_get(data+8,4)==captured);
+    CHECK(cerberus_packet_count_get(data+length-4U,4)==length);
+    CHECK(cerberus_packet_count_get(data+14,2)==16U);
+    CHECK(cerberus_packet_count_get(data+22,2)==(source?5180U:2437U));
+    CHECK(cerberus_packet_count_get(data+24,2)==(source?0x100U:0x80U));
+    CHECK(data[26]==(uint8_t)-49);
+    CHECK(!memcmp(data+28,frame,frame_length));
+    for(size_t i=12U+captured;i<length-4U;++i)CHECK(data[i]==0);
+    ++appends[source];return sd_fail||append_fail?ESP_FAIL:ESP_OK;
+}
 static esp_err_t cerberus_storage_packet_count_finish(uint64_t job,cerberus_storage_packet_count_result_t *out)
 {CHECK(job==storage_job);memset(out,0,sizeof(*out));out->bytes[0]=68+appends[0]*100;out->bytes[1]=68+appends[1]*100;strcpy(out->file_name[0],"S3.PCAPNG");strcpy(out->file_name[1],"C5.PCAPNG");storage_job=0;open_files=0;++closes;return finish_fail?ESP_FAIL:ESP_OK;}
 static esp_err_t exchange(void *ctx,unsigned source,uint8_t command,const void *q,size_t n,void *out,size_t size)
@@ -135,6 +152,22 @@ static void reset(void)
     memset(appends,0,sizeof(appends));memset(ack_calls,0,sizeof(ack_calls));closes=0;frame_length=91;
     for(unsigned i=0;i<sizeof(frame);++i)frame[i]=(uint8_t)(i*13U+7U);
 }
+static void recording_extent(uint16_t length,bool lost_ack)
+{
+    reset();frame_length=length;ack_lost=lost_ack;
+    wifi_packet_count_transport_t transport={.exchange=exchange};uint64_t job;
+    CHECK(wifi_packet_count_record_start(&transport,&job)==ESP_OK);
+    task_entry(task_argument);
+    wifi_packet_count_record_status_t result;
+    CHECK(wifi_packet_count_record_status(job,&result)&&!result.busy&&!result.error);
+    CHECK(!allocations&&!tasks&&!storage_job);
+    for(unsigned source=0;source<2;++source){
+        CHECK(appends[source]==1&&result.source[source].written==1);
+        CHECK(!result.source[source].discarded&&!result.source[source].loss_unknown);
+        CHECK(ack_calls[source]==(lost_ack?2U:1U));
+    }
+    CHECK(wifi_packet_count_record_release(job)==ESP_OK);
+}
 int main(void)
 {
     wifi_packet_count_transport_t transport={.exchange=exchange};uint64_t job=0;
@@ -170,6 +203,13 @@ int main(void)
         CHECK(wifi_packet_count_record_release(job+1)==ESP_ERR_INVALID_STATE);
         CHECK(wifi_packet_count_record_release(job)==ESP_OK);
     }
+    for(uint16_t length=24;length<=96;++length)recording_extent(length,(length&1U)!=0);
+    for(uint16_t boundary=120;boundary<4096;boundary+=40){
+        recording_extent(boundary-1U,false);
+        recording_extent(boundary,true);
+        recording_extent(boundary+1U,false);
+    }
+    recording_extent(4095,true);recording_extent(4096,true);
     printf("Packet Count recorder PASS %u checks; worker context %zu bytes\n",checks,sizeof(packet_count_record_context_t));
     return 0;
 }
