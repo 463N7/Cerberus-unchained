@@ -30,8 +30,9 @@ implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
 **Current source version: `0.1.0-dev.rev134`, targeting onboard C5 protocol
-firmware revision 74. Rev133 is installed; rev134 validation is in progress.
-A public binary release has not been selected.**
+firmware revision 74. The matched rev134 pair is installed after host, native,
+package and recoverable-installation checks. A public binary release has not
+been selected.**
 The web installer remains unavailable until a matched release is deliberately selected.
 Sentinel 1.0.0 binaries are not Unchained firmware.
 
@@ -69,9 +70,13 @@ keepalive. Stop, uncertain ownership and release retain their priority. The
 screen now explains the S3 analysis role for C5-only reception, distinguishes
 setup from reception and shows readout progress. A read-only `packet_count`
 diagnostic exposes copied controller state without controlling either radio.
-See [the rev134 checkpoint](docs/DUAL_RADIO_REV134.md). The reported rev133
-inactivity has a reproduced software failure path; its physical cause and the
-corrected on-device behavior still require verification.
+All 158 host suites and five native targets pass on 1,234 unchanged inputs.
+The resource audit measures 464 additional fixed bytes on S3 and no C5 fixed
+RAM growth. Verified writes and two sampled boot checks pass. See
+[the rev134 checkpoint](docs/DUAL_RADIO_REV134.md). The owner subsequently
+confirmed advancing RX time but zero selected-AP totals on rev133; the
+conditional scheduling defect is not established as that report's cause.
+Actual receive and matching behavior still require the new device diagnostics.
 
 Rev133 adds passive **Packet Count** from a selected Wi-Fi AP or observed
 client, with a separate list of up to 16 targets, explicit Start/Stop and
@@ -84,8 +89,8 @@ associations. Count-only mode allocates no raw recording queues or worker.
 All 157 host suites, five native targets, the linked resource audit and matched
 package verification pass on 1,230 unchanged inputs. The
 [rev133 checkpoint](docs/DUAL_RADIO_REV133.md) records exact package and resource
-costs. The matched rev133 pair is installed with verified writes, mounted SD
-and two passing sampled boot checks. This establishes installation, not live
+costs. The matched rev133 pair was installed before rev134 with verified writes,
+mounted SD and two passing sampled boot checks. This establishes installation, not live
 Packet Count acceptance.
 Physical Packet Count/recording acceptance, rev132 Mesh Save/Open and Locate
 acceptance remain pending. Counter CSV, serial capture and full parity are
@@ -95,7 +100,7 @@ Rev132 implements native Mesh saved maps: portable `.MSH` files, asynchronous
 SD save/open and historical observation browsing with CSV export. All 151 host
 suites and five native targets pass on
 1,202 unchanged inputs, and the verified matched development package is now
-installed on both chips. Paired boot, mounted SD and sampled idle checks pass;
+installed on both chips before rev133. Paired boot, mounted SD and sampled idle checks pass;
 real SD save/reopen and Mesh reception acceptance remain pending. Fixed RAM
 grows by 16 bytes on S3 and is unchanged on C5; the larger archive buffers are
 optional PSRAM allocations. See [the rev132 checkpoint](docs/DUAL_RADIO_REV132.md).
