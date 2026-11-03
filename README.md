@@ -29,10 +29,9 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source version: `0.1.0-dev.rev134`, targeting onboard C5 protocol
-firmware revision 74. The matched rev134 pair is installed after host, native,
-package and recoverable-installation checks. A public binary release has not
-been selected.**
+**Current source version: `0.1.0-dev.rev135`, targeting onboard C5 protocol
+firmware revision 74. Rev134 is installed; the rev135 receive-length correction
+is under validation. A public binary release has not been selected.**
 The web installer remains unavailable until a matched release is deliberately selected.
 Sentinel 1.0.0 binaries are not Unchained firmware.
 
@@ -62,6 +61,17 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev135 corrects the C5 callback payload extent in Packet Count and Probe Sniff
+to follow the installed ESP-IDF 6.0.1 contract. Live rev134 diagnostics found
+all 1,926 callbacks rejected on channel 48 and all 5,267 rejected on channel 10
+before address matching. The code used an additional `dump_len` equality
+condition that Espressif's own sniffer does not require. The correction retains
+receive-error checks, explicit frame-type admission, strict parser bounds and
+recording limits. It also replaces the confusing S3 RF-absence text with its
+processing role and shows a validated metadata-rejection warning. See
+[the rev135 checkpoint](docs/DUAL_RADIO_REV135.md). Physical acceptance of this
+correction remains pending.
 
 Rev134 corrects Packet Count scheduling when slow UI ticks and transport calls
 would otherwise let status polling starve setup or counter reads. A recent,

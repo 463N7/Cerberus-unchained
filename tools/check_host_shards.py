@@ -137,7 +137,7 @@ class RunnerChecks(unittest.TestCase):
         status, receipt, commands = self.invoke()
         self.assertEqual(status, 0)
         self.assertEqual(receipt["format"], 1)
-        self.assertEqual(receipt["suite_set"], "rev134")
+        self.assertEqual(receipt["suite_set"], "rev135")
         self.assertEqual(receipt["status"], "passed")
         self.assertEqual(receipt["selection"]["mode"], "full")
         self.assertEqual([c["check"] for c in receipt["checks"]], list(runner.registered_checks()))
@@ -218,7 +218,7 @@ class AggregateChecks(unittest.TestCase):
                 (folder / log_name).write_bytes(content)
                 checks.append({"check": name, "exit_code": 0, "duration_seconds": 1.25,
                     "log": "artifacts/host-checks/" + log_name, "log_sha256": verifier.digest(content)})
-            receipt = {"format": 1, "status": "passed", "suite_set": "rev134", "platform": "win32",
+            receipt = {"format": 1, "status": "passed", "suite_set": "rev135", "platform": "win32",
                 "hardware_validated": False, "source_head": HEAD, "source_head_after": HEAD,
                 "source_clean": True, "source_clean_after": True,
                 "execution": EXECUTION,

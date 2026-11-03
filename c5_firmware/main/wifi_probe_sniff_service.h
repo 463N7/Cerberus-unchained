@@ -186,7 +186,10 @@ esp_err_t cerberus_wifi_probe_sniff_release(uint64_t token,cerberus_probe_sniff_
  * it, then revalidates that epoch before publication. No heap or SDK calls. */
 static void probe_sniff_receive(const wifi_promiscuous_pkt_t *packet,wifi_promiscuous_pkt_type_t type,int64_t callback_us)
 {
-    if(!packet||type!=WIFI_PKT_MGMT||packet->rx_ctrl.rx_state||packet->rx_ctrl.sig_len<5U||packet->rx_ctrl.dump_len<1U)return;
+    /* ESP-IDF v6.0.1: esp_wifi_types_native.h and the simple_sniffer example
+     * use sig_len for the callback payload, excluding four FCS bytes. Require
+     * one payload byte before the subtype read; dump_len is not an extra gate. */
+    if(!packet||type!=WIFI_PKT_MGMT||packet->rx_ctrl.rx_state||packet->rx_ctrl.sig_len<5U)return;
     uint64_t token=0U;
     portENTER_CRITICAL(&probe_sniff_mux);
     probe_sniff_context_t *c=probe_sniff_context;
@@ -198,9 +201,7 @@ static void probe_sniff_receive(const wifi_promiscuous_pkt_t *packet,wifi_promis
     cerberus_probe_sniff_row_t row;
     cerberus_probe_sniff_decode_result_t result=CERBERUS_PROBE_SNIFF_DECODE_UNSUPPORTED;
     size_t length=(size_t)packet->rx_ctrl.sig_len-4U;
-    /* C5 HE SDK explicitly supplies dump_len excluding FCS. A disagreement
-     * never authorizes parsing a possibly truncated buffer as complete. */
-    if(packet->rx_ctrl.dump_len==length&&length<=CERBERUS_PROBE_SNIFF_MAX_FRAME_BYTES&&callback_us>=0)
+    if(length<=CERBERUS_PROBE_SNIFF_MAX_FRAME_BYTES&&callback_us>=0)
         result=cerberus_probe_sniff_decode(packet->payload,length,packet->rx_ctrl.channel,
             packet->rx_ctrl.rssi,(uint64_t)callback_us,&row);
     portENTER_CRITICAL(&probe_sniff_mux);

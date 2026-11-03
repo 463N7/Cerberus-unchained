@@ -311,12 +311,19 @@ static esp_err_t wifi_packet_count_draw(void)
         for (unsigned radio=0;radio<2U;++radio) {
             const wifi_packet_count_source_t *v=&s->scan.sources[radio];
             bool analysis=wifi_count_analysis_only(s,radio);
+            const char *state=wifi_count_state(v);
+            /* Only a validated bank can distinguish rejected metadata from an
+             * empty channel. Setup, cleanup and errors retain their labels. */
+            bool metadata_rejected=!analysis && v->published.valid &&
+                v->published.summary.invalid_metadata && !v->published.summary.valid_frames &&
+                (!strcmp(state,"RECEIVING") || !strcmp(state,"FROZEN"));
             unsigned x=8U+radio*156U;
             ESP_RETURN_ON_ERROR(cerberus_display_fill_rect(x,60,148,50,UI_PANEL),TAG,"count source");
-            if (!analysis && !strcmp(wifi_count_state(v),"RECEIVING"))
+            if (metadata_rejected) snprintf(line,23U,"%s METADATA REJECTED",radio?"C5":"S3");
+            else if (!analysis && !strcmp(state,"RECEIVING"))
                 snprintf(line,23U,"%s RECEIVING CH%u",radio?"C5":"S3",v->remote.channel);
-            else snprintf(line,sizeof(line),"%s %.19s",radio?"C5":"S3",analysis?"ANALYSIS":wifi_count_state(v));
-            ESP_RETURN_ON_ERROR(cerberus_display_draw_text(x+6U,66,line,UI_TEXT,UI_PANEL,1),TAG,"count source state");
+            else snprintf(line,sizeof(line),"%s %.19s",radio?"C5":"S3",analysis?"PROCESSING":state);
+            ESP_RETURN_ON_ERROR(cerberus_display_draw_text(x+6U,66,line,metadata_rejected?UI_BAD:UI_TEXT,UI_PANEL,1),TAG,"count source state");
             uint64_t window=0; bool saturated=false;
             for (unsigned i=0;i<42U;++i) {
                 uint64_t n=v->completed.channel_window_us[i];
@@ -329,12 +336,12 @@ static esp_err_t wifi_packet_count_draw(void)
             wifi_count_short(window/1000000U,number,sizeof(number));
             char channel[4]="--";
             if (v->remote.channel) snprintf(channel,sizeof(channel),"%u",v->remote.channel);
-            if (analysis) snprintf(line,23U,"CONTROL / READOUT");
+            if (analysis) snprintf(line,23U,"COUNTS + DISPLAY");
             else if (s->scan.recording && wifi_count_readout(v,line,23U)) { /* retain queue loss line below */ }
             else if (!v->published.valid && !v->completed.segments) snprintf(line,23U,"RX --s CH%s",channel);
             else snprintf(line,23U,"RX %.10ss%s CH%s",number,saturated?"+":"",channel);
             ESP_RETURN_ON_ERROR(cerberus_display_draw_text(x+6U,80,line,UI_MUTED,UI_PANEL,1),TAG,"count duration");
-            if (analysis && (!s->scan.recording || !v->completed.segments)) snprintf(line,23U,"NO CURRENT S3 RF");
+            if (analysis && (!s->scan.recording || !v->completed.segments)) snprintf(line,23U,"RECEIVER: C5");
             else if (!s->scan.recording && wifi_count_readout(v,line,23U)) { /* copied-part progress */ }
             else if (!s->scan.recording) snprintf(line,sizeof(line),v->published.valid?"COUNTERS VALIDATED":"AWAITING COUNTERS");
             else if (!v->published.valid && !v->completed.segments) snprintf(line,sizeof(line),"Q -- / DROP --");

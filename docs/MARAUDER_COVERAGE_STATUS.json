@@ -1,7 +1,7 @@
 {
   "format": 1,
-  "checkpoint": "rev134-development",
-  "scope": "Rev133 is the installed baseline; its paired boot and SD mount passed. The owner reported inactive Packet Count and a misleading S3 NOT ASSIGNED label. Rev134 corrects a reproduced controller starvation path, clarifies receiver and analysis roles, and adds read-only scalar diagnostics. Exact validation and installation evidence are recorded separately in DUAL_RADIO_REV134.md. The software reproduction does not establish the physical cause or corrected RF behavior. The owner accepted rev131 Mesh menu-first entry and Back controls; Mesh Save/Open and real Mesh/Locate acceptance remain separate. A read-only GitHub develop check on 2026-11-02 retained 79cc6bcba1db6679baee1dab2b0c1ad5010e6363. All mode status assignments remain unchanged and full Marauder parity is unfinished.",
+  "checkpoint": "rev135-development",
+  "scope": "Rev134 is the installed baseline. Its live Packet Count diagnostics show every callback rejected at the metadata gate on both channel 48 and channel 10, before address matching. Rev135 corrects Count and Probe Sniff payload extent to the installed ESP-IDF 6.0.1 callback contract and clarifies S3 processing and metadata-rejection display. Exact validation and installation evidence are recorded separately in DUAL_RADIO_REV135.md; corrected physical reception remains pending. Prior targeted acceptance remains in its checkpoint documentation, and Mesh Save/Open and real Mesh/Locate acceptance remain separate. A read-only GitHub develop check on 2026-11-02 retained 79cc6bcba1db6679baee1dab2b0c1ad5010e6363. All mode status assignments remain unchanged and full Marauder parity is unfinished.",
   "status_definitions": {
     "partial": "A related Cerberus workflow exists, but upstream option/behavior parity or hardware acceptance remains open.",
     "pending": "The distinct upstream workflow has no verified implementation at this checkpoint.",
@@ -67,7 +67,7 @@
       "family": "wifi_receive_capture",
       "status": "partial",
       "cerberus_evidence": "docs/DUAL_RADIO_REV128.md",
-      "next_gap": "Rev128 adds dedicated passive request/transmitter/network lists, stable details and stopped bounded SD evidence. The separate fixed-channel PCAPNG capture remains available; this CSV is not raw-frame capture. Complete upstream option parity, dense/repeated-use behavior and physical receive/save/reopen acceptance remain open. Requests do not establish association or physical-device identity.",
+      "next_gap": "Rev128 adds dedicated passive request/transmitter/network lists, stable details and stopped bounded SD evidence. Rev135 corrects the native callback payload extent to the ESP-IDF 6.0.1 contract; see DUAL_RADIO_REV135.md. The separate fixed-channel PCAPNG capture remains available; this CSV is not raw-frame capture. Complete upstream option parity, dense/repeated-use behavior and physical receive/save/reopen acceptance remain open. Requests do not establish association or physical-device identity.",
       "s3_role": "S3 validates incremental C5 session/projection transfers, groups sampled observations, freezes selection and saves stopped evidence through the existing serialized worker; the separate raw-capture path writes PCAPNG.",
       "c5_role": "C5 owns passive Probe Request reception, exact session cleanup and a bounded transmitter plus exact requested-SSID inventory; raw capture remains separate.",
       "related_menu_entries": [
@@ -947,8 +947,8 @@
       "symbol": "WIFI_SCAN_PACKET_RATE",
       "family": "wifi_channel_and_signal",
       "status": "partial",
-      "cerberus_evidence": "docs/DUAL_RADIO_REV134.md",
-      "next_gap": "Rev133 implements selected AP/client Packet Count, independent target accounting, disjoint receiver coverage and optional per-source PCAPNG. Rev134 corrects a reproduced slow-tick scheduling stall and exposes setup/readout progress. The owner-reported inactivity still needs corrected physical verification. Count/recording accuracy, sustained-load acceptance and serial-capture parity remain open. Counter CSV is an additional unimplemented export, not a substitute for raw packets.",
+      "cerberus_evidence": "docs/DUAL_RADIO_REV135.md",
+      "next_gap": "Selected AP/client Packet Count, disjoint receiver coverage and optional per-source PCAPNG exist. Rev134 diagnostics establish native metadata rejection on both bands; rev135 corrects the extra dump-length assumption to the SDK callback contract. Corrected physical reception, count/recording accuracy, sustained-load acceptance and serial-capture parity remain open. Counter CSV is an additional unimplemented export, not a substitute for raw packets.",
       "s3_role": "Separate 2.4GHz passive receiver when useful, copied selection/controller UI, exact transport validation and optional dual-source SD recording. Physical acceptance remains pending.",
       "c5_role": "Capability74 scoped passive counter: bounded AP/STA selection, channel planning, validated headers and optional matched-frame FIFO. Actual RF acceptance remains pending.",
       "related_menu_entries": [],

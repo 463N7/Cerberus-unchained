@@ -186,7 +186,8 @@ static void progress_and_diagnostics(const char *folder)
     prior_released=true;fake.delay=9000;ui_ticks(1,true);
     wifi_packet_count_source_t *v=&wifi_packet_count_ui->scan.sources[1];
     CHECK(v->phase==WIFI_COUNT_BEGIN&&!fake.source[1].begin_calls);
-    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"S3 ANALYSIS")&&strstr(drawn,"NO CURRENT S3 RF"));
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"S3 PROCESSING")&&strstr(drawn,"COUNTS + DISPLAY")&&strstr(drawn,"RECEIVER: C5"));
+    CHECK(!strstr(drawn,"NO CURRENT S3 RF")&&!strstr(drawn,"S3 RECEIVING"));
     CHECK(strstr(drawn,"C5 RESERVING")&&strstr(drawn,"RX --s")&&strstr(drawn,"TOTAL --"));
     ppm(folder,"count-c5-setup");
     ui_ticks(1,true);CHECK(v->phase==WIFI_COUNT_TARGET&&v->accepted);
@@ -201,7 +202,7 @@ static void progress_and_diagnostics(const char *folder)
     CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"READ SUMMARY 0/16")&&strstr(drawn,"Q -- / DROP --"));
     wifi_packet_count_ui->scan.sources[0].completed.segments=1U;
     wifi_packet_count_ui->scan.sources[0].completed.raw_dropped_full=7U;
-    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"S3 ANALYSIS")&&strstr(drawn,"Q0 / DROP 7"));
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"S3 PROCESSING")&&strstr(drawn,"COUNTS + DISPLAY")&&strstr(drawn,"Q0 / DROP 7"));
     memset(&wifi_packet_count_ui->scan.sources[0].completed,0,sizeof(wifi_packet_count_ui->scan.sources[0].completed));
     wifi_packet_count_ui->scan.recording=false;
     ui_ticks(1,true);wifi_packet_count_diagnostics_get(&diagnostic);
@@ -213,13 +214,45 @@ static void progress_and_diagnostics(const char *folder)
     fake.delay=0;ui_ticks(200,true);
     CHECK(v->published.valid&&!v->published.rows[0].observations);
     CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"TOTAL 0 / TX 0 / RX 0"));
-    CHECK(!strstr(drawn,"TOTAL --"));ppm(folder,"count-validated-zero");
+    CHECK(!strstr(drawn,"TOTAL --")&&!strstr(drawn,"METADATA REJECTED"));ppm(folder,"count-validated-zero");
     wifi_packet_count_diagnostics_get(&diagnostic);
     CHECK(diagnostic.source[1].published_valid&&!diagnostic.source[1].callbacks);
+    /* A real model metadata rejection reaches the UI through the multipart
+     * controller publication, without fabricating a received valid frame. */
+    uint8_t frame[24]={0x08,0x01};
+    CHECK(!cerberus_wifi_packet_count_observe(&fake.source[1].table,frame,sizeof(frame),
+        CERBERUS_WIFI_PACKET_COUNT_DATA,false,fake.source[1].table.window_channel,-45,fake.clock));
+    ui_ticks(200,true);
+    CHECK(v->published.valid&&v->published.summary.invalid_metadata==1U&&!v->published.summary.valid_frames);
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"C5 METADATA REJECTED")&&strstr(drawn,"TOTAL 0 / TX 0 / RX 0"));
+    ppm(folder,"count-metadata-rejected");
+    unsigned saved_phase=v->phase,saved_kind=v->kind,saved_part=v->part;
+    v->phase=WIFI_COUNT_READ;v->kind=CERBERUS_PACKET_COUNT_READ_SUMMARY;v->part=3U;
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"C5 METADATA REJECTED")&&strstr(drawn,"READ SUMMARY 3/16"));
+    wifi_packet_count_ui->scan.recording=true;
+    v->published.recording.pending=2U;v->published.recording.dropped_full=3U;
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"C5 METADATA REJECTED")&&strstr(drawn,"READ SUMMARY 3/16")&&strstr(drawn,"Q2 / DROP 3"));
+    ppm(folder,"count-metadata-recording");
+    wifi_packet_count_ui->recording.source[1].error=ESP_FAIL;
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"PCAP ERROR S3=0 C5="));
+    wifi_packet_count_ui->recording.source[1].error=ESP_OK;
+    wifi_packet_count_ui->scan.recording=false;
+    memset(&v->published.recording,0,sizeof(v->published.recording));
+    v->published.valid=false;
+    CHECK(draw_detail_page()==ESP_OK&&!strstr(drawn,"METADATA REJECTED"));
+    v->published.valid=true;v->published.summary.invalid_metadata=UINT32_MAX;
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"C5 METADATA REJECTED"));
+    v->published.summary.invalid_metadata=1U;v->published.summary.valid_frames=1U;
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"C5 RECEIVING")&&!strstr(drawn,"METADATA REJECTED"));
+    v->published.summary.valid_frames=0U;v->stop=true;
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"C5 STOPPING")&&!strstr(drawn,"METADATA REJECTED"));
+    v->stop=false;v->faulted=true;
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"C5 CLOSE REQUIRED")&&!strstr(drawn,"METADATA REJECTED"));
+    v->faulted=false;v->phase=saved_phase;v->kind=saved_kind;v->part=saved_part;
     v->remote.flags&=(uint8_t)~CERBERUS_PACKET_COUNT_RX_ACTIVE;
     v->remote.state=CERBERUS_PACKET_COUNT_QUEUED;
-    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"C5 QUEUED"));
-    v->error=ESP_FAIL;CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"C5 ERROR")&&strstr(drawn,"SOURCE ERROR"));
+    CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"C5 QUEUED")&&!strstr(drawn,"METADATA REJECTED"));
+    v->error=ESP_FAIL;CHECK(draw_detail_page()==ESP_OK&&strstr(drawn,"C5 ERROR")&&strstr(drawn,"SOURCE ERROR")&&!strstr(drawn,"METADATA REJECTED"));
     v->error=ESP_OK;v->remote.state=CERBERUS_PACKET_COUNT_RUNNING;
     v->remote.flags|=CERBERUS_PACKET_COUNT_RX_ACTIVE;
     wifi_packet_count_back();ui_ticks(200,true);CHECK(!wifi_packet_count_ui);

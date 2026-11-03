@@ -1,3 +1,6 @@
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE 1
+#endif
 #undef NDEBUG
 #include "cerberus_protocol.h"
 #include "probe_sniff_core.h"
@@ -8,6 +11,13 @@ static atomic_bool packet_count_radio_reserved;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 static unsigned checks;
 #define CHECK(x) do{++checks;assert(x);}while(0)
 #define portMAX_DELAY 0xffffffffU
@@ -181,8 +191,8 @@ static void parser_inventory(void)
     /* A literal '<hidden>' is a third exact key, never wildcard normalization. */
     p=frame((const uint8_t*)"<hidden>",8,1);packet(&p);CHECK(probe_sniff_context->table.summary.count==3);
     unsigned before=probe_sniff_context->table.summary.valid_frames;
-    p.rx_ctrl.dump_len=0;packet(&p);CHECK(probe_sniff_context->table.summary.valid_frames==before);
-    p=frame(binary,32,2);p.rx_ctrl.dump_len--;packet(&p);CHECK(probe_sniff_context->table.summary.unsupported_frames==1);
+    p.rx_ctrl.rx_state=1;packet(&p);CHECK(probe_sniff_context->table.summary.valid_frames==before);
+    p=frame(binary,32,2);p.rx_ctrl.sig_len=CERBERUS_PROBE_SNIFF_MAX_FRAME_BYTES+5U;packet(&p);CHECK(probe_sniff_context->table.summary.unsupported_frames==1);
     p=frame(binary,32,2);p.payload[p.rx_ctrl.dump_len++]=0;p.rx_ctrl.sig_len=p.rx_ctrl.dump_len+4;packet(&p);
     CHECK(probe_sniff_context->table.summary.malformed_frames==1);
     p=frame(binary,32,2);p.payload[1]=0x40;packet(&p);CHECK(probe_sniff_context->table.summary.unsupported_frames==2);
@@ -197,6 +207,70 @@ static void parser_inventory(void)
     unsigned revision=summary.revision;packet(&p);copy_object(token,0,0,&summary,sizeof(summary));CHECK(summary.revision==revision);
     CHECK(sdk_mode==7&&sdk_channel==11&&sdk_second==1&&sdk_filter.filter_mask==7&&!sdk_receiving);
     dispose(token);
+}
+static void metadata_only_callback(void)
+{
+#ifdef _WIN32
+    SYSTEM_INFO info;GetSystemInfo(&info);size_t page=info.dwPageSize;
+    uint8_t *memory=VirtualAlloc(NULL,page*2U,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
+    CHECK(memory);DWORD old;CHECK(VirtualProtect(memory+page,page,PAGE_NOACCESS,&old));
+#else
+    size_t page=(size_t)sysconf(_SC_PAGESIZE);
+    uint8_t *memory=mmap(NULL,page*2U,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+    CHECK(memory!=MAP_FAILED);CHECK(!mprotect(memory+page,page,PROT_NONE));
+#endif
+    wifi_promiscuous_pkt_t *p=(wifi_promiscuous_pkt_t *)(memory+page-sizeof(wifi_pkt_rx_ctrl_t));
+    memset(&p->rx_ctrl,0,sizeof(p->rx_ctrl));p->rx_ctrl.channel=sdk_channel;
+    p->rx_ctrl.sig_len=44;p->rx_ctrl.dump_len=40;
+    unsigned revision=probe_sniff_context->table.summary.revision;
+    wifi_promiscuous_callback(p,WIFI_PKT_MISC);
+    wifi_promiscuous_callback(p,WIFI_PKT_CTRL);
+    wifi_promiscuous_callback(p,WIFI_PKT_DATA);
+    for(unsigned n=0;n<5U;++n){p->rx_ctrl.sig_len=n;packet(p);}
+    p->rx_ctrl.sig_len=44;p->rx_ctrl.rx_state=1;packet(p);
+    CHECK(probe_sniff_context->table.summary.revision==revision);
+#ifdef _WIN32
+    CHECK(VirtualFree(memory,0,MEM_RELEASE));
+#else
+    CHECK(!munmap(memory,page*2U));
+#endif
+}
+static void public_payload_contract(void)
+{
+    const uint8_t channels[]={6,48};
+    const uint8_t binary[]={0,0xff,0x80,'A'};
+    const unsigned dump_lengths[]={0,34,1,29,31,30};
+    for(unsigned ch=0;ch<sizeof(channels);++ch){
+        reset();cerberus_probe_sniff_control_t c=begin(CERBERUS_PROBE_SNIFF_FIXED,channels[ch]);
+        tick(20);CHECK(sdk_receiving&&sdk_channel==channels[ch]);
+        for(unsigned d=0;d<sizeof(dump_lengths)/sizeof(*dump_lengths);++d){
+            wifi_promiscuous_pkt_t p=frame(binary,sizeof(binary),1);p.rx_ctrl.dump_len=dump_lengths[d];
+            memset(p.payload+30,0xee,4);packet(&p);
+            CHECK(probe_sniff_context->table.summary.valid_frames==d+1U);
+            CHECK(!probe_sniff_context->table.summary.malformed_frames&&!probe_sniff_context->table.summary.unsupported_frames);
+            CHECK(probe_sniff_context->table.summary.count==1U&&probe_sniff_context->table.rows[0].frames==d+1U);
+            CHECK(probe_sniff_context->table.rows[0].ssid_length==sizeof(binary)&&
+                !memcmp(probe_sniff_context->table.rows[0].ssid,binary,sizeof(binary)));
+        }
+        metadata_only_callback();
+        wifi_promiscuous_pkt_t p=frame(NULL,0,2);p.rx_ctrl.sig_len=5;p.rx_ctrl.dump_len=0;packet(&p);
+        CHECK(probe_sniff_context->table.summary.malformed_frames==1U);
+        /* Valid bounded IEs fill the exact Cerberus parser limit. */
+        p=frame(NULL,0,2);size_t used=26;
+        while(used<CERBERUS_PROBE_SNIFF_MAX_FRAME_BYTES){
+            size_t remaining=CERBERUS_PROBE_SNIFF_MAX_FRAME_BYTES-used;
+            size_t n=remaining-2U;if(n>255U)n=255U;if(remaining-n-2U==1U)--n;
+            p.payload[used]=221;p.payload[used+1U]=(uint8_t)n;memset(p.payload+used+2U,0x5a,n);used+=n+2U;
+        }
+        p.rx_ctrl.sig_len=used+4U;p.rx_ctrl.dump_len=0;memset(p.payload+used,0xee,4);packet(&p);
+        CHECK(probe_sniff_context->table.summary.valid_frames==7U&&probe_sniff_context->table.summary.count==2U);
+        p.rx_ctrl.sig_len=used+5U;packet(&p);CHECK(probe_sniff_context->table.summary.unsupported_frames==1U);
+        CHECK(probe_sniff_context->table.summary.valid_frames==7U);
+        CHECK(cerberus_wifi_probe_sniff_stop(c.session_id,&c)==ESP_OK);for(unsigned i=0;i<4U;++i)tick(20);
+        cerberus_probe_sniff_projection_t row;copy_object(c.session_id,1,0,&row,sizeof(row));
+        CHECK(cerberus_probe_sniff_projection_valid(&row)&&row.row.frames==6U&&row.row.last_channel==channels[ch]);
+        dispose(c.session_id);
+    }
 }
 static void source_identity_lifetime(void)
 {
@@ -318,6 +392,7 @@ static void interleavings(void)
 #include "probe_sniff_core_edges_check.h"
 int main(void)
 {
+    public_payload_contract();
     pure_parser_edges();pure_table_edges();
     parser_inventory();source_identity_lifetime();cleanup_and_failures();immutable_pin_and_protocol();interleavings();
     reset();probe_sniff_boot_init();CHECK(probe_sniff_epoch&&probe_sniff_epoch!=100);CHECK(!probe_sniff_retained());

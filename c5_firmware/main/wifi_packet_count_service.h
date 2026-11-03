@@ -102,11 +102,15 @@ static void packet_count_raw_stats(packet_count_context_t *c,cerberus_packet_cou
 }
 static void packet_count_receive(const wifi_promiscuous_pkt_t *p,wifi_promiscuous_pkt_type_t type,int64_t now)
 {
-    if(!p)return;
+    if(!p||(type!=WIFI_PKT_MGMT&&type!=WIFI_PKT_DATA))return;
     unsigned kind=type==WIFI_PKT_MGMT?CERBERUS_WIFI_PACKET_COUNT_MGMT:
-        type==WIFI_PKT_DATA?CERBERUS_WIFI_PACKET_COUNT_DATA:CERBERUS_WIFI_PACKET_COUNT_OTHER;
+        CERBERUS_WIFI_PACKET_COUNT_DATA;
+    /* ESP-IDF v6.0.1: esp_wifi_types_native.h defines payload extent by
+     * sig_len; examples/network/simple_sniffer/main/cmd_sniffer.c excludes
+     * MISC/error callbacks and strips four FCS bytes. dump_len equality is
+     * not part of that callback contract. Never read a MISC/CTRL payload. */
     size_t length=p->rx_ctrl.sig_len>=4U?p->rx_ctrl.sig_len-4U:0U;
-    bool complete=p->rx_ctrl.rx_state==0U&&p->rx_ctrl.dump_len==length;
+    bool complete=p->rx_ctrl.rx_state==0U&&p->rx_ctrl.sig_len>=4U;
     portENTER_CRITICAL(&packet_count_mux);
     packet_count_context_t *c=packet_count_context;
     if(!c||!c->channel||(now>=0&&(uint64_t)now<c->channel_armed_us)){

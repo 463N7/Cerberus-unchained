@@ -1,3 +1,6 @@
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE 1
+#endif
 #undef NDEBUG
 #include "cerberus_protocol.h"
 #include "probe_sniff_core.h"
@@ -7,6 +10,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 static unsigned checks;
 #define CHECK(x) do{++checks;assert(x);}while(0)
 #define portMAX_DELAY 0xffffffffU
@@ -146,16 +156,18 @@ static cerberus_packet_count_begin_t begin_request(bool raw,unsigned count)
 {return (cerberus_packet_count_begin_t){.session_id=packet_count_epoch+1U,.channel_mask=UINT64_C(1)<<10,
     .target_count=(uint8_t)count,.dwell_ms=100,.record=(uint8_t)raw};}
 static const uint8_t target_mac[6]={2,3,4,5,6,7};
-static void begin(bool raw,unsigned count)
+static void begin_channel(bool raw,unsigned count,uint8_t channel)
 {
-    cerberus_packet_count_begin_t q=begin_request(raw,count);token=q.session_id;req.session_id=token;
+    cerberus_packet_count_begin_t q=begin_request(raw,count);
+    q.channel_mask=cerberus_wifi_packet_count_channel_bit(channel);token=q.session_id;req.session_id=token;
     CHECK(exchange(CERBERUS_PACKET_COUNT_COMMAND_BEGIN,&q,sizeof(q))==ESP_OK);
     CHECK(control.state==CERBERUS_PACKET_COUNT_STAGING&&(control.flags&CERBERUS_PACKET_COUNT_HELD));
     CHECK(!sdk_calls);CHECK(packet_count_retained());
-    for(unsigned i=0;i<count;++i){cerberus_packet_count_target_t t={.session_id=token,.index=(uint8_t)i,.role=(uint8_t)(i+1U),.channel_hint=11};
+    for(unsigned i=0;i<count;++i){cerberus_packet_count_target_t t={.session_id=token,.index=(uint8_t)i,.role=(uint8_t)(i+1U),.channel_hint=channel};
         memcpy(t.mac,target_mac,6U);CHECK(exchange(CERBERUS_PACKET_COUNT_COMMAND_TARGET,&t,sizeof(t))==ESP_OK);
         CHECK(exchange(CERBERUS_PACKET_COUNT_COMMAND_TARGET,&t,sizeof(t))==ESP_OK);}
 }
+static void begin(bool raw,unsigned count){begin_channel(raw,count,11);}
 static void start(void)
 {
     CHECK(exchange(CERBERUS_PACKET_COUNT_COMMAND_START,&req,sizeof(req))==ESP_OK);
@@ -200,6 +212,88 @@ static void immediate(void)
 {
     CHECK(exchange(CERBERUS_PACKET_COUNT_COMMAND_STATUS,&req,sizeof(req))==ESP_OK);
     CHECK(!(control.flags&CERBERUS_PACKET_COUNT_RX_ACTIVE));receive(40);
+}
+/* The callback metadata ends exactly at an inaccessible page. A mistaken
+ * header read for MISC/CTRL or a short SIG therefore fails at the OS boundary. */
+static void metadata_only_callback(void)
+{
+#ifdef _WIN32
+    SYSTEM_INFO info;GetSystemInfo(&info);size_t page=info.dwPageSize;
+    uint8_t *memory=VirtualAlloc(NULL,page*2U,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
+    CHECK(memory);DWORD old;CHECK(VirtualProtect(memory+page,page,PAGE_NOACCESS,&old));
+#else
+    size_t page=(size_t)sysconf(_SC_PAGESIZE);
+    uint8_t *memory=mmap(NULL,page*2U,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
+    CHECK(memory!=MAP_FAILED);CHECK(!mprotect(memory+page,page,PROT_NONE));
+#endif
+    wifi_promiscuous_pkt_t *p=(wifi_promiscuous_pkt_t *)(memory+page-sizeof(wifi_pkt_rx_ctrl_t));
+    memset(&p->rx_ctrl,0,sizeof(p->rx_ctrl));p->rx_ctrl.channel=sdk_channel;
+    p->rx_ctrl.sig_len=44;p->rx_ctrl.dump_len=40;
+    unsigned callbacks=packet_count_context->table.summary.callbacks;
+    wifi_promiscuous_callback(p,WIFI_PKT_MISC);
+    wifi_promiscuous_callback(p,WIFI_PKT_CTRL);
+    CHECK(packet_count_context->table.summary.callbacks==callbacks);
+    for(unsigned n=0;n<4U;++n){
+        p->rx_ctrl.sig_len=n;p->rx_ctrl.dump_len=0;
+        wifi_promiscuous_callback(p,WIFI_PKT_MGMT);
+    }
+    CHECK(packet_count_context->table.summary.invalid_metadata==4U);
+    p->rx_ctrl.sig_len=4;wifi_promiscuous_callback(p,WIFI_PKT_MGMT);
+    CHECK(packet_count_context->table.summary.malformed_frames==1U);
+    p->rx_ctrl.sig_len=44;p->rx_ctrl.rx_state=1;
+    wifi_promiscuous_callback(p,WIFI_PKT_MGMT);
+    CHECK(packet_count_context->table.summary.invalid_metadata==5U);
+#ifdef _WIN32
+    CHECK(VirtualFree(memory,0,MEM_RELEASE));
+#else
+    CHECK(!munmap(memory,page*2U));
+#endif
+}
+static void recorded_extent(const cerberus_wifi_capture_record_t *r)
+{
+    uint8_t block[CERBERUS_WIFI_PCAP_RECORD_MAX_SIZE+1U];memset(block,0xa5,sizeof(block));
+    size_t n=cerberus_wifi_pcapng_record(&r->metadata,r->frame,r->captured_length,
+        r->original_length,block,sizeof(block)-1U);
+    CHECK(n==32U+r->captured_length&&block[n]==0xa5);
+    CHECK(cerberus_packet_count_get(block,4)==3U); /* Untimed SPB, no invented UTC. */
+    CHECK(cerberus_packet_count_get(block+8,4)==16U+r->original_length);
+    CHECK(block[20]==0U&&!memcmp(block+28,r->frame,r->captured_length)); /* No FCS flag/bytes. */
+    CHECK(cerberus_packet_count_get(block+n-4U,4)==n);
+}
+static void public_payload_contract(void)
+{
+    const uint8_t channels[]={11,48};
+    const unsigned dump_lengths[]={0,44,1,39,41,40};
+    for(unsigned ch=0;ch<sizeof(channels);++ch){
+        reset();begin_channel(true,1,channels[ch]);start();unsigned matched=0;
+        for(unsigned kind=0;kind<2U;++kind)for(unsigned d=0;d<sizeof(dump_lengths)/sizeof(*dump_lengths);++d){
+            frame(40);packet.rx_ctrl.channel=channels[ch];packet.rx_ctrl.dump_len=dump_lengths[d];
+            packet.payload[0]=kind?0x08:0x80;memset(packet.payload+40,0xee,4);
+            now_us+=10;wifi_promiscuous_callback(&packet,kind?WIFI_PKT_DATA:WIFI_PKT_MGMT);
+            CHECK(packet_count_context->table.summary.matched_frames==++matched);
+            CHECK(!packet_count_context->table.summary.invalid_metadata);
+            const cerberus_wifi_capture_record_t *r=cerberus_wifi_capture_ring_peek(packet_count_context->raw);
+            CHECK(r&&r->captured_length==40&&r->original_length==40&&!r->metadata.frame_has_fcs);
+            CHECK(r->metadata.channel==channels[ch]&&!memcmp(r->frame,packet.payload,40));
+            CHECK(r->frame[40]==0); /* Neither the FCS nor arbitrary dump extent was copied. */
+            recorded_extent(r);
+            cerberus_packet_count_ack_t ack={token,r->sequence};
+            CHECK(exchange(CERBERUS_PACKET_COUNT_COMMAND_RAW_ACK,&ack,sizeof(ack))==ESP_OK);
+        }
+        frame(4096);packet.rx_ctrl.channel=channels[ch];packet.rx_ctrl.dump_len=0;
+        memset(packet.payload+24,0x5a,4096U-24U);memset(packet.payload+4096,0xee,4);
+        wifi_promiscuous_callback(&packet,WIFI_PKT_MGMT);
+        const cerberus_wifi_capture_record_t *r=cerberus_wifi_capture_ring_peek(packet_count_context->raw);
+        CHECK(r&&r->captured_length==4096&&r->original_length==4096&&!memcmp(r->frame,packet.payload,4096));
+        recorded_extent(r);
+        cerberus_packet_count_ack_t ack={token,r->sequence};CHECK(exchange(CERBERUS_PACKET_COUNT_COMMAND_RAW_ACK,&ack,sizeof(ack))==ESP_OK);
+        frame(4097);packet.rx_ctrl.channel=channels[ch];packet.rx_ctrl.dump_len=0;
+        wifi_promiscuous_callback(&packet,WIFI_PKT_MGMT);
+        CHECK(packet_count_context->table.summary.matched_frames==matched+2U);
+        cerberus_wifi_capture_ring_stats_t stats;cerberus_wifi_capture_ring_stats(packet_count_context->raw,&stats);
+        CHECK(stats.accepted==matched+1U&&stats.dropped_oversize==1U&&!stats.pending);
+        metadata_only_callback();stop();release();
+    }
 }
 static void basic(void)
 {
@@ -334,7 +428,7 @@ static void sdk_matrix(void)
     reset();begin(true,1);start();receive(4097);CHECK(packet_count_context->table.summary.matched_frames==1);
     cerberus_packet_count_record_stats_t raw;packet_count_raw_stats(packet_count_context,&raw);
     CHECK(!raw.accepted&&raw.dropped_other==1);
-    packet.rx_ctrl.dump_len=0;wifi_promiscuous_callback(&packet,WIFI_PKT_MGMT);
+    packet.rx_ctrl.rx_state=1;wifi_promiscuous_callback(&packet,WIFI_PKT_MGMT);
     CHECK(packet_count_context->table.summary.invalid_metadata==1);
     stop();release();
     reset();begin(false,1);start();receive(24);tick(10001);
@@ -363,4 +457,4 @@ static void admitted_callback_drain(void)
     CHECK(!(packet_count_context->table.summary.flags&CERBERUS_WIFI_PACKET_COUNT_CLOCK_INVALID));
     release();
 }
-int main(void){basic();recording();failures();protocol_edges();sdk_matrix();admitted_callback_drain();printf("Packet Count native: %u checks PASS; context=%zu raw=%zu\n",checks,sizeof(packet_count_context_t),sizeof(cerberus_wifi_capture_ring_t));return 0;}
+int main(void){public_payload_contract();basic();recording();failures();protocol_edges();sdk_matrix();admitted_callback_drain();printf("Packet Count native: %u checks PASS; context=%zu raw=%zu\n",checks,sizeof(packet_count_context_t),sizeof(cerberus_wifi_capture_ring_t));return 0;}
