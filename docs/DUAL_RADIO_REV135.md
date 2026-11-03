@@ -1,6 +1,6 @@
 # Rev135: C5 callback payload compatibility
 
-Rev134 is the installed baseline for this source checkpoint. Its new diagnostic
+Rev134 was the installed baseline for this source checkpoint. Its new diagnostic
 identified the owner's zero-total report at the native receive-metadata gate:
 
 | Live session | Channel | Callbacks | Invalid metadata | Valid frames | Selected matches |
@@ -57,15 +57,79 @@ progress and recording-loss information remain visible.
 
 ## Validation boundary
 
-Focused native Count, Probe Sniff and UI regressions are being prepared for the
-old-reject/new-accept callback cases, receive errors, short lengths, inaccessible
-MISC payload and raw-recording extent. Full validation remains the 158-suite
-host registry, five native targets, exact resource audit and matched package.
-No rev135 image is installed at this source checkpoint. Build and installation
-results will be recorded after they succeed.
+All 158 host suites and five native targets passed on 1,234 unchanged inputs.
+Focused native Count checks passed 10,889 assertions; Probe checks passed 657
+model/controller, 6,593 native and 15,429 actual C5/S3 bridge assertions. Count
+controller and UI checks passed 29,183 and 1,576,525 assertions respectively.
+These exercise old-reject/new-accept callback cases, receive errors, short
+lengths, inaccessible MISC payload and raw-recording extent. Host structure
+sizes are not substituted for linked native measurements.
 
-The required physical check is fresh AP discovery followed by Packet Count
-with PCAP off, advancing validated frames and selected totals, then Stop/Back
-and another Wi-Fi scan. Both bands, optional recording and Probe Sniff need
-their own acceptance. Full Marauder parity, serial capture, Mesh Save/Open and
+The exact linked audit found no fixed RAM growth from rev134: S3 remains at
+170,124 bytes and C5 at 83,464 bytes. Count contexts remain 2,112 bytes on S3
+and 2,152 bytes on C5. Optional recording allocations and task stacks are
+unchanged. These measurements do not establish loaded runtime headroom.
+
+The matched package is
+`dist/cerberus-unchained-0.1.0-dev.rev135-20261103T013007Z`, built from
+`d08bd149a83e93e29ec2aca835466d8b51d00ad4`. Application sizes are 2,117,152
+bytes for S3, 1,721,872 for C5 and 255,296 for the temporary bridge. All 22
+package checksum entries and the offline installation preflight passed.
+The retained local milestone receipt SHA-256 is
+`f04066bc31a972280b30bc82ec014064c75b1c3eed46c8aa34d1a8b1c07ab6c4`.
+
+Rev135 is now installed. Fresh backups of the installed rev134 prefixes were
+verified before writing the matched bridge/C5/S3 images; all nine programmed
+image hashes verified. Two sampled idle boot checks, 79.24 seconds apart,
+showed both chips online, mounted SD, stable memory and advancing SPI exchanges
+without additional listed SPI errors or a changed C5 boot count. S3 internal
+free memory was 136,720 bytes with a 94,208-byte largest block; PSRAM free was
+1,427,552 bytes. The C5 free-memory snapshot was 53,572 bytes. The observed
+console stack low-water value reached 1,280 bytes; this is not a worst-case
+stack bound. Initial READY timeouts and legacy fallbacks remained at four
+each, with no increase across the samples.
+
+Installation evidence is retained in
+`artifacts/device-rev135/installation-receipt.json`, SHA-256
+`72baeb34b31610470d65131e49f06355c9dfce8ed6ac9404ebdcbc5041dbcf61`.
+This receipt establishes paired installation and sampled boot state, not
+physical feature acceptance.
+
+## Live Packet Count result
+
+After a fresh Wi-Fi scan, the owner confirmed that TOTAL or TX increases with
+PCAP OFF. Two captures from the same accepted and published C5 session on
+channel 11 (2.4 GHz) showed:
+
+| Capture | Valid frames | Selected matches | Metadata rejected | Published revision |
+| --- | ---: | ---: | ---: | ---: |
+| First | 873 | 262 | 0 | 875 |
+| Second | 2,748 | 854 | 0 | 2,750 |
+
+Both had zero malformed, unsupported, outside-window and invalid-clock frames,
+and no published, source, controller or UI error. This establishes that valid
+frame parsing, selected-address matching and repeated counter readout now work
+in this tested 2.4 GHz session. Captures are retained as
+`artifacts/device-rev135/packet-count-check-1` and `packet-count-check-2`
+(`.txt` plus hashed `.json` metadata). Counts are callback observations, not
+unique packets or measured RF loss. An AP's beacons can increase TOTAL and TX
+without increasing RX.
+
+The owner then confirmed normal Stop. The retained `packet-count-stopped`
+capture shows 4,306 valid frames and 1,303 selected matches, zero metadata
+rejections and no reported error. Its final publication is valid and frozen,
+the requested session is zero, the C5 controller is idle and no recording
+binding remains. Back and the following Wi-Fi scan are still being checked.
+
+The owner reported that Back and another scan worked. The follow-up capture
+instead found a second running Count session on channel 11 with 2,184 valid
+frames and 463 matches, zero metadata rejections and no reported error. The
+retained Wi-Fi summary still described the first completed scan (one C5 scan,
+21 APs, split S3/C5 coverage). This confirms repeat Count reception but does
+not independently establish a new scan after release. A specific Scan Again
+check, leaving the AP list open, has been requested.
+
+The remaining physical check is Back followed by another Wi-Fi scan.
+The 5 GHz band, optional recording and Probe Sniff need their own acceptance.
+Full Marauder parity, serial capture, Mesh Save/Open and
 Locate reception, GPS and expansion-board validation remain unfinished.
