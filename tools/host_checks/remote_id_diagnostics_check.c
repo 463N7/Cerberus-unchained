@@ -172,7 +172,7 @@ OTHER(print_network) OTHER(print_wifi_seen) OTHER(print_wifi_readout) OTHER(prin
 OTHER(print_radio) OTHER(print_battery)
 OTHER(print_recon_record)
 OTHER(print_ble_archive)
-OTHER(print_wifi_dual) OTHER(print_dual_ble) OTHER(print_ble_memory)
+OTHER(print_wifi_dual) OTHER(print_dual_ble) OTHER(print_ble_memory) OTHER(print_packet_count)
 #include "remote_id_console_impl.h"
 
 static void clear_output(void)

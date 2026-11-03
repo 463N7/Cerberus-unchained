@@ -6,6 +6,13 @@ intentionally assigns reception to C5 and control, analysis and presentation
 to S3. That role label was misleading, and reception has not been established
 by the owner's report or the available rev133 console fields.
 
+The owner subsequently confirmed that C5 shows RECEIVING and its RX seconds
+increase while the selected AP's TOTAL, TX and RX stay zero. This establishes
+progressing receiver-window publications rather than the reproduced setup
+stall. It does not establish delivery of matching frames. The new diagnostics
+separate callback totals, metadata rejections and selected-address matches so
+that this report can be investigated without inferring reception from a timer.
+
 ## Reproduced scheduling defect
 
 The controller checks status every second. If UI ticks are at least one second

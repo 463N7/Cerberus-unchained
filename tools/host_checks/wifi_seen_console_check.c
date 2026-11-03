@@ -68,7 +68,7 @@ OTHER(print_remote_id)
 OTHER(print_wifi_readout)
 OTHER(print_recon_record)
 OTHER(print_ble_archive)
-OTHER(print_wifi_dual) OTHER(print_dual_ble) OTHER(print_ble_memory)
+OTHER(print_wifi_dual) OTHER(print_dual_ble) OTHER(print_ble_memory) OTHER(print_packet_count)
 #include "wifi_seen_console_impl.h"
 
 static void has(const char *text){assert(strstr(output,text));}
