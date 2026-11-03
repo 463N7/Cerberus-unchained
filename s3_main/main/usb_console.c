@@ -828,7 +828,7 @@ static void print_packet_count(void)
             "packet_count_%s_published_valid=%u\r\n",
             name, s->stop ? 1U : 0U, name, s->close ? 1U : 0U, name, s->faulted ? 1U : 0U,
             name, s->clock_invalid ? 1U : 0U, name, s->record_bound ? 1U : 0U, name, s->published_valid ? 1U : 0U);
-        if (s->published_valid)
+        if (s->published_valid) {
             console_printf("packet_count_%s_published_session=%016" PRIx64 "\r\npacket_count_%s_published_revision=%" PRIu32 "\r\n"
                 "packet_count_%s_published_frozen=%u\r\npacket_count_%s_callbacks=%" PRIu32 "\r\n"
                 "packet_count_%s_matched=%" PRIu32 "\r\npacket_count_%s_invalid_metadata=%" PRIu32 "\r\n"
@@ -837,6 +837,14 @@ static void print_packet_count(void)
                 name, s->published_session, name, s->published_revision, name, s->published_frozen ? 1U : 0U,
                 name, s->callbacks, name, s->matched, name, s->invalid_metadata,
                 name, s->raw_dropped_full, name, s->raw_dropped_other, name, s->published_error);
+            console_printf("packet_count_%s_valid_frames=%" PRIu32 "\r\n"
+                "packet_count_%s_malformed_frames=%" PRIu32 "\r\n"
+                "packet_count_%s_unsupported_frames=%" PRIu32 "\r\n"
+                "packet_count_%s_outside_window_frames=%" PRIu32 "\r\n"
+                "packet_count_%s_clock_dropped_frames=%" PRIu32 "\r\n",
+                name, s->valid_frames, name, s->malformed_frames, name, s->unsupported_frames,
+                name, s->outside_window_frames, name, s->clock_dropped_frames);
+        }
         else console_printf("packet_count_%s_counters=unknown\r\n", name);
         if (snapshot.record_valid)
             console_printf("packet_count_%s_record_session=%016" PRIx64 "\r\npacket_count_%s_written=%" PRIu32 "\r\n"

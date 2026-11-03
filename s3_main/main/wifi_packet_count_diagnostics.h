@@ -11,6 +11,8 @@ typedef struct {
     uint64_t last_progress_ms;
     uint32_t pin, revision_floor, published_revision;
     uint32_t callbacks, matched, invalid_metadata, raw_dropped_full, raw_dropped_other;
+    uint32_t valid_frames, malformed_frames, unsupported_frames;
+    uint32_t outside_window_frames, clock_dropped_frames;
     uint32_t written, discarded, transport_errors;
     int32_t error, remote_error, published_error, record_error;
     uint16_t configured, part;

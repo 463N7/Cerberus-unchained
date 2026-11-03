@@ -122,6 +122,11 @@ void wifi_packet_count_diagnostics_publish(const wifi_packet_count_scan_t *scan,
             d->callbacks = s->published.summary.callbacks;
             d->matched = s->published.summary.matched_frames;
             d->invalid_metadata = s->published.summary.invalid_metadata;
+            d->valid_frames = s->published.summary.valid_frames;
+            d->malformed_frames = s->published.summary.malformed_frames;
+            d->unsupported_frames = s->published.summary.unsupported_frames;
+            d->outside_window_frames = s->published.summary.outside_window_frames;
+            d->clock_dropped_frames = s->published.summary.clock_dropped_frames;
             d->raw_dropped_full = s->published.recording.dropped_full;
             d->raw_dropped_other = s->published.recording.dropped_other;
         }

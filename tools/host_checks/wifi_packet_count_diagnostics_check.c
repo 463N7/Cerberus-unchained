@@ -103,6 +103,11 @@ static void availability_and_unknowns(void)
     scan.sources[1].remote.flags = CERBERUS_PACKET_COUNT_RX_ACTIVE;
     scan.sources[1].remote.channel = 11;
     scan.sources[1].published.summary.callbacks = 987654;
+    scan.sources[1].published.summary.valid_frames = 234561;
+    scan.sources[1].published.summary.malformed_frames = 234562;
+    scan.sources[1].published.summary.unsupported_frames = 234563;
+    scan.sources[1].published.summary.outside_window_frames = 234564;
+    scan.sources[1].published.summary.clock_dropped_frames = 234565;
     record.job = 999;
     record.ready = true;
     record.source[1].written = 234567;
@@ -113,11 +118,19 @@ static void availability_and_unknowns(void)
     CHECK(!value.record_valid && !value.record_ready && !value.source[1].written);
     CHECK(!value.source[1].control_valid && !value.source[1].flags && !value.source[1].channel);
     CHECK(!value.source[1].published_valid && !value.source[1].callbacks);
+    CHECK(!value.source[1].valid_frames && !value.source[1].malformed_frames &&
+        !value.source[1].unsupported_frames && !value.source[1].outside_window_frames &&
+        !value.source[1].clock_dropped_frames);
     command("packet_count");
     CHECK(strstr(output, "packet_count_c5_control=unknown\r\n"));
     CHECK(strstr(output, "packet_count_c5_counters=unknown\r\n"));
     CHECK(strstr(output, "packet_count_record_state=unknown\r\n"));
     CHECK(!strstr(output, "987654") && !strstr(output, "234567"));
+    CHECK(!strstr(output, "packet_count_c5_valid_frames=") &&
+        !strstr(output, "packet_count_c5_malformed_frames=") &&
+        !strstr(output, "packet_count_c5_unsupported_frames=") &&
+        !strstr(output, "packet_count_c5_outside_window_frames=") &&
+        !strstr(output, "packet_count_c5_clock_dropped_frames="));
     wifi_packet_count_diagnostics_clear(12);
     value = read_snapshot();
     CHECK(value.available && !value.allocated && value.publication_sequence == 2 && value.published_ms == 12);
@@ -167,7 +180,28 @@ static void actual_intent_and_progress(void)
     wifi_packet_count_diagnostics_publish(&scan, NULL, 300, 0, false, false, ESP_OK);
     command("packet_count");
     CHECK(strstr(output, "packet_count_c5_callbacks=0\r\n"));
+    CHECK(strstr(output, "packet_count_c5_valid_frames=0\r\n") &&
+        strstr(output, "packet_count_c5_malformed_frames=0\r\n") &&
+        strstr(output, "packet_count_c5_unsupported_frames=0\r\n") &&
+        strstr(output, "packet_count_c5_outside_window_frames=0\r\n") &&
+        strstr(output, "packet_count_c5_clock_dropped_frames=0\r\n"));
     CHECK(!strstr(output, "packet_count_c5_counters=unknown\r\n"));
+    s->published.summary.valid_frames = 101;
+    s->published.summary.malformed_frames = 102;
+    s->published.summary.unsupported_frames = 103;
+    s->published.summary.outside_window_frames = 104;
+    s->published.summary.clock_dropped_frames = 105;
+    wifi_packet_count_diagnostics_publish(&scan, NULL, 350, 0, false, false, ESP_OK);
+    value = read_snapshot();
+    CHECK(value.source[1].valid_frames == 101 && value.source[1].malformed_frames == 102 &&
+        value.source[1].unsupported_frames == 103 && value.source[1].outside_window_frames == 104 &&
+        value.source[1].clock_dropped_frames == 105);
+    command("packet_count");
+    CHECK(strstr(output, "packet_count_c5_valid_frames=101\r\n") &&
+        strstr(output, "packet_count_c5_malformed_frames=102\r\n") &&
+        strstr(output, "packet_count_c5_unsupported_frames=103\r\n") &&
+        strstr(output, "packet_count_c5_outside_window_frames=104\r\n") &&
+        strstr(output, "packet_count_c5_clock_dropped_frames=105\r\n"));
     wifi_packet_count_scan_stop(&scan);
     wifi_packet_count_diagnostics_publish(&scan, NULL, 400, 0, false, true, ESP_OK);
     value = read_snapshot();
@@ -194,6 +228,9 @@ static void limits_record_copy_and_clock(void)
         s->published.valid=s->published.frozen=true;s->published.session=UINT64_MAX;
         s->published.summary.revision=s->published.summary.callbacks=s->published.summary.matched_frames=
             s->published.summary.invalid_metadata=UINT32_MAX;
+        s->published.summary.valid_frames=s->published.summary.malformed_frames=
+            s->published.summary.unsupported_frames=s->published.summary.outside_window_frames=
+            s->published.summary.clock_dropped_frames=UINT32_MAX;
         s->published.recording.dropped_full=s->published.recording.dropped_other=UINT32_MAX;
         s->published.source_error=INT32_MIN;
         wifi_packet_count_record_source_t *r=&record.source[i];
@@ -211,6 +248,11 @@ static void limits_record_copy_and_clock(void)
     CHECK(strstr(output,"packet_count_c5_phase=255:unknown\r\n"));
     CHECK(strstr(output,"packet_count_c5_written=4294967295\r\n"));
     CHECK(strstr(output,"packet_count_c5_record_loss_unknown=1\r\n"));
+    CHECK(strstr(output,"packet_count_c5_valid_frames=4294967295\r\n") &&
+        strstr(output,"packet_count_c5_malformed_frames=4294967295\r\n") &&
+        strstr(output,"packet_count_c5_unsupported_frames=4294967295\r\n") &&
+        strstr(output,"packet_count_c5_outside_window_frames=4294967295\r\n") &&
+        strstr(output,"packet_count_c5_clock_dropped_frames=4294967295\r\n"));
     CHECK(!strstr(output,"PRIVATE_FILE_NAME"));
     wifi_packet_count_diagnostics_clear(499);copy=read_snapshot();
     CHECK(!copy.allocated && !copy.time_valid && copy.published_ms==500 && copy.publication_sequence==2);
@@ -278,6 +320,11 @@ static void *writer(void *unused)
             input.sources[source].request.session_id=(uint64_t)i*7U+source;
             input.sources[source].published.valid=true;
             input.sources[source].published.summary.callbacks=i+source;
+            input.sources[source].published.summary.valid_frames=i+source+1U;
+            input.sources[source].published.summary.malformed_frames=i+source+2U;
+            input.sources[source].published.summary.unsupported_frames=i+source+3U;
+            input.sources[source].published.summary.outside_window_frames=i+source+4U;
+            input.sources[source].published.summary.clock_dropped_frames=i+source+5U;
         }
         wifi_packet_count_diagnostics_publish(&input,&rec,(uint64_t)i*1000U,i,false,false,-(int32_t)i);
     }
@@ -307,6 +354,13 @@ static void concurrent_readers(void)
         CHECK(value.target_count==i%17U&&value.job==i&&value.ui_error==-(int32_t)i);
         CHECK(value.source[0].requested_session==(uint64_t)i*7U&&value.source[1].requested_session==(uint64_t)i*7U+1U);
         CHECK(value.source[0].callbacks==i&&value.source[1].callbacks==i+1U);
+        for(unsigned source=0;source<2;++source) {
+            CHECK(value.source[source].valid_frames==i+source+1U);
+            CHECK(value.source[source].malformed_frames==i+source+2U);
+            CHECK(value.source[source].unsupported_frames==i+source+3U);
+            CHECK(value.source[source].outside_window_frames==i+source+4U);
+            CHECK(value.source[source].clock_dropped_frames==i+source+5U);
+        }
         CHECK(value.source[0].written==i+10U&&value.source[1].written==i+20U);
         previous=value.publication_sequence;
     } while(!atomic_load(&finished));
