@@ -78,9 +78,29 @@ and the recovery bridge 255,296 bytes. Fixed data/BSS and the measured receive
 queue/workspace allocations are unchanged on both chips. Retained proof is
 `artifacts/rev138-validation/local-milestone.json`.
 
-Rev138 is built and packaged, **not installed**. The connected device's last
-verified application remains rev137. No new on-device behavior is claimed for
-the candidate, and no public upload or PR update has been performed.
+The matched rev138 package is **installed on both chips**. Fresh recovery
+backups match the preceding rev137 images: 2,191,360 bytes for S3 and 2,097,152
+bytes for C5, covering all erase-rounded update writes. Six identity-guard tests
+and 28 installation-helper tests pass. Exact USB and chip identities were checked
+before access; all nine bridge/C5/S3 image writes passed hash verification.
+Neither a blanket flash erase nor an NVS rewrite was performed.
+
+Two post-install diagnostic captures 48.95 seconds apart confirm the rev138 S3
+application, C5 capability 75 online, mounted SD, released radio owners and no
+previous reset fault. S3 internal free memory stayed at 135,964 bytes, the largest
+internal block at 94,208 bytes, and PSRAM free at 1,427,552 bytes. The C5 snapshot
+reported 53,460 free bytes. SPI exchanges advanced from 50 to 286 without a new
+listed transport error or a changed C5 boot count. The four initial READY timeout
+and legacy-fallback counters were present at boot and did not increase; they are
+not represented as zero.
+
+Private installation evidence is retained in
+`artifacts/device-rev138/installation-receipt.json` (SHA-256
+`c4aff1d7a67994f054e992b3782c330fbbba835b724458edc20133dcee0ed423`).
+The immutable pre-install milestone remains separate from that installation
+receipt. Boot/idle checks do not establish fresh capture, GPS, touchscreen,
+SD save/reopen or sustained-load behavior. A new combined-mode capture and file
+readback are pending. No service upload or PR update has been performed.
 
 Further acceptance needs sustained GPS fix/UTC, repeated combined-mode runs,
 separate-mode tests, endurance and a real service import result. Channel dwell

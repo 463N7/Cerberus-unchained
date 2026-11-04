@@ -31,10 +31,11 @@ imply upstream endorsement of Cerberus Unchained.
 
 **Current source version: `0.1.0-dev.rev138`, targeting onboard C5 protocol
 firmware revision 75. Rev138 removes unused duplicate-history work from streaming
-Wardriving and corrects the WiGLE export pre-header. It is a development candidate;
-the installed rev137 pair completed a 16,592-observation combined-mode recording
-and clean Stop, with both saved CSV files read back. GPS fix loss and live service
-import acceptance remain open. Validation is tracked in
+Wardriving and corrects the WiGLE export pre-header. The matched rev138 pair is
+installed with verified image writes, mounted SD and two successful idle boot
+checks. The preceding rev137 pair completed a 16,592-observation combined-mode
+recording and clean Stop, with both saved CSV files read back. Fresh rev138 capture,
+sustained GPS fix and live service import acceptance remain open. Validation is tracked in
 [the rev138 checkpoint](docs/DUAL_RADIO_REV138.md).
 A public binary release has not been selected.**
 The web installer remains unavailable until a matched release is deliberately selected.
