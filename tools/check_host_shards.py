@@ -52,19 +52,19 @@ class SelectionChecks(unittest.TestCase):
             self.assertEqual(names.count(name), 1)
             self.assertIn(name, runner.CHECKS)
         parts = [runner.selected_checks(i, 4) for i in range(4)]
-        self.assertEqual([len(part) for part in parts], [40, 40, 39, 39])
+        self.assertEqual([len(part) for part in parts], [40, 40, 40, 40])
         self.assertEqual(set().union(*(set(part) for part in parts)), set(names))
         for index, part in enumerate(parts):
             self.assertEqual(part, tuple(name for ordinal, name in enumerate(names) if ordinal % 4 == index))
-            self.assertEqual(len(set(part) & set(runner.CHECKS)), [33, 33, 33, 33][index])
-            self.assertEqual(len(set(part) & set(runner.SERIAL_CHECKS)), [7, 7, 6, 6][index])
+            self.assertEqual(len(set(part) & set(runner.CHECKS)), [34, 34, 33, 33][index])
+            self.assertEqual(len(set(part) & set(runner.SERIAL_CHECKS)), [6, 6, 7, 7][index])
             for other in parts[index + 1:]:
                 self.assertFalse(set(part) & set(other))
         self.assertEqual(runner.selected_checks(), names)
 
     def test_invalid_or_partial_shard_arguments_reject(self):
         for index, count in ((None, 4), (0, None), (-1, 4), (4, 4), (0, 0),
-                             (0, 159), (True, 4), (0, True)):
+                             (0, 161), (True, 4), (0, True)):
             with self.subTest(index=index, count=count), self.assertRaises(ValueError):
                 runner.selected_checks(index, count)
 
