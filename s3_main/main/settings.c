@@ -110,6 +110,30 @@ static cerberus_settings_t current_settings = {
 };
 static nvs_handle_t settings_handle;
 static bool settings_ready;
+static cerberus_gps_config_t gps_settings;
+static bool gps_settings_loaded;
+
+cerberus_gps_config_t cerberus_settings_gps_get(void)
+{ return gps_settings_loaded?gps_settings:cerberus_gps_config_default(); }
+
+esp_err_t cerberus_settings_gps_set(const cerberus_gps_config_t *config)
+{
+    if(!settings_ready)return ESP_ERR_INVALID_STATE;
+    if(!cerberus_gps_config_valid(config))return ESP_ERR_INVALID_ARG;
+    esp_err_t error=nvs_set_blob(settings_handle,"gps_v1",config,sizeof(*config));
+    if(error==ESP_OK)error=nvs_commit(settings_handle);
+    if(error==ESP_OK){gps_settings=*config;gps_settings_loaded=true;}
+    return error;
+}
+
+static void load_gps_settings(void)
+{
+    cerberus_gps_config_t config={0};size_t size=sizeof(config);
+    esp_err_t error=nvs_get_blob(settings_handle,"gps_v1",&config,&size);
+    gps_settings=error==ESP_OK&&size==sizeof(config)&&cerberus_gps_config_valid(&config)?
+        config:cerberus_gps_config_default();
+    gps_settings_loaded=true;
+}
 static bool sentinel_style_needs_save;
 static ble_favorites_record_t ble_favorites = {
     .magic = BLE_FAVORITES_MAGIC,
@@ -481,6 +505,7 @@ esp_err_t cerberus_settings_init(void)
     }
 
     err = load_favorites();
+    load_gps_settings();
     if (err == ESP_OK) {
         err = load_wifi_trusted();
     }
@@ -710,6 +735,7 @@ esp_err_t cerberus_settings_factory_reset(void)
     reset_wifi_trusted();
     memset(&touch_calibration, 0, sizeof(touch_calibration));
     ESP_LOGW(TAG, "Cerberus settings namespace erased; defaults restored in memory");
+    gps_settings=cerberus_gps_config_default();gps_settings_loaded=true;
     return ESP_OK;
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include "gps_config.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -66,6 +67,10 @@ typedef struct {
 } cerberus_touch_calibration_t;
 
 esp_err_t cerberus_settings_init(void);
+/* GPS has its own versioned record; legacy display backup formats retain
+ * their meaning. Read/write are UI-thread operations, applied at next attach. */
+cerberus_gps_config_t cerberus_settings_gps_get(void);
+esp_err_t cerberus_settings_gps_set(const cerberus_gps_config_t *config);
 const cerberus_settings_t *cerberus_settings_get(void);
 esp_err_t cerberus_settings_set_brightness(uint8_t percent);
 esp_err_t cerberus_settings_set_screen_timeout(uint16_t seconds);

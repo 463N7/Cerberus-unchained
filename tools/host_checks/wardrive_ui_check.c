@@ -1,5 +1,6 @@
 #undef NDEBUG
 #include "wardrive_service.h"
+#include "wardrive_gps_uart.h"
 #include "ui_widgets.h"
 #include "display.h"
 #include "esp_check.h"
@@ -22,7 +23,14 @@ static const char *TAG="wardrive_host";
 static uint16_t pixels[480][320];
 static char drawn[8192], lines[480][128];
 static cerberus_wardrive_status_t runtime;
+esp_err_t cerberus_wardrive_gps_uart_get_state(cerberus_wardrive_gps_uart_state_t *out)
+{memset(out,0,sizeof(*out));out->gps=runtime.gps;out->error=runtime.gps_error;out->active_baud=115200;return ESP_OK;}
 static bool wardrive_start_pending,wardrive_return_pending,wardrive_gps_enabled,wardrive_include_expansions;
+static uint8_t wardrive_mode;
+static esp_err_t gps_preview_error;
+static void gps_preview_poll(uint32_t now,bool asleep){(void)now;(void)asleep;}
+esp_err_t cerberus_wardrive_set_mode(uint8_t mode){wardrive_mode=mode;return ESP_OK;}
+
 static esp_err_t wardrive_start_error;
 static char wardrive_blocked_reason[64];
 static uint32_t wardrive_start_requested_ms,wardrive_last_start_attempt_ms,wardrive_last_draw_ms;
@@ -116,30 +124,25 @@ static void save(const char *prefix,const char *name)
 static void check_views(const char *prefix)
 {
     reset();draw();CHECK(!strcmp(lines[80],"GPS DATA > OFF / UNLOC CSV"));
-    CHECK(!strcmp(lines[178],"PROBE WAIT / BLE HINTS 0")&&strstr(drawn,"START\n"));save(prefix,"idle-no-gps");
+    CHECK(!strcmp(lines[178],"C5 5G: 0 WIFI / 0 BLE")&&strstr(drawn,"START\n"));save(prefix,"idle-no-gps");
     runtime=(cerberus_wardrive_status_t){.state=CERBERUS_WARDRIVE_RUNNING,.c5_wifi_sweeps=12,.c5_wifi_observations=96,
-        .s3_ble_sweeps=9,.s3_ble_observations=173,.s3_ble_flock_observations=23,
+        .c5_stream={.wifi_reports=96},.s3_stream={.ble_reports=173},.s3_ble_sweeps=9,.s3_ble_observations=173,.s3_ble_flock_observations=23,
         .s3_ble_flock_clue=3,.s3_ble_flock_signature=15,.s3_ble_flock_corroborated=5,
         .c5_probe_state=CERBERUS_WARDRIVE_PROBE_AVAILABLE,.c5_probe_observations=4,
         .c5_wifi_logged=31,.s3_ble_logged=48,.sd_rows=79,.sd_bytes=32768,.unlocated_rows=79,
         .last_file_name="UNLOC0001.CSV"};
-    draw();CHECK(!strcmp(lines[132],"C5 WI-FI: 12 SWEEPS / 96 AP"));
-    CHECK(!strcmp(lines[156],"S3 BLE: 9 SWEEPS / 173 OBS"));
-    CHECK(!strcmp(lines[178],"HINT OBS: PROBE 4 / BLE 23")&&strstr(drawn,"STOP\n"));
+    draw();CHECK(!strcmp(lines[178],"C5 5G: 96 WIFI / 0 BLE"));
+    CHECK(!strcmp(lines[158],"S3 2.4G/BLE: 0 WIFI / 173 BLE")&&strstr(drawn,"STOP\n"));
     CHECK(!strcmp(lines[300],"GEO 0 / UNLOC 79 ROWS"));save(prefix,"running-no-gps");
-    runtime.s3_ble_flock_observations=runtime.c5_probe_observations=UINT32_MAX;draw();
-    CHECK(!strcmp(lines[178],"HINT OBS: PROBE 4294967295 / BLE 4294967295"));save(prefix,"max-flock-count");
-    runtime.c5_probe_state=CERBERUS_WARDRIVE_PROBE_UNAVAILABLE;draw();
-    CHECK(!strcmp(lines[178],"PROBE UNAVAILABLE / BLE HINTS 4294967295"));save(prefix,"probe-unavailable");
-    runtime.c5_probe_state=CERBERUS_WARDRIVE_PROBE_UNSUPPORTED;draw();
-    CHECK(!strcmp(lines[178],"PROBE UNSUPPORTED / BLE HINTS 4294967295"));
+    runtime.c5_stream.wifi_reports=runtime.c5_stream.ble_reports=UINT32_MAX;draw();
+    CHECK(!strcmp(lines[178],"C5 5G: 4294967295 WIFI / 4294967295 BLE"));save(prefix,"max-counts");
     runtime.state=CERBERUS_WARDRIVE_STOPPING;wardrive_return_pending=true;draw();
     CHECK(!strcmp(lines[105],"STATE: STOPPING / SAVING"));
     CHECK(!strcmp(lines[324],"WAITING FOR RADIOS AND FILES")&&strstr(drawn,"STOP\n"));save(prefix,"stopping");
     runtime.state=CERBERUS_WARDRIVE_STOPPED;wardrive_return_pending=false;draw();
     CHECK(!strcmp(lines[105],"STATE: STOPPED")&&strstr(drawn,"START\n"));
     runtime.state=CERBERUS_WARDRIVE_ERROR;runtime.error_code=ESP_ERR_TIMEOUT;runtime.s3_ble_error=ESP_ERR_TIMEOUT;
-    draw();CHECK(!strcmp(lines[324],"S3 BLE: ESP_ERR_TIMEOUT"));save(prefix,"error");
+    draw();CHECK(!strcmp(lines[324],"S3: ESP_ERR_TIMEOUT"));save(prefix,"error");
     runtime=(cerberus_wardrive_status_t){.state=CERBERUS_WARDRIVE_RUNNING,.gps_requested=true,
         .gps={.state=CERBERUS_WARDRIVE_GPS_FRESH,.utc_valid=true},.expansion_present_mask=0x3f};
     wardrive_gps_enabled=wardrive_include_expansions=true;draw();
@@ -151,7 +154,11 @@ static void check_views(const char *prefix)
 }
 static void check_routes(void)
 {
-    reset();wardrive_handle_tap(24,346);CHECK(wardrive_include_expansions&&!wardrive_gps_enabled);
+    reset();wardrive_mode=0;wardrive_handle_tap(80,130);CHECK(wardrive_mode==CERBERUS_WD_WIFI);
+    wardrive_handle_tap(80,130);CHECK(wardrive_mode==CERBERUS_WD_BLE);
+    wardrive_handle_tap(24,346);CHECK(!wardrive_gps_enabled&&!wardrive_include_expansions);
+    wardrive_handle_tap(80,130);CHECK(wardrive_mode==CERBERUS_WD_COMBINED);
+    wardrive_handle_tap(24,346);CHECK(wardrive_include_expansions&&!wardrive_gps_enabled);
     wardrive_handle_tap(164,346);CHECK(wardrive_gps_enabled);
     unsigned old=status_reads;wardrive_handle_tap(23,390);wardrive_handle_tap(296,390);CHECK(status_reads==old);
     unsigned draws=page_draws;wardrive_handle_tap(200,178);CHECK(page_draws==draws&&!stop_requests);
@@ -197,7 +204,7 @@ static void check_lifecycle(const char *prefix)
     CHECK(wardrive_return_pending&&!launcher_returns&&!service_starts);
     runtime.error_code=runtime.s3_ble_error=ESP_ERR_TIMEOUT;wardrive_tick(22000,false);
     CHECK(!launcher_returns&&wardrive_return_pending&&strstr(drawn,"STATE: STOPPING / SAVING"));
-    CHECK(strstr(drawn,"S3 BLE: ESP_ERR_TIMEOUT")&&strstr(drawn,"STOP\n"));save(prefix,"held-release-error");
+    CHECK(strstr(drawn,"S3: ESP_ERR_TIMEOUT")&&strstr(drawn,"STOP\n"));save(prefix,"held-release-error");
     runtime.state=CERBERUS_WARDRIVE_ERROR;wardrive_tick(23000,true);
     CHECK(launcher_returns==1&&!wardrive_return_pending&&!service_starts);
     wardrive_tick(24000,true);CHECK(launcher_returns==1);

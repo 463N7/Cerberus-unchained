@@ -64,13 +64,14 @@ static bool owner_valid(cerberus_s3_ble_owner_t owner)
 {
     return owner == CERBERUS_S3_BLE_OWNER_SCANNER ||
         owner == CERBERUS_S3_BLE_OWNER_ADVERTISER ||
-        owner == CERBERUS_S3_BLE_OWNER_CENTRAL;
+        owner == CERBERUS_S3_BLE_OWNER_CENTRAL || owner == CERBERUS_S3_BLE_OWNER_WARDRIVE;
 }
 
-static bool passive_wifi_owns_radio(void)
+static bool passive_wifi_owns_radio(cerberus_s3_ble_owner_t claimant)
 {
     cerberus_s3_wifi_owner_t owner=cerberus_s3_wifi_owner();
-    return owner==CERBERUS_S3_WIFI_SCAN||owner==CERBERUS_S3_WIFI_COUNT;
+    return owner==CERBERUS_S3_WIFI_SCAN||owner==CERBERUS_S3_WIFI_COUNT||
+        (owner==CERBERUS_S3_WIFI_WARDRIVE&&claimant!=CERBERUS_S3_BLE_OWNER_WARDRIVE);
 }
 
 static bool lease_matches_locked(const cerberus_s3_ble_host_lease_t *lease)
@@ -187,7 +188,7 @@ esp_err_t cerberus_s3_ble_host_claim(cerberus_s3_ble_owner_t owner,
     if (!lease) return ESP_ERR_INVALID_ARG;
     memset(lease, 0, sizeof(*lease));
     if (!owner_valid(owner)) return ESP_ERR_INVALID_ARG;
-    if (passive_wifi_owns_radio()) return ESP_ERR_INVALID_STATE;
+    if (passive_wifi_owns_radio(owner)) return ESP_ERR_INVALID_STATE;
     portENTER_CRITICAL(&host_lock);
     if (pending_token || current_lease.token || host_stopped || epoch_exhausted ||
         last_claim_token == UINT64_MAX) {
@@ -204,7 +205,7 @@ esp_err_t cerberus_s3_ble_host_claim(cerberus_s3_ble_owner_t owner,
     portEXIT_CRITICAL(&host_lock);
     /* The Wi-Fi scanner claims first and then checks BLE ownership. This
      * second check closes a claim race before any controller/GAP work starts. */
-    if (passive_wifi_owns_radio()) {
+    if (passive_wifi_owns_radio(owner)) {
         return finish_claim(&candidate, ESP_ERR_INVALID_STATE, lease);
     }
 #if CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL
@@ -241,7 +242,7 @@ esp_err_t cerberus_s3_ble_host_claim(cerberus_s3_ble_owner_t owner,
         if (ready) { error = ESP_OK; break; }
         if (i < 200U) vTaskDelay(pdMS_TO_TICKS(10));
     }
-    if (error == ESP_OK && passive_wifi_owns_radio())
+    if (error == ESP_OK && passive_wifi_owns_radio(owner))
         error = ESP_ERR_INVALID_STATE;
     error = finish_claim(&candidate, error, lease);
     memory_capture(CERBERUS_S3_BLE_MEMORY_AFTER_SYNC, owner, error);

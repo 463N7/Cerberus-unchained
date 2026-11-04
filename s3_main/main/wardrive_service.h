@@ -3,6 +3,7 @@
 #include "esp_err.h"
 #include "wardrive_gps_core.h"
 #include "wardrive_recent.h"
+#include "wardrive_stream.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -31,6 +32,9 @@ typedef enum {
 
 typedef struct {
     cerberus_wardrive_state_t state;
+    uint8_t mode;
+    cerberus_wd_status_t s3_stream,c5_stream;
+    uint32_t s3_wifi_logged,c5_ble_logged;
     bool gps_requested; /* UART2 is used only when explicitly enabled. */
     bool gps_present; /* Checksum-valid NMEA was received recently. */
     cerberus_wardrive_gps_snapshot_t gps;
@@ -108,6 +112,8 @@ esp_err_t cerberus_wardrive_clear_recent(void);
  * continue with no GPS reader or UART driver. With GPS enabled, fresh GPS/RMC
  * results enter WiGLE; other valid observations enter an unlocated sidecar. */
 esp_err_t cerberus_wardrive_start(bool include_expansions, bool enable_gps);
+/* Idle-only mode selection. Applies to the next integrated session. */
+esp_err_t cerberus_wardrive_set_mode(uint8_t mode);
 /* Stop is asynchronous. Both terminal states mean the worker has closed its
  * SD file. STOPPED confirms release of all started scans; ERROR reports a
  * radio or storage fault, including an expansion STOP that remains uncertain.

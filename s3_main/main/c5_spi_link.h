@@ -1,4 +1,7 @@
 #pragma once
+#include "esp_err.h"
+#include "wardrive_stream.h"
+esp_err_t c5_spi_link_wardrive(uint8_t command,const cerberus_wd_request_t *query,void *reply);
 
 #include "cerberus_protocol.h"
 #include "s3_wifi_observation.h"

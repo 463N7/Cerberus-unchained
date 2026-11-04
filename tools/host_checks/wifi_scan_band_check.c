@@ -1,3 +1,4 @@
+#include "wardrive_foreign_boundary.h"
 #undef NDEBUG
 #include "c5_spi_link.h"
 #include <assert.h>

@@ -1,3 +1,4 @@
+#include "wardrive_foreign_boundary.h"
 #undef NDEBUG
 #include "cerberus_watch_capture.h"
 #include "remote_id_channel_plan.h"

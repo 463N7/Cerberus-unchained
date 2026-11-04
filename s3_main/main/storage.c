@@ -1269,7 +1269,7 @@ static esp_err_t wardrive_stream_append(wardrive_storage_stream_t *stream,
     }
     stream->bytes += row_length;
     ++stream->pending_rows;
-    bool due = stream->pending_rows >= 25U ||
+    bool due = stream->pending_rows >= 256U ||
         esp_timer_get_time() - stream->last_sync_us >= 2000000LL;
     esp_err_t error = ESP_OK;
     if (due && (fflush(stream->file) != 0 || fsync(fileno(stream->file)) != 0))

@@ -30,6 +30,7 @@
 #include "usb_mass_storage.h"
 #include "system_health.h"
 #include "wardrive_service.h"
+#include "wardrive_gps_uart.h"
 
 #include "driver/usb_serial_jtag.h"
 #include "driver/usb_serial_jtag_vfs.h"
@@ -89,6 +90,7 @@ static __attribute__((noinline)) void print_remote_id(void);
 static __attribute__((noinline)) void print_stations(void);
 static __attribute__((noinline)) void print_reports(void);
 static __attribute__((noinline)) void print_radio(void);
+static __attribute__((noinline)) void print_gps(void);
 static __attribute__((noinline)) void print_dual_ble(void);
 static __attribute__((noinline)) void print_ble_memory(void);
 static __attribute__((noinline)) void print_battery(void);
@@ -163,6 +165,7 @@ static void print_help(void)
         "stations Read passive station capture without renewing its lease\r\n"
         "reports  Read the first 32 SD log names and network CSVs\r\n"
         "radio    Show C5, S3 BLE/Wi-Fi and Wardriving status without renewing leases\r\n"
+        "gps      Show receiver, baud and fix health without coordinates\r\n"
         "dual_ble Read cached two-receiver BLE/Fox state without SPI or scanning\r\n"
         "ble_memory Read cached S3 BLE lifecycle heap samples without heap walks\r\n"
         "battery  Show cached onboard battery gauge status\r\n"
@@ -1359,6 +1362,20 @@ static void print_wardrive_relations(const cerberus_wardrive_status_t *status)
 }
 /* END WIFI RELATION DIAGNOSTICS. */
 
+static void print_gps(void)
+{
+    cerberus_wardrive_gps_uart_state_t state={0};
+    esp_err_t error=cerberus_wardrive_gps_uart_get_state(&state);
+    console_printf("processor=GPS\r\nread_error=%ld\r\nprofile=%u\r\nrx_gpio=%u\r\ntx_assignment=%d\r\npps_assignment=%d\r\n"
+        "baud=%lu\r\ndetecting=%u\r\nreader=%u\r\nbytes=%lu\r\nstate=%u\r\nsatellites=%u\r\nfix_age_ms=%lu\r\n"
+        "valid_sentences=%lu\r\nbad_checksums=%lu\r\nutc_valid=%u\r\nerror=%ld\r\n",
+        (long)error,state.config.profile,state.config.rx_gpio,state.config.tx_gpio,state.config.pps_gpio,
+        (unsigned long)state.active_baud,state.detecting_baud,state.reader_running,(unsigned long)state.received_bytes,
+        state.gps.state,state.gps.satellites,(unsigned long)state.gps.fix_age_ms,(unsigned long)state.gps.valid_sentences,
+        (unsigned long)state.gps.bad_checksums,state.gps.utc_valid,(long)state.error);
+}
+
+
 /* Compact read-only view: never place the ten-row bank on the console stack. */
 __attribute__((noinline))
 static void print_wardrive_recent(void)
@@ -1461,6 +1478,16 @@ static void print_radio(void)
         (unsigned long)wardrive.c5_probe_dropped,
         (unsigned long)wardrive.c5_probe_unavailable_sweeps);
     print_wardrive_relations(&wardrive);
+    console_printf("wardrive_mode=%u\r\nstream_s3_wifi=%lu\r\nstream_s3_ble=%lu\r\nstream_c5_wifi=%lu\r\nstream_c5_ble=%lu\r\n"
+        "stream_s3_pending=%u\r\nstream_c5_pending=%u\r\nstream_s3_drops=%lu\r\nstream_c5_drops=%lu\r\n"
+        "stream_s3_channel=%u\r\nstream_c5_channel=%u\r\nstream_s3_channels=%u\r\nstream_c5_channels=%u\r\n"
+        "stream_s3_held=%u\r\nstream_c5_held=%u\r\nstream_s3_error=%ld\r\nstream_c5_error=%ld\r\n",
+        wardrive.mode,(unsigned long)wardrive.s3_stream.wifi_reports,(unsigned long)wardrive.s3_stream.ble_reports,
+        (unsigned long)wardrive.c5_stream.wifi_reports,(unsigned long)wardrive.c5_stream.ble_reports,
+        wardrive.s3_stream.pending,wardrive.c5_stream.pending,(unsigned long)wardrive.s3_stream.dropped,
+        (unsigned long)wardrive.c5_stream.dropped,wardrive.s3_stream.channel,wardrive.c5_stream.channel,
+        wardrive.s3_stream.valid_channels,wardrive.c5_stream.valid_channels,wardrive.s3_stream.held,wardrive.c5_stream.held,
+        (long)wardrive.s3_stream.error,(long)wardrive.c5_stream.error);
     print_wardrive_recent();
 }
 
@@ -1629,6 +1656,8 @@ static void execute_command(char *line)
         print_ble_memory();
     } else if (strcmp(start, "radio") == 0) {
         print_radio();
+    } else if (strcmp(start, "gps") == 0) {
+        print_gps();
     } else if (strcmp(start, "battery") == 0) {
         print_battery();
     } else {

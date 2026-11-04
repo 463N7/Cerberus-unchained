@@ -42,7 +42,7 @@ class SelectionChecks(unittest.TestCase):
 
     def test_four_shards_partition_exact_canonical_registry(self):
         names = runner.registered_checks()
-        self.assertEqual(len(names), 158)
+        self.assertEqual(len(names), 160)
         self.assertEqual(names.count("check_radio_worker.py"), 1)
         self.assertIn("check_radio_worker.py", runner.CHECKS)
         for name in ("check_mesh_mac.py", "check_mesh_observation.py", "check_mesh_link.py", "check_mesh_scan.py",
@@ -137,7 +137,7 @@ class RunnerChecks(unittest.TestCase):
         status, receipt, commands = self.invoke()
         self.assertEqual(status, 0)
         self.assertEqual(receipt["format"], 1)
-        self.assertEqual(receipt["suite_set"], "rev136")
+        self.assertEqual(receipt["suite_set"], "rev137")
         self.assertEqual(receipt["status"], "passed")
         self.assertEqual(receipt["selection"]["mode"], "full")
         self.assertEqual([c["check"] for c in receipt["checks"]], list(runner.registered_checks()))
@@ -218,13 +218,13 @@ class AggregateChecks(unittest.TestCase):
                 (folder / log_name).write_bytes(content)
                 checks.append({"check": name, "exit_code": 0, "duration_seconds": 1.25,
                     "log": "artifacts/host-checks/" + log_name, "log_sha256": verifier.digest(content)})
-            receipt = {"format": 1, "status": "passed", "suite_set": "rev136", "platform": "win32",
+            receipt = {"format": 1, "status": "passed", "suite_set": "rev137", "platform": "win32",
                 "hardware_validated": False, "source_head": HEAD, "source_head_after": HEAD,
                 "source_clean": True, "source_clean_after": True,
                 "execution": EXECUTION,
                 "inputs_changed": [], "inputs_after": self.inputs, "python_version": "3.13.16",
                 "ziglang_version": "0.14.1", "registry_sha256": runner.registry_sha256(),
-                "registered_suite_count": 158, "checks": checks,
+                "registered_suite_count": 160, "checks": checks,
                 "selection": {"mode": "shard", "shard_index": index, "shard_count": 4,
                     "selected_names": names, "selected_suite_count": len(names)}}
             path = folder / "host-checks.json"
@@ -249,8 +249,8 @@ class AggregateChecks(unittest.TestCase):
     def test_complete_logs_and_shards_pass_in_any_artifact_order(self):
         report = self.verify(list(reversed(self.paths)))
         self.assertEqual(report["status"], "passed")
-        self.assertEqual(report["verified_suite_count"], 158)
-        self.assertEqual(report["suite_seconds_sum"], 158 * 1.25)
+        self.assertEqual(report["verified_suite_count"], 160)
+        self.assertEqual(report["suite_seconds_sum"], 160 * 1.25)
         self.assertEqual([r["shard_index"] for r in report["receipts"]], [0, 1, 2, 3])
         self.assertEqual(report["inputs_sha256"], verifier.canonical_digest(self.inputs))
         for row, path in zip(report["receipts"], self.paths):

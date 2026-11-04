@@ -60,7 +60,7 @@ static void test_pages(const char *directory)
     CHECK(wardrive_recent_ui_draw(&viewer,ESP_OK,5000,true)==ESP_OK);
     CHECK(viewer.paint_valid&&viewer.painted_count==4&&viewer.painted_total==10);
     CHECK(!memcmp(&before,&viewer.snapshot,sizeof(before)));
-    CHECK(strstr(drawn,"STATE: LIVE")&&strstr(drawn,"PAGE 1 OF 3")&&strstr(drawn,"LAST 24 OBSERVATIONS"));
+    CHECK(strstr(drawn,"STATE: LIVE")&&strstr(drawn,"PAGE 1 OF 3")&&strstr(drawn,"24 OBSERVATION HISTORY"));
     CHECK(viewer.painted[0].sequence==10&&viewer.painted[3].sequence==7);
     CHECK(viewer.painted_session_id==1&&viewer.painted_revision==model.revision);
     preview(directory,"recent-live");

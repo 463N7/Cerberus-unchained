@@ -175,10 +175,10 @@ static inline esp_err_t wardrive_recent_ui_draw(wardrive_recent_ui_store_t *stor
     }
     uint8_t total = store->snapshot.count;
     if (store->page * 4U >= total) store->page = 0U;
-    snprintf(line, sizeof(line), "%u RECENT ADDRESSES / PAGE %u OF %u", total,
+    snprintf(line, sizeof(line), "%u OBSERVATIONS / PAGE %u OF %u", total,
         store->page + 1U, total ? (total + 3U) / 4U : 1U);
     ESP_RETURN_ON_ERROR(draw_centered(104, line, UI_TEXT, 1), TAG, "recent count");
-    ESP_RETURN_ON_ERROR(draw_centered(122, "NEWEST 10 DISTINCT / LAST 24 OBSERVATIONS", UI_MUTED, 1), TAG, "recent history scope");
+    ESP_RETURN_ON_ERROR(draw_centered(122, "LATEST RESULTS / 24 OBSERVATION HISTORY", UI_MUTED, 1), TAG, "recent history scope");
     for (uint8_t i = 0U; i < 4U && store->page * 4U + i < total; ++i) {
         cerberus_wardrive_recent_row_t *entry = &store->painted[i];
         *entry = store->snapshot.rows[store->page * 4U + i];

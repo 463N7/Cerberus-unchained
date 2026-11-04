@@ -1,3 +1,5 @@
+static _Bool stream_recording;
+static unsigned long long stream_observed_ms;
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
@@ -201,6 +203,21 @@ int main(void)
         untouched,sizeof(untouched),&written)==CERBERUS_WIGLE_INVALID_ARG);
     assert(!strcmp(untouched,"unchanged")&&written==123);
     }
+    /* Streaming mode retains equal sightings from both radio assignments.
+     * A delayed queue entry must not borrow the current GPS position. */
+    stream_recording=true;stream_observed_ms=clock_ms;
+    ap=(cerberus_wardrive_observation_t){.type=CERBERUS_WARDRIVE_WIFI,
+        .radio=CERBERUS_WARDRIVE_RADIO_S3,.address={2,3,4,5,6,7},.channel=6,.rssi_dbm=-45,
+        .label={'A',',','B'},.label_length=3};
+    gps_fixture.state=CERBERUS_WARDRIVE_GPS_FRESH;gps_fixture.utc_valid=true;
+    unsigned recorded=appends[1];
+    for(unsigned i=0;i<1000;++i)assert(append_observation(&ap)==ESP_OK);
+    assert(appends[1]==recorded+1000&&strstr(last_row[1],"\"A,B\""));
+    ap.type=CERBERUS_WARDRIVE_BLE;ap.radio=CERBERUS_WARDRIVE_RADIO_C5;
+    ap.channel=0;ap.manufacturer_id=76;
+    assert(append_observation(&ap)==ESP_OK&&appends[1]==recorded+1001);
+    stream_observed_ms=clock_ms-1001;unsigned unlocated=appends[0];
+    assert(append_observation(&ap)==ESP_OK&&appends[0]==unlocated+1&&appends[1]==recorded+1001);
     puts("wardrive routing: GPS recovery, separate probe/relation histories, unlocated-only evidence, SD retry and rotation passed");
     return 0;
 }

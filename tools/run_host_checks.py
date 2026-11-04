@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the 158 registered host suites through Packet Count progress and diagnostics.
+"""Run the 160 registered host suites through streaming Wardriving and GPS.
 
 The checked-in synthetic fixtures need no board, radio, or private captures.
 Generated fixtures, native executables, previews, logs, and the result receipt
@@ -109,6 +109,8 @@ CHECKS = (
     'check_ble_vendor_cache.py',
     'check_wardrive_ble_capture.py',
     'check_wardrive_core.py',
+    'check_wardrive_stream.py',
+    'check_wardrive_radio.py',
     'check_wardrive_log_routing.py',
     'check_wardrive_memory.py',
     'check_wardrive_stop.py',
@@ -190,8 +192,8 @@ SERIAL_CHECKS = (
 
 def registered_checks() -> tuple[str, ...]:
     names = (*CHECKS, *SERIAL_CHECKS)
-    if len(names) != 158 or len(set(names)) != 158:
-        raise ValueError("Expected 158 unique suites; do not silently skip a suite")
+    if len(names) != 160 or len(set(names)) != 160:
+        raise ValueError("Expected 160 unique suites; do not silently skip a suite")
     return names
 
 
@@ -210,7 +212,7 @@ def selected_checks(shard_index: int | None = None,
         return names
     if (type(shard_index) is not int or type(shard_count) is not int or
             not 1 <= shard_count <= len(names) or not 0 <= shard_index < shard_count):
-        raise ValueError("Supply both --shard-index and --shard-count; index is zero-based and count is 1..158")
+        raise ValueError("Supply both --shard-index and --shard-count; index is zero-based and count is 1..160")
     return names[shard_index::shard_count]
 
 
@@ -322,7 +324,7 @@ def main() -> int:
     changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
     receipt = {
         "format": 1,
-        "suite_set": "rev136",
+        "suite_set": "rev137",
         "recorded_utc": datetime.now(timezone.utc).isoformat(),
         "status": "passed" if not changed and head == head_after and
             (args.shard_count is None or clean_after) and

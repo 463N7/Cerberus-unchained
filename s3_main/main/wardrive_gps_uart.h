@@ -2,10 +2,11 @@
 
 #include "esp_err.h"
 #include "wardrive_gps_core.h"
+#include "gps_config.h"
 
-/* 9600 baud produces at most 960 bytes/s with 8N1 framing. The reader polls
- * every 100ms; this ring retains over one second of input without a 4KiB pool. */
-#define CERBERUS_WARDRIVE_GPS_RX_BUFFER_BYTES 1024U
+/* LC29H can emit multi-constellation NMEA bursts at 115200 or faster. A 4 KiB
+ * UART ring and 20 ms reads bound burst pressure without per-line allocation. */
+#define CERBERUS_WARDRIVE_GPS_RX_BUFFER_BYTES 4096U
 #define CERBERUS_WARDRIVE_GPS_TASK_STACK_BYTES 3584U
 #define CERBERUS_WARDRIVE_GPS_TRACE_CAPACITY 8U
 #define CERBERUS_WARDRIVE_GPS_TRACE_PAYLOAD_BYTES (CERBERUS_WARDRIVE_GPS_LINE_CAPACITY - 1U)
@@ -38,6 +39,9 @@ typedef struct {
     bool starting;
     bool stopping;
     bool clock_valid;
+    cerberus_gps_config_t config;
+    uint32_t active_baud, received_bytes, baud_changes;
+    bool detecting_baud;
 } cerberus_wardrive_gps_uart_state_t;
 
 typedef struct {
@@ -56,12 +60,15 @@ typedef struct {
     cerberus_wardrive_gps_trace_row_t rows[CERBERUS_WARDRIVE_GPS_TRACE_CAPACITY];
 } cerberus_wardrive_gps_trace_snapshot_t;
 
-/* Optional receiver on UART2 RX GPIO1, 9600 8N1. The reader and UART driver
- * exist only during an integrated Wardriving session. Start/Stop are serialized
- * by that service's worker; observers never control the driver. A failed Stop
- * retains ownership for an exact same-owner retry. No PPS pin is claimed. */
+/* UART2 uses the saved RX pin and baud/preset. Session and screen preview
+ * share one reader, preserving the acquired fix across Start. A failed Stop
+ * retains ownership for an exact same-owner retry. TX/PPS assignments are
+ * stored but neither pin is driven; NMEA supplies position and UTC. */
 esp_err_t cerberus_wardrive_gps_uart_start(void);
 esp_err_t cerberus_wardrive_gps_uart_stop(void);
+/* UI attaches once on entry and releases on leave; session ownership keeps
+ * the same receiver/fix alive across Start/Stop. Retry NOT_FINISHED releases. */
+esp_err_t cerberus_wardrive_gps_uart_preview(bool enabled);
 void cerberus_wardrive_gps_uart_snapshot(
     cerberus_wardrive_gps_snapshot_t *out, esp_err_t *uart_error);
 

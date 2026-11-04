@@ -29,12 +29,11 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source version: `0.1.0-dev.rev136`, targeting onboard C5 protocol
-firmware revision 74. Rev135 remains installed with verified paired writes and
-boot checks; 2.4 GHz Packet Count reception, matching, Stop/Back and the next
-split Wi-Fi scan are confirmed. Rev136's recorder memory optimization passes
-the full local host/native matrix and package verification, but has not been
-flashed. A public binary release has not been selected.**
+**Current source version: `0.1.0-dev.rev137`, targeting onboard C5 protocol
+firmware revision 75. Rev137 adds streaming dual-radio Wardriving, repeated
+observation logging and configurable GNSS with a fix preview. Validation and
+hardware acceptance are tracked in [the rev137 checkpoint](docs/DUAL_RADIO_REV137.md).
+A public binary release has not been selected.**
 The web installer remains unavailable until a matched release is deliberately selected.
 Sentinel 1.0.0 binaries are not Unchained firmware.
 
@@ -64,6 +63,15 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev137 provides Wi-Fi-only, Bluetooth-only and combined Wardriving modes.
+Wi-Fi-only splits S3 2.4 GHz and C5 5 GHz reception; Bluetooth-only uses both
+receivers. Combined mode keeps C5 on 5 GHz and assigns S3 alternating Wi-Fi/BLE
+windows. Bounded queues separate RF callbacks from CSV/SD work and preserve
+repeated observations, with overflow counters. GPS AUTO, LC29H-AA, ATGM336H
+and manual profiles live in one Settings branch. GNSS can be inspected before
+recording; stale or absent fixes route observations to unlocated output.
+See [roles, limits and validation scope](docs/DUAL_RADIO_REV137.md).
 
 Rev136 reuses Packet Count's raw-frame scratch for in-place PCAPNG encoding,
 removing a second 4,096-byte buffer from the optional S3 recording worker.

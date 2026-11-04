@@ -70,6 +70,9 @@ typedef struct {
     uint8_t satellites;
     char utc[25]; /* YYYY-MM-DDTHH:MM:SS.mmmZ from a valid RMC date/time. */
     char utc_second[7];
+    char gga_second[7];
+    bool gga_time_valid;
+    uint16_t gga_millis,utc_millis;
     uint32_t valid_sentences;
     uint32_t bad_checksums;
     uint32_t malformed_sentences;

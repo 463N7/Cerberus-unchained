@@ -1,3 +1,4 @@
+#include "wardrive_foreign_boundary.h"
 #undef NDEBUG
 #include "wifi_scan_observation.h"
 #include <assert.h>

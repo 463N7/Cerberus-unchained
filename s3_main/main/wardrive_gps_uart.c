@@ -1,4 +1,5 @@
 #include "wardrive_gps_uart.h"
+#include "settings.h"
 #include "driver/gpio.h"
 #include "driver/uart.h"
 #include "esp_heap_caps.h"
@@ -7,14 +8,14 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include <limits.h>
+#include <stdatomic.h>
 #include <string.h>
 
 #define GPS_UART UART_NUM_2
-#define GPS_RX_GPIO GPIO_NUM_1
 #define GPS_RX_BUFFER_BYTES CERBERUS_WARDRIVE_GPS_RX_BUFFER_BYTES
 #define GPS_TASK_STACK_BYTES CERBERUS_WARDRIVE_GPS_TASK_STACK_BYTES
 #define GPS_READ_CHUNK_BYTES 256U
-#define GPS_READ_WAIT_MS 100U
+#define GPS_READ_WAIT_MS 20U
 #define GPS_STOP_GRACE_MS 1000U
 #define GPS_SNAPSHOT_WAIT_MS 25U
 
@@ -31,6 +32,15 @@ static uint64_t receiver_epoch, clock_highwater;
 static bool clock_seen, receipt_clock_valid;
 static gps_trace_store_t *trace_store;
 static uint64_t trace_token, trace_token_counter, trace_sequence;
+static cerberus_gps_config_t receiver_config;
+static const uint32_t detect_bauds[]={115200U,9600U,38400U,57600U,19200U,4800U,230400U,460800U,921600U};
+static uint32_t active_baud,received_bytes,baud_changes;
+static uint64_t baud_started_ms;
+static uint8_t baud_index;
+static bool detecting_baud;
+static atomic_flag gps_control=ATOMIC_FLAG_INIT;
+static unsigned gps_consumers;
+static esp_err_t gps_native_stop(void);
 
 static void increment(uint32_t *value)
 { if (*value != UINT32_MAX) ++*value; }
@@ -97,8 +107,36 @@ static void gps_reader(void *unused)
             receipt_clock_valid = clock_ms(&received_ms);
             cerberus_wardrive_gps_core_feed_observed(&gps_core, bytes, (size_t)count,
                 received_ms, trace_store ? observe_line : NULL, NULL);
+            received_bytes=UINT32_MAX-received_bytes<(uint32_t)count?UINT32_MAX:received_bytes+(uint32_t)count;
+        }
+        uint64_t probe_now=0U;
+        bool probe_clock=clock_ms(&probe_now);
+        if(detecting_baud&&gps_core.valid_sentences>=2U)detecting_baud=false;
+        /* A cold candidate gets two seconds, long enough for a1Hz receiver.
+         * A verified baud is retained through loss of fix; only loss of NMEA
+         * for10s resumes discovery. This does not change receiver settings. */
+        if(!receiver_config.baud&&!detecting_baud&&probe_clock&&gps_core.sentence_seen&&
+            probe_now>=gps_core.last_sentence_ms&&probe_now-gps_core.last_sentence_ms>=10000U){
+            detecting_baud=true;baud_started_ms=probe_now;
+            cerberus_wardrive_gps_core_reset(&gps_core);
+        }
+        bool retune=!stop_requested&&detecting_baud&&probe_clock&&
+            probe_now>=baud_started_ms&&probe_now-baud_started_ms>=2000U;
+        uint32_t next_baud=active_baud;
+        if(retune){
+            baud_index=(uint8_t)((baud_index+1U)%(sizeof(detect_bauds)/sizeof(detect_bauds[0])));
+            next_baud=detect_bauds[baud_index];
         }
         xSemaphoreGive(gps_lock);
+        if(retune){
+            esp_err_t changed=uart_set_baudrate(GPS_UART,next_baud);
+            if(changed==ESP_OK)changed=uart_flush_input(GPS_UART);
+            xSemaphoreTake(gps_lock,portMAX_DELAY);
+            if(changed!=ESP_OK){last_uart_error=changed;stop_requested=true;}
+            else {active_baud=next_baud;increment(&baud_changes);baud_started_ms=probe_now;
+                cerberus_wardrive_gps_core_reset(&gps_core);}
+            xSemaphoreGive(gps_lock);
+        }
     }
     xSemaphoreTake(gps_lock, portMAX_DELAY); task_running = false; xSemaphoreGive(gps_lock);
     vTaskDelete(NULL);
@@ -109,12 +147,14 @@ static esp_err_t setup_failed(esp_err_t error)
     xSemaphoreTake(gps_lock, portMAX_DELAY);
     last_uart_error = error; start_in_progress = false; stop_requested = true;
     xSemaphoreGive(gps_lock);
-    esp_err_t cleanup = cerberus_wardrive_gps_uart_stop();
+    esp_err_t cleanup = gps_native_stop();
     return cleanup != ESP_OK ? cleanup : error;
 }
 
-esp_err_t cerberus_wardrive_gps_uart_start(void)
+static esp_err_t gps_native_start(void)
 {
+    cerberus_gps_config_t selected=cerberus_settings_gps_get();
+    if(!cerberus_gps_config_valid(&selected))return ESP_ERR_INVALID_ARG;
     /* Integrated Wardriving serializes first-use mutex initialization. */
     if (!gps_lock) {
         gps_lock = xSemaphoreCreateMutex();
@@ -124,7 +164,7 @@ esp_err_t cerberus_wardrive_gps_uart_start(void)
     bool cleanup_needed = uart_active && stop_requested && !start_in_progress;
     xSemaphoreGive(gps_lock);
     if (cleanup_needed) {
-        esp_err_t cleanup = cerberus_wardrive_gps_uart_stop();
+        esp_err_t cleanup = gps_native_stop();
         if (cleanup != ESP_OK) return cleanup;
     }
     xSemaphoreTake(gps_lock, portMAX_DELAY);
@@ -142,14 +182,18 @@ esp_err_t cerberus_wardrive_gps_uart_start(void)
     xSemaphoreTake(gps_lock, portMAX_DELAY);
     uart_active = true; /* Retain driver ownership through every later failure. */
     ++receiver_epoch; clock_seen = false;
+    receiver_config=selected;baud_index=0U;
+    active_baud=selected.baud?selected.baud:detect_bauds[0];
+    detecting_baud=selected.baud==0U;received_bytes=baud_changes=0U;
+    baud_started_ms=(uint64_t)(esp_timer_get_time()/1000LL);
     cerberus_wardrive_gps_core_reset(&gps_core);
     if (trace_store) memset(trace_store, 0, sizeof(*trace_store));
     xSemaphoreGive(gps_lock);
-    const uart_config_t config = {.baud_rate=9600,.data_bits=UART_DATA_8_BITS,
+    const uart_config_t config = {.baud_rate=(int)active_baud,.data_bits=UART_DATA_8_BITS,
         .parity=UART_PARITY_DISABLE,.stop_bits=UART_STOP_BITS_1,
         .flow_ctrl=UART_HW_FLOWCTRL_DISABLE,.source_clk=UART_SCLK_DEFAULT};
     error = uart_param_config(GPS_UART, &config);
-    if (error == ESP_OK) error = uart_set_pin(GPS_UART, UART_PIN_NO_CHANGE, GPS_RX_GPIO,
+    if (error == ESP_OK) error = uart_set_pin(GPS_UART, UART_PIN_NO_CHANGE, selected.rx_gpio,
         UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     if (error == ESP_OK) error = uart_flush_input(GPS_UART);
     if (error != ESP_OK) return setup_failed(error);
@@ -166,7 +210,7 @@ esp_err_t cerberus_wardrive_gps_uart_start(void)
     return ESP_OK;
 }
 
-esp_err_t cerberus_wardrive_gps_uart_stop(void)
+static esp_err_t gps_native_stop(void)
 {
     if (!gps_lock) return ESP_OK;
     xSemaphoreTake(gps_lock, portMAX_DELAY);
@@ -195,6 +239,43 @@ esp_err_t cerberus_wardrive_gps_uart_stop(void)
     return error;
 }
 
+/* Session and screen preview share one reader. A screen never stops the GPS
+ * beneath a logger, and starting logging preserves the already acquired fix.
+ * Failed cleanup retains its consumer; only that consumer can retry release. */
+static esp_err_t gps_consumer_set(unsigned consumer,bool enabled)
+{
+    if(atomic_flag_test_and_set_explicit(&gps_control,memory_order_acquire))return ESP_ERR_NOT_FINISHED;
+    esp_err_t error=ESP_OK;
+    bool healthy=false,cleanup=false;
+    if(gps_lock){
+        xSemaphoreTake(gps_lock,portMAX_DELAY);
+        healthy=uart_active&&task_running&&!stop_requested;
+        cleanup=stop_requested;
+        xSemaphoreGive(gps_lock);
+    }
+    if(enabled){
+        if(gps_consumers==consumer&&cleanup)error=gps_native_start();
+        else if(gps_consumers&consumer)error=ESP_ERR_INVALID_STATE;
+        else if(!gps_consumers)error=gps_native_start();
+        else if(!healthy)error=ESP_ERR_INVALID_STATE;
+        if(error==ESP_OK)gps_consumers|=consumer;
+        /* A failed native start can retain cleanup ownership. */
+        else if(!gps_consumers&&gps_lock){
+            xSemaphoreTake(gps_lock,portMAX_DELAY);
+            if(uart_active||task_running||start_in_progress)gps_consumers|=consumer;
+            xSemaphoreGive(gps_lock);
+        }
+    }else if(gps_consumers&consumer){
+        if(gps_consumers==consumer)error=gps_native_stop();
+        if(error==ESP_OK)gps_consumers&=~consumer;
+    }
+    atomic_flag_clear_explicit(&gps_control,memory_order_release);
+    return error;
+}
+esp_err_t cerberus_wardrive_gps_uart_start(void){return gps_consumer_set(1U,true);}
+esp_err_t cerberus_wardrive_gps_uart_stop(void){return gps_consumer_set(1U,false);}
+esp_err_t cerberus_wardrive_gps_uart_preview(bool enabled){return gps_consumer_set(2U,enabled);}
+
 static void snapshot_locked(cerberus_wardrive_gps_snapshot_t *out, bool *valid_clock)
 {
     uint64_t now;
@@ -221,6 +302,8 @@ esp_err_t cerberus_wardrive_gps_uart_get_state(cerberus_wardrive_gps_uart_state_
     out->starting=start_in_progress; out->stopping=stop_requested && (uart_active || task_running || start_in_progress);
     out->error=uart_active || task_running || start_in_progress ? last_uart_error : ESP_OK;
     out->historical_error=last_uart_error;
+    out->config=receiver_config;out->active_baud=active_baud;
+    out->received_bytes=received_bytes;out->baud_changes=baud_changes;out->detecting_baud=detecting_baud;
     xSemaphoreGive(gps_lock); return ESP_OK;
 }
 

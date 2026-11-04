@@ -208,6 +208,7 @@ static bool parse_rmc(cerberus_wardrive_gps_core_t *core, char *fields[],
         memcpy(core->utc_second, second_text, sizeof(core->utc_second));
         core->utc_seen = true;
         core->last_utc_ms = monotonic_ms;
+        core->utc_millis=(uint16_t)millis;
     } else {
         core->utc_seen = false;
         core->utc[0] = '\0';
@@ -226,7 +227,12 @@ static bool parse_rmc(cerberus_wardrive_gps_core_t *core, char *fields[],
     }
     core->latitude = latitude;
     core->longitude = longitude;
-    core->altitude_valid = false;
+    /* Receivers differ in sentence order. Preserve altitude only from the
+     * same fresh GGA epoch, never from an earlier fix or previous UTC day. */
+    core->altitude_valid = core->altitude_valid && time_valid && core->gga_time_valid &&
+        memcmp(core->gga_second,second_text,sizeof(second_text))==0 && core->gga_millis==millis &&
+        monotonic_ms>=core->last_gga_ms && monotonic_ms-core->last_gga_ms<=1000U;
+    if(!core->altitude_valid)core->altitude_m=0.0f;
     core->fix_live = true;
     core->last_fix_ms = monotonic_ms;
     increment(&core->fix_updates);
@@ -239,6 +245,7 @@ static bool parse_gga(cerberus_wardrive_gps_core_t *core, char *fields[],
     /* These fields belong to this GGA, independently of later RMC fixes and
      * independently of whether GGA currently reports a navigation fix. */
     core->gga_seen = true;
+    core->gga_time_valid = false;
     core->last_gga_ms = monotonic_ms;
     core->satellites_valid = false;
     core->hdop_valid = false;
@@ -261,8 +268,11 @@ static bool parse_gga(cerberus_wardrive_gps_core_t *core, char *fields[],
     char second_text[7];
     bool gga_time_valid = utc_time(fields[1], &hour, &minute, &second,
         &millis, second_text);
+    core->gga_time_valid=gga_time_valid;
+    if(gga_time_valid){memcpy(core->gga_second,second_text,sizeof(second_text));core->gga_millis=(uint16_t)millis;}
     if (!gga_time_valid || !core->utc_seen ||
         memcmp(core->utc_second, second_text, sizeof(core->utc_second)) != 0 ||
+        core->utc_millis!=millis ||
         monotonic_ms < core->last_utc_ms ||
         monotonic_ms - core->last_utc_ms > 1000U) {
         core->utc_seen = false;

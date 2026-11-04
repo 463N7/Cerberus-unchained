@@ -6,6 +6,9 @@
 #include <string.h>
 #include "gps_sdk_stub.h"
 #include "wardrive_gps_uart.h"
+static cerberus_gps_config_t test_config;
+static uint32_t configured_baud;
+cerberus_gps_config_t cerberus_settings_gps_get(void){return test_config;}
 static unsigned checks;
 #define CHECK(x) do { ++checks; assert(x); } while (0)
 static bool locked, mutex_fail, create_mutex_fail, alloc_fail, task_fail, driver_installed;
@@ -32,7 +35,7 @@ void xSemaphoreGive(SemaphoreHandle_t lock) { CHECK(lock && locked); locked=fals
 int64_t esp_timer_get_time(void) { return now_us; }
 esp_err_t uart_driver_install(int port,int rx,int tx,int queue,void *handle,int flags)
 {
-    CHECK(!locked && port==2 && rx==1024 && !tx && !queue && !handle && !flags);
+    CHECK(!locked && port==2 && rx==4096 && !tx && !queue && !handle && !flags);
     ++installs; CHECK(!driver_installed);
     if (install_error) return install_error;
     driver_installed=true; return ESP_OK;
@@ -40,12 +43,15 @@ esp_err_t uart_driver_install(int port,int rx,int tx,int queue,void *handle,int 
 esp_err_t uart_param_config(int port,const uart_config_t *config)
 {
     CHECK(!locked && port==2 && driver_installed);
-    CHECK(config->baud_rate==9600 && config->data_bits==8 && !config->parity && config->stop_bits==1);
+    CHECK((uint32_t)config->baud_rate==(test_config.baud?test_config.baud:115200U) && config->data_bits==8 && !config->parity && config->stop_bits==1);
+    configured_baud=(uint32_t)config->baud_rate;
     if (sdk_hook) {void (*hook)(void)=sdk_hook;sdk_hook=NULL;hook();}
     return config_error;
 }
 esp_err_t uart_set_pin(int port,int tx,int rx,int rts,int cts)
-{ CHECK(!locked && port==2 && tx==-1 && rx==1 && rts==-1 && cts==-1);return pin_error; }
+{ CHECK(!locked && port==2 && tx==-1 && rx==test_config.rx_gpio && rts==-1 && cts==-1);return pin_error; }
+esp_err_t uart_set_baudrate(int port,uint32_t baud)
+{CHECK(!locked&&port==2&&cerberus_gps_baud_valid(baud)&&baud);configured_baud=baud;return config_error;}
 esp_err_t uart_flush_input(int port) {CHECK(!locked && port==2);return flush_error;}
 esp_err_t uart_driver_delete(int port)
 {
@@ -55,7 +61,7 @@ esp_err_t uart_driver_delete(int port)
 }
 int uart_read_bytes(int port,void *bytes,unsigned capacity,unsigned wait)
 {
-    CHECK(!locked && port==2 && capacity==256 && wait==100 && driver_installed);++reads;
+    CHECK(!locked && port==2 && capacity==256 && wait==20 && driver_installed);++reads;
     if (read_error) return read_error;
     if (input_offset==input_size) longjmp(yield_reader,1);
     size_t count=input_size-input_offset;
@@ -97,6 +103,8 @@ static void reset(void)
     mutex_fail=create_mutex_fail=alloc_fail=task_fail=driver_installed=false;
     install_error=config_error=pin_error=flush_error=delete_error=read_error=0;
     reader_task=NULL;sdk_hook=allocation_hook=NULL;now_us=1000000;
+    test_config=cerberus_gps_config_default();cerberus_gps_config_profile(&test_config,CERBERUS_GPS_ATGM336H);
+    gps_consumers=0;atomic_flag_clear(&gps_control);configured_baud=0;
 }
 static void feed(const void *bytes,size_t count,size_t chunk)
 {
@@ -206,12 +214,12 @@ static void setup_and_cleanup(void)
     CHECK(cerberus_wardrive_gps_uart_stop()==ESP_OK);
 }
 static void cancel_setup(void)
-{ CHECK(cerberus_wardrive_gps_uart_start()==ESP_ERR_INVALID_STATE);CHECK(cerberus_wardrive_gps_uart_stop()==ESP_ERR_NOT_FINISHED); }
+{ CHECK(cerberus_wardrive_gps_uart_start()==ESP_ERR_NOT_FINISHED);CHECK(cerberus_wardrive_gps_uart_stop()==ESP_ERR_NOT_FINISHED); }
 static void cancel_attach(void) { stop_clean(); }
 static void clocks_and_identity(void)
 {
-    reset();sdk_hook=cancel_setup;CHECK(cerberus_wardrive_gps_uart_start()==ESP_ERR_INVALID_STATE);
-    CHECK(!driver_installed && !creates && installs==1 && deletes==1);
+    reset();sdk_hook=cancel_setup;CHECK(cerberus_wardrive_gps_uart_start()==ESP_OK);
+    CHECK(driver_installed && creates==1 && installs==1 && deletes==0);stop_clean();
     CHECK(cerberus_wardrive_gps_uart_start()==ESP_OK);
     uint64_t token;allocation_hook=cancel_attach;
     CHECK(cerberus_wardrive_gps_uart_trace_begin(&token)==ESP_ERR_NOT_FINISHED && !token && frees==1);
@@ -250,9 +258,33 @@ static void observer_lock_timeouts(void)
     fail_timed_take=0;CHECK(cerberus_wardrive_gps_uart_trace_end(token)==ESP_OK && !trace_store && !trace_token && frees==2);
     CHECK(task_running && uart_active);stop_clean();
 }
+static void presets_preview_and_detection(void)
+{
+    reset();test_config=cerberus_gps_config_default();
+    CHECK(cerberus_gps_config_valid(&test_config));
+    CHECK(cerberus_wardrive_gps_uart_preview(true)==ESP_OK&&configured_baud==115200U);
+    CHECK(cerberus_wardrive_gps_uart_start()==ESP_OK&&installs==1U);
+    CHECK(cerberus_wardrive_gps_uart_preview(false)==ESP_OK&&driver_installed);
+    char text[180];size_t size=sentence(text,"GNRMC,120000.000,A,4807.038,N,01131.000,E,0,0,010124","\r\n");
+    now_us+=2100000;feed(text,1,1);
+    CHECK(configured_baud==9600U&&baud_changes==1U&&detecting_baud);
+    feed(text,size,13);feed(text,size,7);
+    CHECK(!detecting_baud&&gps_core.valid_sentences==2U);
+    uint64_t epoch=receiver_epoch;
+    CHECK(cerberus_wardrive_gps_uart_preview(true)==ESP_OK);
+    CHECK(cerberus_wardrive_gps_uart_stop()==ESP_OK&&driver_installed&&receiver_epoch==epoch);
+    CHECK(cerberus_wardrive_gps_uart_start()==ESP_OK&&installs==1U);
+    CHECK(cerberus_wardrive_gps_uart_preview(false)==ESP_OK);
+    stop_clean();
+    reset();cerberus_gps_config_profile(&test_config,CERBERUS_GPS_LC29H_AA);
+    CHECK(cerberus_wardrive_gps_uart_start()==ESP_OK&&configured_baud==115200U&&!detecting_baud);stop_clean();
+    for(int pin=0;pin<49;++pin){cerberus_gps_config_t c=cerberus_gps_config_default();c.rx_gpio=(uint8_t)pin;
+        CHECK(cerberus_gps_config_valid(&c)==(cerberus_gps_input_pin_valid(pin)&&pin!=2&&pin!=46));}
+    reset();test_config.rx_gpio=44;CHECK(cerberus_wardrive_gps_uart_start()==ESP_ERR_INVALID_ARG&&!installs);
+}
 int main(void)
 {
-    off_and_trace();setup_and_cleanup();clocks_and_identity();observer_lock_timeouts();reset();
+    off_and_trace();setup_and_cleanup();clocks_and_identity();observer_lock_timeouts();presets_preview_and_detection();reset();
     printf("GPS UART/trace: %u checks; actual reader/parser/lifecycle, optional PSRAM, exact observer identity, privacy and cleanup passed. row=%zu store=%zu snapshot=%zu\n",
         checks,sizeof(cerberus_wardrive_gps_trace_row_t),sizeof(gps_trace_store_t),sizeof(cerberus_wardrive_gps_trace_snapshot_t));
     return 0;

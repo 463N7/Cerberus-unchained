@@ -39,6 +39,24 @@ static unsigned additional_checks;
 #define CHECK(x) do { ++additional_checks; assert(x); } while (0)
 static const char good_gga[]="GPGGA,123519.25,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,";
 static const char good_rmc[]="GNRMC,123519.25,A,4807.038,N,01131.000,E,0.0,0.0,230394,,";
+static void sentence_order(void)
+{
+    cerberus_wardrive_gps_core_t core;cerberus_wardrive_gps_snapshot_t out;
+    cerberus_wardrive_gps_core_reset(&core);
+    feed(&core,good_gga,1000);feed(&core,good_rmc,1020);
+    cerberus_wardrive_gps_core_snapshot(&core,1020,&out);
+    CHECK(out.utc_valid&&out.altitude_valid&&out.altitude_m>545.39f&&out.altitude_m<545.41f);
+    feed(&core,"GNRMC,123519.50,A,4807.038,N,01131.000,E,0.0,0.0,230394,,",1050);
+    cerberus_wardrive_gps_core_snapshot(&core,1050,&out);
+    CHECK(out.utc_valid&&!out.altitude_valid);
+    feed(&core,good_gga,1060);cerberus_wardrive_gps_core_snapshot(&core,1060,&out);
+    CHECK(!out.utc_valid); /* Different fractional fix cannot borrow RMC time. */
+    cerberus_wardrive_gps_core_reset(&core);
+    feed(&core,good_rmc,2000);feed(&core,good_gga,2020);
+    cerberus_wardrive_gps_core_snapshot(&core,2020,&out);CHECK(out.utc_valid&&out.altitude_valid);
+    feed(&core,good_rmc,4000);cerberus_wardrive_gps_core_snapshot(&core,4000,&out);
+    CHECK(out.utc_valid&&!out.altitude_valid);
+}
 
 static void independent_gga_freshness(void)
 {
@@ -293,7 +311,7 @@ int main(void)
     cerberus_wardrive_gps_core_snapshot(&core, 21000U, &status);
     assert(status.valid_sentences == 12U);
 
-    independent_gga_freshness();strict_decimal_fields();observed_assembly();
+    sentence_order();independent_gga_freshness();strict_decimal_fields();observed_assembly();
     printf("Wardriving GPS core checks passed: existing strict NMEA/UTC tests + %u independent-GGA/decimal/observed-assembly assertions; core=%zu snapshot=%zu bytes.\n",
         additional_checks,sizeof(core),sizeof(status));
     return 0;

@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "main.c"
+        "../../shared/wardrive_radio.c"
         "battery.c"
         "bmp_viewer.c"
         "boot_logo.c"

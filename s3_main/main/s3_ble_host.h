@@ -9,6 +9,7 @@ typedef enum {
     CERBERUS_S3_BLE_OWNER_SCANNER,
     CERBERUS_S3_BLE_OWNER_ADVERTISER,
     CERBERUS_S3_BLE_OWNER_CENTRAL,
+    CERBERUS_S3_BLE_OWNER_WARDRIVE,
 } cerberus_s3_ble_owner_t;
 
 typedef struct {
