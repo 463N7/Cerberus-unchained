@@ -38,11 +38,16 @@ resending. Retry only unfinished destinations, respect Retry-After and service
 limits, and show server-confirmed counts independently of locally recorded rows.
 Upload All never silently changes the requested observation-retention policy.
 
+Current log rotation is 64 MiB, larger than WDGWars's documented 40 MB CSV
+limit. The uploader must stream smaller, complete-row chunks with valid headers
+and individual receipts, preserving the original file and every observation.
+Do not treat the current rotation size as a safe request size for every provider.
+
 ## Contract verification
 
 | Destination | Confirmed public interface | Remaining verification |
 | --- | --- | --- |
-| WiGLE | WiGLE 1.6 CSV; official client exports UTC and Wi-Fi/BLE types. Existing standalone code uses HTTPS file upload and API Basic authentication. | Current upload/status schema, documented missing-accuracy handling, rate limits and actual import test. |
+| WiGLE | Official client uses `POST https://api.wigle.net/api/v2/file/upload`, multipart file upload and API-name/token Basic authentication. Its response has `success`, `warning` and `results.transids` with transaction IDs; `/api/v2/file/transactions` provides processing states and counts. | Documented missing-accuracy handling, current limits and authenticated import test; HTTP success is not finished processing. |
 | WDGWars | `POST https://wdgwars.pl/api/upload-csv`, `X-API-Key`, multipart `file`; the official press/API page documents WiGLE 1.6, 40 MB CSV limit, sequential requests and rate limiting. | Parse real success/failure and asynchronous status responses; authenticated import test. |
 | Wardrift | User requests token-backed upload. | Public homepage returned a browser challenge during research. Verify the official endpoint, token header, file format, response/status schema and limits before implementing the adapter. Do not guess an endpoint or copy another provider's authentication. |
 
@@ -57,6 +62,8 @@ References:
 
 - [WiGLE CSV 1.6](https://api.wigle.net/csvFormat-1_6.html)
 - [WiGLE's official client](https://github.com/wiglenet/wigle-wifi-wardriving)
+- [Official upload response model](https://github.com/wiglenet/wigle-wifi-wardriving/blob/main/wiglewifiwardriving/src/main/java/net/wigle/wigleandroid/model/api/UploadReseponse.java)
+- [Official endpoints](https://github.com/wiglenet/wigle-wifi-wardriving/blob/main/wiglewifiwardriving/src/main/java/net/wigle/wigleandroid/util/UrlConfig.java)
 - [WDGWars developer API and limits](https://www.wdgwars.pl/press)
 - [Wardrift](https://wardrift.net/)
 - Preserved local reference: `integration/baselines/wardriving/s3_main/main/wigle_uploader.c`

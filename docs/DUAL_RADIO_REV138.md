@@ -62,7 +62,25 @@ All 160 host suites pass, including ten new file-level preflight tests and
 cross-checking actual C formatter output with an independent CSV reader. Routing
 fixtures verify 1,000 repeated located observations, a BLE observation and stale
 queue routing while asserting that streaming performs zero legacy lookups.
-Native builds, matched packaging and installation of rev138 are pending.
+All five native targets pass. The host and native receipts bind to the same
+1,250 unchanged inputs at source commit
+`99383a6c3e3e77b90552e0d0b40fcb86d62273a8`. Native READY, console-stack and C5
+Locate/parser gates pass. The compiled S3 image contains its actual rev138
+metadata; both CSV header lines together occupy 379 bytes, below the existing
+512-byte storage header limit.
+
+The matched development package is
+`dist/cerberus-unchained-0.1.0-dev.rev138-20261104T222302Z`.
+Its 22 listed package files pass checksum verification. Manifest SHA-256:
+`bc62df06636076615768aed9d1439bdec40061755efce85e66c30bd58ec7d6b8`.
+S3 application size is 2,122,608 bytes (+64 versus rev137), C5 1,728,736 bytes,
+and the recovery bridge 255,296 bytes. Fixed data/BSS and the measured receive
+queue/workspace allocations are unchanged on both chips. Retained proof is
+`artifacts/rev138-validation/local-milestone.json`.
+
+Rev138 is built and packaged, **not installed**. The connected device's last
+verified application remains rev137. No new on-device behavior is claimed for
+the candidate, and no public upload or PR update has been performed.
 
 Further acceptance needs sustained GPS fix/UTC, repeated combined-mode runs,
 separate-mode tests, endurance and a real service import result. Channel dwell
