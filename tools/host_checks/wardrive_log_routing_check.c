@@ -69,6 +69,23 @@ static esp_err_t cerberus_storage_wardrive_wigle_finish(bool keep, char *n, size
 static esp_err_t cerberus_storage_wardrive_session_finish(void)
 { assert(!storage_open[0] && !storage_open[1]); return ESP_OK; }
 
+static unsigned history_lookups;
+static cerberus_wardrive_decision_t counted_decide(const cerberus_wardrive_dedupe_t *s,
+    const cerberus_wardrive_observation_t *o,uint32_t ms)
+{ ++history_lookups;return cerberus_wardrive_decide(s,o,ms); }
+static cerberus_wardrive_decision_t counted_evidence(const cerberus_wardrive_dedupe_t *s,
+    const cerberus_wardrive_observation_t *o,uint32_t ms)
+{ ++history_lookups;return cerberus_wardrive_decide_evidence(s,o,ms); }
+static cerberus_wardrive_decision_t counted_probe(const cerberus_wardrive_probe_dedupe_t *s,
+    const cerberus_wardrive_observation_t *o,uint32_t ms)
+{ ++history_lookups;return cerberus_wardrive_probe_decide(s,o,ms); }
+static cerberus_wardrive_decision_t counted_relation(const cerberus_wardrive_relation_dedupe_t *s,
+    const cerberus_wardrive_observation_t *o,uint32_t ms)
+{ ++history_lookups;return cerberus_wardrive_relation_decide(s,o,ms); }
+#define cerberus_wardrive_decide counted_decide
+#define cerberus_wardrive_decide_evidence counted_evidence
+#define cerberus_wardrive_probe_decide counted_probe
+#define cerberus_wardrive_relation_decide counted_relation
 #include "wardrive_log_routing_impl.h"
 
 int main(void)
@@ -206,6 +223,8 @@ int main(void)
     /* Streaming mode retains equal sightings from both radio assignments.
      * A delayed queue entry must not borrow the current GPS position. */
     stream_recording=true;stream_observed_ms=clock_ms;
+    assert(history_lookups > 0U);
+    const unsigned legacy_lookups = history_lookups;
     ap=(cerberus_wardrive_observation_t){.type=CERBERUS_WARDRIVE_WIFI,
         .radio=CERBERUS_WARDRIVE_RADIO_S3,.address={2,3,4,5,6,7},.channel=6,.rssi_dbm=-45,
         .label={'A',',','B'},.label_length=3};
@@ -218,6 +237,7 @@ int main(void)
     assert(append_observation(&ap)==ESP_OK&&appends[1]==recorded+1001);
     stream_observed_ms=clock_ms-1001;unsigned unlocated=appends[0];
     assert(append_observation(&ap)==ESP_OK&&appends[0]==unlocated+1&&appends[1]==recorded+1001);
+    assert(history_lookups == legacy_lookups);
     puts("wardrive routing: GPS recovery, separate probe/relation histories, unlocated-only evidence, SD retry and rotation passed");
     return 0;
 }

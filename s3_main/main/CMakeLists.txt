@@ -147,3 +147,6 @@ idf_component_register(
         nvs_flash
         sdmmc
 )
+
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    CERBERUS_APP_VERSION="${PROJECT_VER}")

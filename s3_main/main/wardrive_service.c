@@ -469,18 +469,23 @@ static esp_err_t append_observation_impl(const cerberus_wardrive_observation_t *
             return ESP_ERR_INVALID_SIZE;
         }
     }
-    /* Separate histories let the first fresh fix record an identity that was
-     * previously written without location. A failed append never commits. */
+    /* Streaming preserves every observation. Skip the legacy history walk
+     * entirely, instead of calculating a decision that would be ignored. */
     cerberus_wardrive_dedupe_t *history = located ? &wigle_dedupe : &dedupe;
-    cerberus_wardrive_decision_t decision = relation ?
-        cerberus_wardrive_relation_decide(&relation_dedupe, observation, (uint32_t)uptime) : probe ?
-        cerberus_wardrive_probe_decide(&probe_dedupe, observation, (uint32_t)uptime) : located ?
-        cerberus_wardrive_decide(history, observation, (uint32_t)uptime) :
-        cerberus_wardrive_decide_evidence(history, observation, (uint32_t)uptime);
-    if (!stream_recording && !decision.should_log) {
-        *outcome = CERBERUS_WARDRIVE_RECENT_DUPLICATE;
-        publish_sighting(observation, false);
-        return ESP_OK;
+    cerberus_wardrive_decision_t decision = {0};
+    if (!stream_recording) {
+        /* Legacy result snapshots retain separate located/unlocated histories;
+         * only a successful append commits their decision. */
+        decision = relation ?
+            cerberus_wardrive_relation_decide(&relation_dedupe, observation, (uint32_t)uptime) : probe ?
+            cerberus_wardrive_probe_decide(&probe_dedupe, observation, (uint32_t)uptime) : located ?
+            cerberus_wardrive_decide(history, observation, (uint32_t)uptime) :
+            cerberus_wardrive_decide_evidence(history, observation, (uint32_t)uptime);
+        if (!decision.should_log) {
+            *outcome = CERBERUS_WARDRIVE_RECENT_DUPLICATE;
+            publish_sighting(observation, false);
+            return ESP_OK;
+        }
     }
     esp_err_t error = ESP_OK;
     if (!(located ? wigle_file_open : wardrive_file_open))

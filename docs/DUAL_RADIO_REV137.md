@@ -146,8 +146,30 @@ timeouts. Settled S3 internal free heap is 135,964 bytes, largest internal block
 94,208, and free PSRAM 1,427,552. These are idle samples before receiver startup.
 The installation receipt is `artifacts/device-rev137/installation-receipt.json`.
 
-Live LC29H NMEA/fix reception, loaded operation in all three capture modes,
-repeated Stop/restart and SD CSV readback remain the next acceptance checks.
+Live LC29H reception was confirmed at 115200 baud, with zero reported NMEA
+checksum errors. The user observed FIX + UTC before recording. A subsequent
+392.458-second combined-mode run saved 16,592 observations: 3,290 S3 Wi-Fi,
+11,338 S3 BLE and 1,964 C5 Wi-Fi. Both reported queue-drop counters and all
+reported radio/SD service errors remained zero. Stop drained both queues,
+released both RF owners and published two CSV files.
+
+Readback found 2,291 located rows (685 Wi-Fi and 1,606 BLE) and 14,301 unlocated
+observations. These sum exactly to the final accepted-radio counters. All
+located rows have 14 fields, valid bounded coordinates, valid UTC dates and
+consistent channel/frequency fields under the new local preflight. The GPS
+fix became invalid during the run; this is not acceptance of sustained GNSS
+reception. Every located row lacks a measured accuracy in metres.
+
+The readback also found that the old pre-header omitted `star/body/subBody`
+and still described the previous result-receipt path. Rev138 corrects these
+fields. The original files and a separate metadata-corrected local copy are
+retained in ignored artifacts; the original observation bytes were not changed.
+The corrected copy passes local structural checks with missing-accuracy warnings.
+This is not proof of WiGLE ingestion. Raw captures are intentionally absent
+from Git. See [rev138](DUAL_RADIO_REV138.md) for export checks and next work.
+
+Wi-Fi-only/BLE-only loaded operation, repeated Stop/restart on this installed
+version, sustained GPS reception and live service import remain unaccepted.
 ATGM336H hardware, the expansion backboard, long-drive endurance and live
 WiGLE/WDGWars imports have not been accepted by this installation receipt.
 No public binary release or additional PR update is part of this checkpoint.
