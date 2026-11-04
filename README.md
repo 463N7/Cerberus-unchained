@@ -31,8 +31,9 @@ imply upstream endorsement of Cerberus Unchained.
 
 **Current source version: `0.1.0-dev.rev137`, targeting onboard C5 protocol
 firmware revision 75. Rev137 adds streaming dual-radio Wardriving, repeated
-observation logging and configurable GNSS with a fix preview. Validation and
-hardware acceptance are tracked in [the rev137 checkpoint](docs/DUAL_RADIO_REV137.md).
+observation logging and configurable GNSS with a fix preview. The matched pair
+is installed and passes boot/idle checks; live GPS and capture-mode acceptance
+are pending. Validation is tracked in [the rev137 checkpoint](docs/DUAL_RADIO_REV137.md).
 A public binary release has not been selected.**
 The web installer remains unavailable until a matched release is deliberately selected.
 Sentinel 1.0.0 binaries are not Unchained firmware.

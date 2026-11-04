@@ -114,9 +114,43 @@ and failed SD writes. Strict frame/security decoding, 100,000 repeated FIFO
 observations, repeated CSV rows, stale queue location routing, AUTO baud and
 shared preview/session ownership are also covered.
 
-Final matched-build, package and hardware results are recorded separately
-after validation. A successful build or synthetic test does not establish RF
+All 160 registered host suites and five native targets pass on 1,248 unchanged
+inputs at source commit `cf43ac01f736e81f1b741798064c6fc903851c76`.
+The 21 CI shard/aggregation helper tests and 20 build/package failure-handling
+tests also pass. Native READY, console-stack and C5 Locate/parser placement
+guards pass. A successful build or synthetic test does not establish RF
 coverage, GPS reception, upload acceptance or comparative performance.
+
+The matched candidate is
+`dist/cerberus-unchained-0.1.0-dev.rev137-20261104T210426Z`.
+The S3 application is 2,122,544 bytes, C5 is 1,728,736 bytes and the temporary
+bridge is 255,296 bytes. Manifest SHA-256:
+`1dfbe5e3363a2db4b2414f64d8691b79f23712b01e73a48edc7336d760741d33`.
+Retained evidence is `artifacts/rev137-validation/local-milestone.json`.
+
+Native fixed data/BSS totals are 170,492 bytes on S3 and 83,584 on C5, increases
+of 368 and 120 bytes respectively over rev135. The session queues allocate
+27,648 bytes of S3 PSRAM and 6,912 bytes of C5 internal RAM. The shared writer
+workspace is 22,464 bytes of PSRAM. Task stacks, UART buffering, SDK allocations
+and allocator overhead are separate; these sizes are not peak-runtime bounds.
+
+Rev137 was installed on the connected Cerberus on 2026-11-04. Fresh verified
+rev135 recovery prefixes cover 2,191,360 S3 bytes and the full 2,097,152 C5 bytes.
+All nine bridge/C5/S3 image writes verified their hashes against the exact chip
+identities. The application reports rev137 and C5 capability 75, mounted SD,
+buffered display and no previous-reset fault. Two idle snapshots 67.6 seconds
+apart show advancing uptimes/exchanges, unchanged C5 boot count and no growth
+in the listed SPI error counters. The startup's four initial-ready timeouts and
+legacy fallbacks are retained in evidence; this is not a claim of zero lifetime
+timeouts. Settled S3 internal free heap is 135,964 bytes, largest internal block
+94,208, and free PSRAM 1,427,552. These are idle samples before receiver startup.
+The installation receipt is `artifacts/device-rev137/installation-receipt.json`.
+
+Live LC29H NMEA/fix reception, loaded operation in all three capture modes,
+repeated Stop/restart and SD CSV readback remain the next acceptance checks.
+ATGM336H hardware, the expansion backboard, long-drive endurance and live
+WiGLE/WDGWars imports have not been accepted by this installation receipt.
+No public binary release or additional PR update is part of this checkpoint.
 
 References reviewed for this implementation:
 
