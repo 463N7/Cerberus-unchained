@@ -51,12 +51,33 @@ static int xTaskCreate(void (*fn)(void *),const char *name,unsigned stack,void *
 {CHECK(!depth&&!strcmp(name,"wd_radio")&&stack==4096&&!arg&&priority==4&&!handle);if(fail_task)return 0;worker_fn=fn;return pdPASS;}
 static void vTaskDelete(void *unused){CHECK(!depth&&!unused);++radio_stops;}
 static void vTaskDelay(unsigned ticks);
+#if CONFIG_IDF_TARGET_ESP32C5
+typedef int wifi_band_mode_t;
+typedef int wifi_second_chan_t;
+enum {WIFI_BAND_MODE_AUTO=0,WIFI_BAND_MODE_2G_ONLY=1,WIFI_BAND_2G=2,WIFI_BAND_5G=5};
+static wifi_band_mode_t current_mode=WIFI_BAND_MODE_2G_ONLY;
+static unsigned current_band=WIFI_BAND_2G,current_filter=9;
+static esp_err_t esp_wifi_get_band_mode(wifi_band_mode_t *mode){CHECK(!depth);*mode=current_mode;return ESP_OK;}
+static esp_err_t esp_wifi_set_band_mode(wifi_band_mode_t mode){CHECK(!depth&&!ble_rx);current_mode=mode;return ESP_OK;}
+static esp_err_t esp_wifi_get_channel(uint8_t *ch,wifi_second_chan_t *second){CHECK(!depth);*ch=6;*second=WIFI_SECOND_CHAN_NONE;return ESP_OK;}
+static esp_err_t esp_wifi_set_band(unsigned band){CHECK(!depth&&!ble_rx&&current_mode==WIFI_BAND_MODE_AUTO);current_band=band;return ESP_OK;}
+static esp_err_t esp_wifi_get_promiscuous_filter(wifi_promiscuous_filter_t *filter){CHECK(!depth);filter->filter_mask=current_filter;return ESP_OK;}
+#endif
 static esp_err_t esp_wifi_set_channel(unsigned value,int secondary)
-{CHECK(!depth&&secondary==WIFI_SECOND_CHAN_NONE&&!ble_rx);channel=value;return ESP_OK;}
+{CHECK(!depth&&secondary==WIFI_SECOND_CHAN_NONE&&!ble_rx);
+#if CONFIG_IDF_TARGET_ESP32C5
+ CHECK(current_band==(value<=14?WIFI_BAND_2G:WIFI_BAND_5G));
+#endif
+ channel=value;return ESP_OK;}
 static esp_err_t esp_wifi_set_promiscuous(bool enabled)
 {CHECK(!depth);if(!enabled&&cleanup_failures){--cleanup_failures;return ESP_FAIL;}CHECK(!enabled||!ble_rx);driver_rx=enabled;return ESP_OK;}
 static esp_err_t esp_wifi_set_promiscuous_filter(const wifi_promiscuous_filter_t *f)
-{CHECK(!depth&&f->filter_mask==WIFI_PROMIS_FILTER_MASK_MGMT);return prepare_fail?ESP_FAIL:ESP_OK;}
+{CHECK(!depth&&(f->filter_mask==WIFI_PROMIS_FILTER_MASK_MGMT||f->filter_mask==9));
+ if(prepare_fail){prepare_fail=false;return ESP_FAIL;}
+#if CONFIG_IDF_TARGET_ESP32C5
+ current_filter=f->filter_mask;
+#endif
+ return ESP_OK;}
 static int ble_hs_id_infer_auto(int privacy,uint8_t *type){CHECK(!depth&&!privacy);*type=0;return 0;}
 #if CONFIG_IDF_TARGET_ESP32C5 && FIXTURE_EXT_ADV
 static int ble_gap_ext_disc(unsigned type,int duration,int period,int duplicates,int filter,int limited,
@@ -166,6 +187,8 @@ static void scenario(uint8_t mode,bool overflow,bool lost_host,bool fail_prepare
     CHECK(!allocations);CHECK(cerberus_wardrive_radio_exchange(CERBERUS_WD_START,&query,&status)==ESP_ERR_INVALID_STATE);
 #if CONFIG_IDF_TARGET_ESP32S3
     CHECK(!wifi_owned&&!ble_owned&&!wifi_initialized&&!wifi_started);
+#else
+    CHECK(!wd_wifi_saved&&current_mode==WIFI_BAND_MODE_2G_ONLY&&current_band==WIFI_BAND_2G&&current_filter==9);
 #endif
 }
 int main(void)

@@ -24,7 +24,9 @@ by a nominal 5 ms delay rounding to zero at the configured 100 Hz tick rate.
 Wi-Fi reception captures beacons and observed probe responses without sending
 probes or associating. S3 visits channels 1–11; C5 visits the configured 5 GHz
 channel list with 120 ms dwell. Unsupported channels are skipped and counted;
-the driver remains responsible for regulatory support. BLE duplicate filtering
+the driver remains responsible for regulatory support. C5 explicitly selects
+the 5 GHz band at entry and restores its previous band mode, channel and
+receive filter before releasing ownership. BLE duplicate filtering
 is disabled. Incomplete extended advertising fragments and malformed frames
 are rejected rather than turned into invented observations.
 
@@ -48,6 +50,8 @@ the files, then releases ownership. Failed cleanup retains its owner for retry.
 A ten-second host-contact lease stops a receiver if its host disappears.
 The onboard wire extension requires C5 firmware capability 75; install a
 matched S3/C5 pair.
+The temporary USB flashing bridge retains Bluetooth-disabled stubs and does
+not link the receive engine's NimBLE implementation.
 
 ## GNSS settings and status
 

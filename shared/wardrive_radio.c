@@ -7,6 +7,8 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
+#if CONFIG_BT_NIMBLE_ENABLED
 #include "host/ble_hs.h"
 #include "host/util/util.h"
 #include <stdatomic.h>
@@ -34,6 +36,12 @@ static bool wd_promiscuous,wd_ble_active;
 static bool wd_wifi_initialized,wd_wifi_started,wd_wifi_callback;
 static bool wd_wifi_claimed;
 static cerberus_s3_ble_host_lease_t wd_ble_lease;
+#else
+static bool wd_wifi_saved;
+static wifi_band_mode_t wd_previous_band;
+static wifi_second_chan_t wd_previous_second;
+static uint8_t wd_previous_channel;
+static wifi_promiscuous_filter_t wd_previous_filter;
 #endif
 static uint32_t wd_now(void){return (uint32_t)(esp_timer_get_time()/1000LL);}
 static void wd_error(esp_err_t e)
@@ -147,6 +155,15 @@ static esp_err_t wd_prepare(uint8_t mode)
         e=esp_wifi_start();if(e!=ESP_OK)return e;wd_wifi_started=true;
         e=esp_wifi_set_promiscuous_rx_cb(wd_wifi_rx);if(e!=ESP_OK)return e;wd_wifi_callback=true;
     }
+#else
+    if(mode!=CERBERUS_WD_BLE){
+        e=esp_wifi_get_band_mode(&wd_previous_band);if(e!=ESP_OK)return e;
+        e=esp_wifi_get_channel(&wd_previous_channel,&wd_previous_second);if(e!=ESP_OK)return e;
+        e=esp_wifi_get_promiscuous_filter(&wd_previous_filter);if(e!=ESP_OK)return e;
+        wd_wifi_saved=true;
+        e=esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO);if(e!=ESP_OK)return e;
+        e=esp_wifi_set_band(WIFI_BAND_5G);if(e!=ESP_OK)return e;
+    }
 #endif
     if(mode!=CERBERUS_WD_BLE){
         wifi_promiscuous_filter_t filter={.filter_mask=WIFI_PROMIS_FILTER_MASK_MGMT};
@@ -169,6 +186,17 @@ static esp_err_t wd_cleanup(void)
         memset(&wd_ble_lease,0,sizeof(wd_ble_lease));
     }
     if(wd_wifi_claimed){e=cerberus_s3_wifi_release(CERBERUS_S3_WIFI_WARDRIVE);if(e!=ESP_OK)return e;wd_wifi_claimed=false;}
+#else
+    if(wd_wifi_saved){
+        e=esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO);if(e!=ESP_OK)return e;
+        if(wd_previous_channel){
+            e=esp_wifi_set_band(wd_previous_channel<=14U?WIFI_BAND_2G:WIFI_BAND_5G);if(e!=ESP_OK)return e;
+            e=esp_wifi_set_channel(wd_previous_channel,wd_previous_second);if(e!=ESP_OK)return e;
+        }
+        e=esp_wifi_set_promiscuous_filter(&wd_previous_filter);if(e!=ESP_OK)return e;
+        e=esp_wifi_set_band_mode(wd_previous_band);if(e!=ESP_OK)return e;
+        wd_wifi_saved=false;
+    }
 #endif
     return ESP_OK;
 }
@@ -293,3 +321,10 @@ esp_err_t cerberus_wardrive_radio_exchange(uint8_t command,const cerberus_wd_req
     portEXIT_CRITICAL(&wd_lock);heap_caps_free(dispose);
     atomic_flag_clear_explicit(&wd_command,memory_order_release);return e;
 }
+#else
+/* The temporary USB bridge has Bluetooth disabled and never runs a survey. */
+bool cerberus_wardrive_radio_held(void){return false;}
+void cerberus_wardrive_radio_wifi_rx(void *buffer,int type){(void)buffer;(void)type;}
+esp_err_t cerberus_wardrive_radio_exchange(uint8_t command,const cerberus_wd_request_t *query,void *reply)
+{(void)command;(void)query;if(reply)memset(reply,0,54U);return ESP_ERR_NOT_SUPPORTED;}
+#endif
