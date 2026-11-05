@@ -87,6 +87,12 @@ errors. Private installation proof is
 `artifacts/device-rev139/installation-receipt.json`, SHA-256
 `16321a0fcd45bd06616d3e48d7967d03e9bc63216a3d7b889d11463cdf8685eb`.
 
+The owner then checked the installed **LOGS / UPLOAD** page against the saved
+capture: 1,436 rows, 263 on 2.4 GHz, 121 on 5 GHz and 1,052 BLE. They confirmed
+the counts, Back navigation and opening/leaving **HOME WI-FI / API SETUP** work.
+This adds physical SD-read/parser/navigation acceptance. It does not validate
+credential entry/persistence, destructive actions, home association or uploads.
+
 This does not finish Marauder parity. Live service acceptance, WiGLE processing
 reconciliation, physical upload/Cancel transitions, long-drive RF completeness,
 sustained GPS lock, dense BLE performance and six-C5 hardware remain separate
