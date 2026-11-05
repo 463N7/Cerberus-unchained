@@ -76,7 +76,7 @@ cerberus_upload_reply_t cerberus_upload_reply(cerberus_upload_service_t service,
 }
 const char *cerberus_upload_result_name(cerberus_upload_result_t result)
 {
-    static const char *const names[]={"NOT SENT","SENDING","QUEUED","ACCEPTED","REJECTED","CHECK ACCOUNT"};
+    static const char *const names[]={"NOT SENT","SENDING","UPLOADED","UPLOADED","REJECTED","CHECK ACCOUNT"};
     return (unsigned)result<sizeof(names)/sizeof(*names)?names[result]:"CHECK ACCOUNT";
 }
 bool cerberus_upload_reply_merge(cerberus_upload_reply_t *aggregate,const cerberus_upload_reply_t *part)

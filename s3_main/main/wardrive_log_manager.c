@@ -63,7 +63,10 @@ static esp_err_t request(uint64_t session,uint32_t revision,cerberus_log_action_
         memset(state.accepted,0,sizeof(state.accepted));
         memset(state.queued,0,sizeof(state.queued));memset(state.skipped,0,sizeof(state.skipped));
         if(action==CERBERUS_LOG_IMPORT_PROFILE)snprintf(state.name,sizeof(state.name),"UPLOAD.JSON");
-        memset(&state.summary,0,sizeof(state.summary));if(!retry)memset(state.destination,0,sizeof(state.destination));e=ESP_OK;
+        memset(&state.summary,0,sizeof(state.summary));
+        if(!retry){memset(state.destination,0,sizeof(state.destination));memset(state.destination_complete,0,sizeof(state.destination_complete));}
+        else state.destination_complete[service]=false;
+        e=ESP_OK;
     }portEXIT_CRITICAL(&lock);return e;
 }
 esp_err_t cerberus_log_manager_request(uint64_t session,uint32_t revision,cerberus_log_action_t action,int index)
@@ -119,12 +122,16 @@ static esp_err_t receipt_write(uint64_t lease,const char *key,const cerberus_upl
     uint8_t bytes[128];if(!cerberus_upload_receipt_encode(reply,bytes))return ESP_ERR_INVALID_ARG;
     return cerberus_ward_log_receipt_write(lease,key,bytes,sizeof(bytes));
 }
-static void destination(unsigned s,const cerberus_upload_reply_t *reply)
-{portENTER_CRITICAL(&lock);state.destination[s]=*reply;portEXIT_CRITICAL(&lock);}
+static void destination(unsigned s,const cerberus_upload_reply_t *reply,bool complete)
+{portENTER_CRITICAL(&lock);state.destination[s]=*reply;
+    state.destination_complete[s]=complete&&(reply->result==CERBERUS_UPLOAD_QUEUED||reply->result==CERBERUS_UPLOAD_ACCEPTED);
+    portEXIT_CRITICAL(&lock);}
 static esp_err_t process_file(uint64_t lease,unsigned index,bool upload,int retry_service,bool *network)
 {
     const cerberus_ward_log_entry_t *entry=&work->entries[index];FILE *file=NULL;
-    portENTER_CRITICAL(&lock);memcpy(state.name,entry->name,sizeof(state.name));if(retry_service<0)memset(state.destination,0,sizeof(state.destination));portEXIT_CRITICAL(&lock);
+    portENTER_CRITICAL(&lock);memcpy(state.name,entry->name,sizeof(state.name));
+    if(retry_service<0){memset(state.destination,0,sizeof(state.destination));memset(state.destination_complete,0,sizeof(state.destination_complete));}
+    portEXIT_CRITICAL(&lock);
     progress(NULL,"VALIDATING SAVED CSV",0,0);
     esp_err_t e=cerberus_ward_log_storage_open(lease,entry->name,&file);
     if(e!=ESP_OK)return e;
@@ -150,7 +157,7 @@ static esp_err_t process_file(uint64_t lease,unsigned index,bool upload,int retr
             progress(NULL,"READING SAVED UPLOAD RECEIPT",0,0);
             e=receipt_read(lease,key,&reply);
             if(e!=ESP_OK||reply.result==CERBERUS_UPLOAD_UNKNOWN){
-                destination(s,&reply);
+                destination(s,&reply,false);
                 if(e!=ESP_OK||(upload&&retry_service!=(int)s)){
                     char stage[40];snprintf(stage,sizeof(stage),"%s / CHECK ACCOUNT FIRST",
                         cerberus_upload_service_name((cerberus_upload_service_t)s));
@@ -179,11 +186,11 @@ static esp_err_t process_file(uint64_t lease,unsigned index,bool upload,int retr
                 reply=cerberus_upload_net_send(&work->config,(cerberus_upload_service_t)s,file,&work->plan,p,name,cancel,progress,NULL,&transfer);
                 portENTER_CRITICAL(&lock);state.transfer=transfer;portEXIT_CRITICAL(&lock);
                 e=receipt_write(lease,key,&reply);
-                if(e!=ESP_OK){reply.result=CERBERUS_UPLOAD_UNKNOWN;destination(s,&reply);break;}
+                if(e!=ESP_OK){reply.result=CERBERUS_UPLOAD_UNKNOWN;destination(s,&reply,false);break;}
                 if(reply.result==CERBERUS_UPLOAD_UNKNOWN||reply.result==CERBERUS_UPLOAD_REJECTED){
                     progress(NULL,transfer.http_status==429?"RATE LIMITED / TRY LATER":reply.result==CERBERUS_UPLOAD_UNKNOWN?
                         "CHECK SERVICE ACCOUNT BEFORE RETRY":"UPLOAD REJECTED / CHECK SETUP",0,0);
-                    destination(s,&reply);e=ESP_ERR_INVALID_RESPONSE;break;
+                    destination(s,&reply,false);e=ESP_ERR_INVALID_RESPONSE;break;
                 }
                 /* Sequential requests, below the documented WDGWars limit. No
                  * automatic retry of 429, authentication or ambiguous errors. */
@@ -193,7 +200,7 @@ static esp_err_t process_file(uint64_t lease,unsigned index,bool upload,int retr
             if(upload){portENTER_CRITICAL(&lock);if(reply.result==CERBERUS_UPLOAD_ACCEPTED)++state.accepted[s];
                 else if(reply.result==CERBERUS_UPLOAD_QUEUED)++state.queued[s];else ++state.skipped[s];
                 portEXIT_CRITICAL(&lock);}
-            destination(s,&aggregate);
+            destination(s,&aggregate,e==ESP_OK&&p+1==work->plan.parts);
         }
     }
     cerberus_upload_config_clear(digest,sizeof(digest));

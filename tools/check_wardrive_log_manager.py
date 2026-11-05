@@ -29,10 +29,10 @@ unloc=['']*34;unloc[:5]=['1','2','S3','BLE','02:00:00:00:00:02']
 import csv,io,tempfile,json
 for mode in ('normal','current_name','unknown','wdgwars_unknown','cancel','sd_fail','network_fail','busy','import_ok','import_invalid','import_save_fail','import_readback_fail','import_remove_fail','import_cancel_after_save',
              'retry_ok','retry_unknown','retry_disabled','retry_network_fail','retry_cancel_before','retry_cancel_send',
-             'retry_corrupt','retry_acknowledged','retry_multipart','retry_queued'):
+             'retry_corrupt','retry_acknowledged','retry_multipart','retry_queued','multipart_cancel'):
     with tempfile.TemporaryDirectory(dir=out,prefix=mode+'-') as td:
         folder=Path(td)/'card/CERBERUS/WARD';folder.mkdir(parents=True)
-        (folder/('CERBWardrive001.CSV' if mode=='current_name' else 'WIGLE001.CSV')).write_text(meta+columns+row*(14000 if mode=='retry_multipart' else 10),newline='')
+        (folder/('CERBWardrive001.CSV' if mode=='current_name' else 'WIGLE001.CSV')).write_text(meta+columns+row*(14000 if mode in ('retry_multipart','multipart_cancel') else 10),newline='')
         stream=io.StringIO();stream.write(unloc_header);csv.writer(stream,lineterminator='\n').writerow(unloc)
         (folder/'UNLOC001.CSV').write_text(stream.getvalue(),newline='')
         (folder/'KEEP.TXT').write_text('fixture');(folder/'WIGLE002.TMP').write_text('unfinished fixture')
@@ -43,4 +43,4 @@ for mode in ('normal','current_name','unknown','wdgwars_unknown','cancel','sd_fa
         profile['wigle']={'enabled':True,'api_name':'json-name','api_token':'json-token'}
         (config/'UPLOAD.JSON').write_text('invalid {' if mode=='import_invalid' else json.dumps(profile))
         subprocess.run([str(exe),mode],cwd=td,check=True,env=env)
-print('Log manager: twenty-four lifecycle/failure/import/retry scenarios passed; no real network/card accessed')
+print('Log manager: twenty-five lifecycle/failure/import/retry scenarios passed; no real network/card accessed')

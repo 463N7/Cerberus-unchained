@@ -82,6 +82,13 @@ static unsigned wardrive_logs_retry_mask(const cerberus_log_manager_status_t *s,
 }
 static int wardrive_logs_single_retry(unsigned mask)
 {return mask==1?0:mask==2?1:mask==4?2:-1;}
+static const char *wardrive_logs_destination_name(const cerberus_log_manager_status_t *s,unsigned i)
+{
+    cerberus_upload_result_t result=s->destination[i].result;
+    if(!s->destination_complete[i]&&(result==CERBERUS_UPLOAD_QUEUED||result==CERBERUS_UPLOAD_ACCEPTED))
+        return s->busy?"IN PROGRESS":"INCOMPLETE";
+    return cerberus_upload_result_name(result);
+}
 static esp_err_t wardrive_logs_draw(void)
 {
     cerberus_log_manager_status_t s;cerberus_log_manager_status(&s);
@@ -93,6 +100,9 @@ static esp_err_t wardrive_logs_draw(void)
         return draw_small_button(8,432,304,36,"CANCEL FIELD");
     }
     char line[64];
+    bool processing_unverified=false;
+    for(unsigned i=0;i<CERBERUS_UPLOAD_SERVICE_COUNT;++i)
+        processing_unverified|=s.destination_complete[i]&&s.destination[i].result==CERBERUS_UPLOAD_QUEUED;
     bool receipt_hold=s.error==ESP_ERR_INVALID_STATE&&strstr(s.stage," / CHECK ACCOUNT FIRST");
     const char *message=wd_log_ui->message[0]?wd_log_ui->message:s.stage;
     if(receipt_hold&&!wd_log_ui->message[0])message="UPLOAD NEEDS RETRY CONFIRMATION";
@@ -114,8 +124,10 @@ static esp_err_t wardrive_logs_draw(void)
         ESP_RETURN_ON_ERROR(draw_centered(145,line,UI_TEXT,1),TAG,"log files progress");
         snprintf(line,sizeof(line),"%lu / %lu KiB",(unsigned long)(s.sent/1024),(unsigned long)(s.bytes/1024));
         ESP_RETURN_ON_ERROR(draw_centered(170,line,UI_TEXT,1),TAG,"log bytes");
-        for(unsigned i=0;i<3;++i){snprintf(line,sizeof(line),"%s: %s",cerberus_upload_service_name((cerberus_upload_service_t)i),cerberus_upload_result_name(s.destination[i].result));
+        for(unsigned i=0;i<3;++i){snprintf(line,sizeof(line),"%s: %s",cerberus_upload_service_name((cerberus_upload_service_t)i),wardrive_logs_destination_name(&s,i));
             ESP_RETURN_ON_ERROR(draw_centered(220+i*28,line,UI_TEXT,1),TAG,"upload result");}
+        if(processing_unverified)
+            ESP_RETURN_ON_ERROR(draw_centered(302,"UPLOAD VERIFIED; IMPORT MAY BE PENDING",UI_MUTED,1),TAG,"upload processing");
         ESP_RETURN_ON_ERROR(draw_centered(332,"CANCEL MAY REQUIRE ACCOUNT RECONCILIATION",UI_MUTED,1),TAG,"upload cancel note");
         ESP_RETURN_ON_ERROR(draw_small_button(8,380,304,36,"CANCEL OPERATION"),TAG,"log cancel");
         return draw_small_button(8,432,304,36,"BACK / CANCEL AND CLOSE");
@@ -188,7 +200,7 @@ static esp_err_t wardrive_logs_draw(void)
         if(s.summary.kind==CERBERUS_WARD_LOG_UNLOCATED)snprintf(line,sizeof(line),"LEGACY LOG / NO GPS / CANNOT UPLOAD");
         else snprintf(line,sizeof(line),"NO ACCURACY %lu / NO ALTITUDE %lu",(unsigned long)s.summary.missing_accuracy,(unsigned long)s.summary.missing_altitude);
         ESP_RETURN_ON_ERROR(draw_centered(202,line,UI_MUTED,1),TAG,"log quality");
-        for(unsigned i=0;i<3;++i){snprintf(line,sizeof(line),"%s: %s",cerberus_upload_service_name((cerberus_upload_service_t)i),cerberus_upload_result_name(s.destination[i].result));
+        for(unsigned i=0;i<3;++i){snprintf(line,sizeof(line),"%s: %s",cerberus_upload_service_name((cerberus_upload_service_t)i),wardrive_logs_destination_name(&s,i));
             ESP_RETURN_ON_ERROR(draw_centered(234+i*23,line,UI_TEXT,1),TAG,"log receipt");}
         if(s.transfer.attempted){
             snprintf(line,sizeof(line),"HTTP %u / %s",s.transfer.http_status,
@@ -198,6 +210,8 @@ static esp_err_t wardrive_logs_draw(void)
         else if(s.destination[CERBERUS_UPLOAD_WDGWARS].counts_valid){
             snprintf(line,sizeof(line),"WDGW IMPORTED %lu / REJECTED ROWS %lu",(unsigned long)s.destination[1].imported,(unsigned long)s.destination[1].rejected_rows);
             ESP_RETURN_ON_ERROR(draw_centered(312,line,UI_TEXT,1),TAG,"server row counts");}
+        if(processing_unverified)
+            ESP_RETURN_ON_ERROR(draw_centered(326,"UPLOAD VERIFIED; IMPORT MAY BE PENDING",UI_MUTED,1),TAG,"log processing");
         bool eligible=s.summary.complete&&!s.summary.error&&!s.summary.legacy_metadata&&s.summary.kind==CERBERUS_WARD_LOG_WIGLE;
         const char *upload_label=eligible?"UPLOAD THIS LOG":"NO GPS DATA / LOCAL ONLY";
         if(eligible){int one=wardrive_logs_single_retry(wardrive_logs_retry_mask(&s,wd_log_ui->selected));

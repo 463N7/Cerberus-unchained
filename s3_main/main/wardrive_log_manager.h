@@ -18,6 +18,9 @@ typedef struct {
     char stage[40], name[CERBERUS_WARD_LOG_NAME_CAPACITY];
     cerberus_ward_log_summary_t summary;
     cerberus_upload_reply_t destination[3];
+    /* True only after every part has a confirmed receipt for this file/service.
+     * Presentation state only; persistent receipt format is unchanged. */
+    bool destination_complete[3];
 } cerberus_log_manager_status_t;
 esp_err_t cerberus_log_manager_open(void);
 void cerberus_log_manager_close(void);

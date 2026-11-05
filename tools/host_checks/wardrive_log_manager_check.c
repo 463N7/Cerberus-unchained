@@ -31,6 +31,7 @@ static const char *import_mode;
 static const char *retry_mode;
 static unsigned service_sends[3];
 static bool retry_multipart;
+static bool multipart_cancel;
 static bool current_names;
 static unsigned part_sends[3][2];
 static unsigned saves;
@@ -109,6 +110,8 @@ cerberus_upload_reply_t cerberus_upload_net_send(const cerberus_upload_config_t 
     if(current_names)assert(!strncmp(name,"CERBWardrive001-",sizeof("CERBWardrive001-")-1U));
     ++sends;++service_sends[service];assert(part<2);++part_sends[service][part];
     if(retry_multipart)assert(plan->parts==2);
+    cerberus_log_manager_status_t current;cerberus_log_manager_status(&current);
+    assert(!current.destination_complete[service]); /* Never complete before the final POST reply. */
     progress(context,"SENDING",10,20);*transfer=(cerberus_upload_transfer_t){.http_status=200,.attempted=true,.response_complete=true,.response_bytes=48};
     if(request_cancel)cerberus_log_manager_cancel();
     cerberus_upload_reply_t r={.result=unknown_reply||request_cancel||(wdgwars_unknown&&service==CERBERUS_UPLOAD_WDGWARS&&(!retry_multipart||part==1))?CERBERUS_UPLOAD_UNKNOWN:
@@ -146,21 +149,49 @@ static void change_uncertain_receipt(bool corrupt)
 void vTaskDelay(unsigned ms)
 {
     assert(!critical&&!storage_locked);cerberus_log_manager_status_t s;cerberus_log_manager_status(&s);
-    if(s.busy||ms!=50)return;
+    if(s.busy||ms!=50){
+        if(multipart_cancel&&phase==2&&ms==100&&sends==1)cerberus_log_manager_cancel();
+        return;
+    }
     if(sd_busy){assert(s.error!=ESP_OK&&!sd_ward_log_lease);cerberus_log_manager_close();return;}
+    if(multipart_cancel){
+        switch(phase++){
+        case 0:issue(CERBERUS_LOG_INSPECT,0);break;
+        case 1:assert(s.summary.rows==14000&&s.error==ESP_OK);issue(CERBERUS_LOG_UPLOAD,0);break;
+        case 2:assert(sends==1&&ends==1&&strstr(s.stage,"CANCELED"));
+            assert(s.destination[0].result==CERBERUS_UPLOAD_QUEUED&&!s.destination_complete[0]);
+            issue(CERBERUS_LOG_INSPECT,0);break;
+        case 3:assert(s.error==ESP_OK&&sends==1&&s.destination[0].result==CERBERUS_UPLOAD_NEW);
+            assert(!s.destination_complete[0]);issue(CERBERUS_LOG_UPLOAD,0);break;
+        case 4:assert(s.error==ESP_OK&&sends==6&&begins==2&&ends==2);
+            for(unsigned service=0;service<3;++service){
+                assert(s.destination_complete[service]);
+                assert(part_sends[service][0]==1&&part_sends[service][1]==1);
+            }
+            cerberus_log_manager_close();break;
+        default:assert(!"unexpected multipart cancellation phase");
+        }return;
+    }
     if(retry_multipart){
         switch(phase++){
         case 0:issue(CERBERUS_LOG_INSPECT,0);break;
         case 1:assert(s.summary.rows==14000&&s.error==ESP_OK);issue(CERBERUS_LOG_UPLOAD,0);break;
         case 2:assert(s.error!=ESP_OK&&sends==4&&begins==1&&ends==1&&s.destination[0].result==CERBERUS_UPLOAD_QUEUED);
+            assert(s.destination_complete[0]&&!s.destination_complete[1]&&!s.destination_complete[2]);
             assert(service_sends[0]==2&&service_sends[1]==2&&!service_sends[2]);
             assert(cerberus_log_manager_retry_service(s.session,s.catalog_revision,0,CERBERUS_UPLOAD_WDGWARS)==ESP_OK);
             wdgwars_unknown=false;break;
         case 3:assert(s.error==ESP_OK&&sends==5&&begins==2&&ends==2);
             assert(part_sends[0][0]==1&&part_sends[0][1]==1&&part_sends[1][0]==1&&part_sends[1][1]==2&&!service_sends[2]);
             assert(s.destination[0].result==CERBERUS_UPLOAD_QUEUED&&s.destination[1].result==CERBERUS_UPLOAD_ACCEPTED);
+            assert(s.destination_complete[0]&&s.destination_complete[1]&&!s.destination_complete[2]);
             issue(CERBERUS_LOG_UPLOAD,0);break;
-        case 4:assert(s.error==ESP_OK&&sends==7&&begins==3&&ends==3&&service_sends[2]==2);cerberus_log_manager_close();break;
+        case 4:assert(s.error==ESP_OK&&sends==7&&begins==3&&ends==3&&service_sends[2]==2);
+            assert(s.destination_complete[0]&&s.destination_complete[1]&&s.destination_complete[2]);
+            issue(CERBERUS_LOG_INSPECT,0);break;
+        case 5:assert(s.error==ESP_OK&&sends==7&&begins==3&&ends==3);
+            assert(s.destination_complete[0]&&s.destination_complete[1]&&s.destination_complete[2]);
+            cerberus_log_manager_close();break;
         default:assert(!"unexpected multipart phase");
         }return;
     }
@@ -233,6 +264,7 @@ void vTaskDelay(unsigned ms)
     case 7:{
         assert(s.action==CERBERUS_LOG_RETRY_SERVICE&&service_sends[0]==1&&service_sends[2]==0);
         assert(s.destination[0].result==CERBERUS_UPLOAD_QUEUED);
+        assert(s.destination_complete[0]);
         bool disabled=!strcmp(retry_mode,"retry_disabled"),before=!strcmp(retry_mode,"retry_cancel_before");
         if(!strcmp(retry_mode,"retry_corrupt")||!strcmp(retry_mode,"retry_acknowledged")){
             bool corrupt=!strcmp(retry_mode,"retry_corrupt");
@@ -263,6 +295,7 @@ int main(int argc,char **argv)
     wdgwars_unknown=!strcmp(argv[1],"wdgwars_unknown");
     if(!strncmp(argv[1],"retry_",6)){retry_mode=argv[1];wdgwars_unknown=true;}
     retry_multipart=!strcmp(argv[1],"retry_multipart");
+    multipart_cancel=!strcmp(argv[1],"multipart_cancel");
     current_names=!strcmp(argv[1],"current_name");
     /* Diagnostic catalog uses actual leased storage, never the upload worker.
      * It lists the existing files, omits TMP/other paths, and releases its lease. */

@@ -13,6 +13,8 @@ typedef struct {
  * WiGLE upload acknowledgement is QUEUED, never an import result. */
 cerberus_upload_reply_t cerberus_upload_reply(cerberus_upload_service_t service,
     unsigned http_status, const char *body, size_t length, bool complete);
+/* Display confirmed service receipts as UPLOADED. Keep the stored QUEUED and
+ * ACCEPTED values distinct: file receipt does not establish import/credit. */
 const char *cerberus_upload_result_name(cerberus_upload_result_t result);
 /* Combine part outcomes without hiding an ambiguous or rejected earlier part.
  * Initialize aggregate to ACCEPTED with zero counters. False means overflow. */

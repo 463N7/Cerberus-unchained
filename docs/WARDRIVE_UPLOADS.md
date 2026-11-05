@@ -159,12 +159,20 @@ or altitude remain warnings; HDOP is never substituted for measured accuracy.
 | --- | --- |
 | NOT SENT | No matching receipt for these contents and credentials. |
 | SENDING | Durable local intent, not a service acknowledgement. |
-| QUEUED | WiGLE returned `success: true` and a transaction ID, or WDGWars v2 returned HTTP 202, `ok: true` and a positive job ID. Processing/credit remain unverified. |
-| ACCEPTED | WDGWars returned synchronous `ok`/import counts, or Wardrift returned `accepted: true`. WDGWars imported/rejected-row counts are separate. |
+| IN PROGRESS / INCOMPLETE | At least one part has a receipt, but the entire log has not been confirmed for this service. The first label is used while the worker is active; the second is used after it stops. |
+| UPLOADED | The complete service reply confirms receipt: WiGLE returned `success: true` and a transaction ID; WDGWars returned HTTP 202, `ok: true` and a positive job ID, or synchronous `ok`/import counts; Wardrift returned `accepted: true`. Upload receipt alone does not establish processing or account credit. WDGWars imported/rejected-row counts are shown separately when provided. |
 | REJECTED | A complete recognized reply explicitly rejected the request. Correct its cause before manually retrying. |
 | CHECK ACCOUNT | Ambiguous delivery, damaged receipt or unexpected response. No automatic resend. |
 
-Queued/accepted parts are skipped on later uploads with the same contents and
+Both the progress screen and saved log details use **UPLOADED** for confirmed
+service receipts. Asynchronous receipts also show **UPLOAD VERIFIED; IMPORT MAY
+BE PENDING**. Existing receipts display the new label without another upload.
+The journal retains its distinct `QUEUED` and `ACCEPTED` values; this is a display
+change, not a receipt migration or new server-status check. The UI waits until
+every part of the log has a confirmed receipt for that service. A partial upload,
+incomplete reply, rejection or uncertain delivery cannot become **UPLOADED**.
+
+Acknowledged parts are skipped on later uploads with the same contents and
 credentials. Observation rows are never deduplicated. Receipts bind SHA-256 of
 the **whole original file**, destination, credential fingerprint and versioned
 part plan. Rotating a key creates a new receipt identity: check the account
@@ -190,7 +198,8 @@ or enable retries across Upload All. The original CSV and journal history stay
 on SD. A disabled service must first be enabled in setup.
 
 WDGWars uploads now use `/api/v2/upload-csv`, matching the current Marauder
-development implementation. A valid 202 job receipt is retained as QUEUED;
+development implementation. A valid 202 job receipt is retained internally as
+`QUEUED` and displayed as **UPLOADED**;
 processing is asynchronous and automatic job-status polling is not implemented.
 See the [rev142 API references](DUAL_RADIO_REV142.md) and
 [rev143 recording/retry scope](DUAL_RADIO_REV143.md).
@@ -214,8 +223,8 @@ Wardrift's current limits still need live verification.
 
 | Service | Request | Acknowledgement |
 | --- | --- | --- |
-| WiGLE | `POST https://api.wigle.net/api/v2/file/upload`; Basic API-name/token; multipart `file` | HTTP 200, `success: true`, exactly one transaction ID; QUEUED |
-| WDGWars | `POST https://wdgwars.pl/api/v2/upload-csv`; `X-API-Key`; multipart `file`; `Accept: application/json` | HTTP 202, `ok: true`, positive `job_id`: QUEUED; synchronous HTTP 200/import counts remain supported |
+| WiGLE | `POST https://api.wigle.net/api/v2/file/upload`; Basic API-name/token; multipart `file` | HTTP 200, `success: true`, exactly one transaction ID; UPLOADED, server processing unverified |
+| WDGWars | `POST https://wdgwars.pl/api/v2/upload-csv`; `X-API-Key`; multipart `file`; `Accept: application/json` | HTTP 202, `ok: true`, positive `job_id`: UPLOADED, server processing unverified; synchronous HTTP 200/import counts remain supported |
 | Wardrift | `POST https://wardrift.net/v1/ingest/signals`; `X-API-Key`, `X-File-Name`; raw `text/csv` | HTTP 200, `accepted: true`; provisional until live verification |
 
 HTTPS verifies CA chain/hostname and disables redirects. Complete responses are
