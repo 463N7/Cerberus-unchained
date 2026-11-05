@@ -29,17 +29,15 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source version: `0.1.0-dev.rev138`, targeting onboard C5 protocol
-firmware revision 75. Rev138 removes unused duplicate-history work from streaming
-Wardriving and corrects the WiGLE export pre-header. The matched rev138 pair is
-installed with verified image writes, mounted SD and two successful idle boot
-checks. The preceding rev137 pair completed a 16,592-observation combined-mode
-recording and clean Stop, with both saved CSV files read back. A fresh rev138
-combined run stopped cleanly with 1,438 observations and zero reported queue
-drops; physical SD readback accounts for every observation. Its native WiGLE
-CSV passes local preflight with missing-accuracy/altitude warnings. Sustained
-GPS fix, endurance and live service import acceptance remain open. Validation is tracked in
-[the rev138 checkpoint](docs/DUAL_RADIO_REV138.md).
+**Current source version: `0.1.0-dev.rev139`, targeting onboard C5 protocol
+firmware revision 75. Rev139 adds saved-log management, home Wi-Fi/API setup and
+manual WiGLE, WDGWars and provisional Wardrift uploads. See the
+[setup guide](docs/WARDRIVE_UPLOADS.md) and [rev139 scope](docs/DUAL_RADIO_REV139.md).
+The installed capture baseline is rev138: its 1,438-observation combined run
+stopped cleanly, and physical SD readback accounts for every observation with
+zero reported queue drops. Its native CSV passes local preflight with missing
+accuracy/altitude warnings. Live service acceptance, physical uploader acceptance
+and endurance remain open; [rev138 proof](docs/DUAL_RADIO_REV138.md) is separate.
 A public binary release has not been selected.**
 The web installer remains unavailable until a matched release is deliberately selected.
 Sentinel 1.0.0 binaries are not Unchained firmware.

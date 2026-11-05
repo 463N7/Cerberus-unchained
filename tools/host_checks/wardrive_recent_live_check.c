@@ -32,6 +32,7 @@ static esp_err_t draw_detail_page(void)
 /* GPS rendering/observer lifetime has its own actual-production suite. Only
  * that viewer's visibility is a boundary for this shared repaint guard. */
 static bool gps_view_opened;
+static bool wardrive_logs_is_open(void){return false;}
 static bool wardrive_gps_view_is_open(void)
 { return gps_view_opened && current_page == UI_PAGE_WARDRIVE; }
 #include "recent_repaint_impl.h"

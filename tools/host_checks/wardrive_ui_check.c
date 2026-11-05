@@ -46,6 +46,10 @@ enum { CERBERUS_STORAGE_OWNER_USB=2 };
 static esp_err_t draw_detail_page(void);
 static void wardrive_recent_open(void){++recent_opens;}
 static bool wardrive_recent_is_open(void){return recent_is_open;}
+static unsigned logs_opened;
+static void wardrive_logs_open(void){++logs_opened;}
+static bool wardrive_logs_is_open(void){return false;}
+static void wardrive_logs_tick(bool asleep){(void)asleep;}
 static void wardrive_gps_view_open(void){}
 static bool wardrive_gps_view_is_open(void){return false;}
 static void wardrive_gps_view_release_if_hidden(uint32_t now_ms,bool asleep){(void)now_ms;(void)asleep;}
@@ -160,7 +164,7 @@ static void check_routes(void)
     wardrive_handle_tap(80,130);CHECK(wardrive_mode==CERBERUS_WD_COMBINED);
     wardrive_handle_tap(24,346);CHECK(wardrive_include_expansions&&!wardrive_gps_enabled);
     wardrive_handle_tap(164,346);CHECK(wardrive_gps_enabled);
-    unsigned old=status_reads;wardrive_handle_tap(23,390);wardrive_handle_tap(296,390);CHECK(status_reads==old);
+    unsigned old=status_reads;wardrive_handle_tap(7,390);wardrive_handle_tap(312,390);CHECK(status_reads==old);
     unsigned draws=page_draws;wardrive_handle_tap(200,178);CHECK(page_draws==draws&&!stop_requests);
     wardrive_start_error=ESP_FAIL;strcpy(wardrive_blocked_reason,"old failure");
     wardrive_handle_tap(80,380);CHECK(wardrive_start_pending&&!stop_requests&&!wardrive_start_error&&!wardrive_blocked_reason[0]);
@@ -173,11 +177,12 @@ static void check_routes(void)
         wardrive_handle_tap(164,346);CHECK(wardrive_gps_enabled);
     }
     old=status_reads;draws=page_draws;
-    wardrive_handle_tap(156,390);wardrive_handle_tap(163,390);
+    wardrive_handle_tap(104,390);wardrive_handle_tap(211,390);
     CHECK(status_reads==old&&page_draws==draws&&!recent_opens);
     unsigned stops=stop_requests;
-    wardrive_handle_tap(164,380);wardrive_handle_tap(295,411);
+    wardrive_handle_tap(112,380);wardrive_handle_tap(207,411);
     CHECK(recent_opens==2&&status_reads==old&&stop_requests==stops);
+    wardrive_handle_tap(216,380);wardrive_handle_tap(311,411);CHECK(logs_opened==2);
     /* A failed paint is returned, not reported as successful. */
     reset();fail_at=1;CHECK(draw_wardrive()==ESP_FAIL);
 }

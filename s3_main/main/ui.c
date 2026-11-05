@@ -408,6 +408,11 @@ static void ble_archive_save_c5(bool selected);
 static void ble_archive_open_file(const char *path, const char *name);
 static bool ble_archive_is_file(const char *name);
 static bool wardrive_recent_is_open(void);
+static bool wardrive_logs_is_open(void);
+static esp_err_t wardrive_logs_draw(void);
+static void wardrive_logs_open(void);
+static void wardrive_logs_tap(uint16_t x,uint16_t y);
+static void wardrive_logs_tick(bool asleep);
 static esp_err_t wardrive_recent_draw(void);
 static void wardrive_recent_open(void);
 static void wardrive_recent_close(void);
@@ -8206,9 +8211,10 @@ static esp_err_t draw_wardrive(void)
     ESP_RETURN_ON_ERROR(draw_small_button(164, 346, 132, 28,
         wardrive_gps_enabled ? "GPS: ON" : "GPS: OFF"),
         TAG, "wardrive GPS control");
-    ESP_RETURN_ON_ERROR(draw_button(24, 380, 132, 32,
+    ESP_RETURN_ON_ERROR(draw_button(8, 380, 96, 32,
         active || wardrive_start_pending ? "STOP" : "START"), TAG, "wardrive start stop");
-    return draw_button(164, 380, 132, 32, "RECENT NETS");
+    ESP_RETURN_ON_ERROR(draw_button(112,380,96,32,"RECENT NETS"),TAG,"wardrive recent");
+    return draw_button(216,380,96,32,"LOGS / UPLOAD");
 }
 
 static esp_err_t draw_detail_page(void)
@@ -8219,6 +8225,7 @@ static esp_err_t draw_detail_page(void)
     if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_PROBE_SNIFF) return probe_sniff_draw();
     if (wardrive_gps_view_is_open()) return wardrive_gps_view_draw();
     if (wardrive_recent_is_open()) return wardrive_recent_draw();
+    if (wardrive_logs_is_open()) return wardrive_logs_draw();
     if (current_page == UI_PAGE_BLE_ARCHIVE) return ble_archive_draw();
     if (current_page == UI_PAGE_WIFI_ARCHIVE) return wifi_archive_draw();
     if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_CSI) return csi_draw(true);
@@ -11522,6 +11529,7 @@ static void handle_scripts_tap(uint16_t x, uint16_t y)
 #include "airtag_json_live_ui.h"
 #include "wardrive_recent_live_ui.h"
 #include "wardrive_gps_live_ui.h"
+#include "wardrive_logs_ui.h"
 #include "sentinel_watch_ui.h"
 #include "remote_id_live_ui.h"
 #include "mac_monitor_live_ui.h"
@@ -11835,16 +11843,15 @@ static void ble_attack_tick(uint32_t now_ms, bool asleep)
 
 static void wardrive_handle_tap(uint16_t x, uint16_t y)
 {
+    if(y>=380U&&y<412U&&x>=216U&&x<312U){wardrive_logs_open();return;}
+    if(y>=380U&&y<412U&&x>=112U&&x<208U){wardrive_recent_open();return;}
+    if(y>=380U&&y<412U&&x>=104U)return;
+    if(y>=380U&&y<412U&&x>=8U&&x<24U)x=24U;
     if (x < 24U || x >= 296U) return;
     if (y >= 72U && y < 98U) {
         wardrive_gps_view_open();
         return;
     }
-    if (y >= 380U && y < 412U && x >= 164U) {
-        wardrive_recent_open();
-        return;
-    }
-    if (y >= 380U && y < 412U && x >= 156U) return;
     cerberus_wardrive_status_t status;
     cerberus_wardrive_get_status(&status);
     bool active = status.state == CERBERUS_WARDRIVE_STARTING ||
@@ -11882,6 +11889,7 @@ static void wardrive_handle_tap(uint16_t x, uint16_t y)
 
 static void wardrive_tick(uint32_t now_ms, bool asleep)
 {
+    wardrive_logs_tick(asleep);
     wardrive_gps_view_release_if_hidden(now_ms, asleep);
     gps_preview_poll(now_ms,asleep);
     if (current_page != UI_PAGE_WARDRIVE) return;
@@ -11926,7 +11934,7 @@ static void wardrive_tick(uint32_t now_ms, bool asleep)
     }
     if (!asleep && (wardrive_last_draw_ms == 0U ||
         (uint32_t)(now_ms - wardrive_last_draw_ms) >=
-            (wardrive_recent_is_open() || wardrive_gps_view_is_open() ? 500U : 1000U))) {
+            (wardrive_recent_is_open() || wardrive_gps_view_is_open() || wardrive_logs_is_open() ? 500U : 1000U))) {
         ESP_ERROR_CHECK(draw_detail_page());
         wardrive_last_draw_ms = now_ms;
     }
@@ -11937,6 +11945,7 @@ static void handle_tap(uint16_t x, uint16_t y)
     if (x >= CERBERUS_LCD_WIDTH || y >= CERBERUS_LCD_HEIGHT) {
         return;
     }
+    if (wardrive_logs_is_open()) {wardrive_logs_tap(x,y);return;}
     if (wardrive_gps_view_is_open()) {
         wardrive_gps_view_handle_tap(x, y);
         return;
@@ -12670,6 +12679,7 @@ void cerberus_ui_run(const cerberus_ui_config_t *config)
                  ble_mode == UI_BLE_MODE_ANALYZER)) &&
             ui_screen_timeout_seconds > 0U &&
             !watch_keeps_awake() &&
+            !wardrive_logs_is_open() &&
             !remote_id_keeps_awake() &&
             !mac_monitor_keeps_awake() &&
             !ble_discovery_keeps_awake() &&

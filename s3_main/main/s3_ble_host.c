@@ -70,7 +70,7 @@ static bool owner_valid(cerberus_s3_ble_owner_t owner)
 static bool passive_wifi_owns_radio(cerberus_s3_ble_owner_t claimant)
 {
     cerberus_s3_wifi_owner_t owner=cerberus_s3_wifi_owner();
-    return owner==CERBERUS_S3_WIFI_SCAN||owner==CERBERUS_S3_WIFI_COUNT||
+    return owner==CERBERUS_S3_WIFI_UPLOAD||owner==CERBERUS_S3_WIFI_SCAN||owner==CERBERUS_S3_WIFI_COUNT||
         (owner==CERBERUS_S3_WIFI_WARDRIVE&&claimant!=CERBERUS_S3_BLE_OWNER_WARDRIVE);
 }
 
