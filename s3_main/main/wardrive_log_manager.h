@@ -2,7 +2,8 @@
 #include "wardrive_log_storage.h"
 #include "wardrive_upload_reply.h"
 #include "wardrive_upload_net.h"
-typedef enum { CERBERUS_LOG_INSPECT, CERBERUS_LOG_DELETE, CERBERUS_LOG_UPLOAD, CERBERUS_LOG_IMPORT_PROFILE } cerberus_log_action_t;
+typedef enum { CERBERUS_LOG_INSPECT, CERBERUS_LOG_DELETE, CERBERUS_LOG_UPLOAD,
+    CERBERUS_LOG_IMPORT_PROFILE, CERBERUS_LOG_RETRY_SERVICE } cerberus_log_action_t;
 typedef struct {
     uint64_t session;
     uint32_t catalog_revision;
@@ -29,3 +30,8 @@ bool cerberus_log_manager_row(unsigned index,cerberus_ward_log_entry_t *out);
  * revision shown by that confirmation. */
 esp_err_t cerberus_log_manager_request(uint64_t session,uint32_t revision,
     cerberus_log_action_t action,int index);
+/* Explicitly confirmed retry for one reviewed file and uncertain service only.
+ * Other services and acknowledged parts are not resent. This appends to the
+ * receipt journal; it does not erase receipt history or the original CSV. */
+esp_err_t cerberus_log_manager_retry_service(uint64_t session,uint32_t revision,
+    int index,cerberus_upload_service_t service);

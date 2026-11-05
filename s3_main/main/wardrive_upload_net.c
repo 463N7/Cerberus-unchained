@@ -109,7 +109,7 @@ cerberus_upload_reply_t cerberus_upload_net_send(const cerberus_upload_config_t 
     for(const char *p=name;*p;++p)if(!((*p>='0'&&*p<='9')||(*p>='a'&&*p<='z')||
         (*p>='A'&&*p<='Z')||*p=='-'||*p=='_'||*p=='.'))return reply;
     static const char *const urls[]={"https://api.wigle.net/api/v2/file/upload",
-        "https://wdgwars.pl/api/upload-csv","https://wardrift.net/v1/ingest/signals"};
+        "https://wdgwars.pl/api/v2/upload-csv","https://wardrift.net/v1/ingest/signals"};
     esp_http_client_config_t cfg={.url=urls[service],.method=HTTP_METHOD_POST,
         .timeout_ms=10000,.disable_auto_redirect=true,.crt_bundle_attach=esp_crt_bundle_attach,
         .buffer_size=1024,.buffer_size_tx=1024,.user_agent="Cerberus/" CERBERUS_APP_VERSION};
@@ -120,6 +120,7 @@ cerberus_upload_reply_t cerberus_upload_net_send(const cerberus_upload_config_t 
     const char *boundary="CerberusWardrivePartV1";
     size_t head_bytes=0,tail_bytes=0;
     esp_err_t err=buffer?ESP_OK:ESP_ERR_NO_MEM;
+    if(err==ESP_OK)err=esp_http_client_set_header(client,"Accept","application/json");
     if(err==ESP_OK&&service==CERBERUS_UPLOAD_WIGLE){
         int n=snprintf(plain,sizeof(plain),"%s:%s",config->wigle_name,config->wigle_token);size_t encoded=0;
         memcpy(auth,"Basic ",6);

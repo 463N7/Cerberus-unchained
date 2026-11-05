@@ -59,14 +59,15 @@ int mbedtls_base64_encode(unsigned char *out,size_t cap,size_t *n,const unsigned
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *c)
 {
     assert(!client.active&&started&&sync_alive);assert(c->disable_auto_redirect&&c->crt_bundle_attach==esp_crt_bundle_attach&&c->method==HTTP_METHOD_POST);
-    const char *urls[]={"https://api.wigle.net/api/v2/file/upload","https://wdgwars.pl/api/upload-csv","https://wardrift.net/v1/ingest/signals"};
+    const char *urls[]={"https://api.wigle.net/api/v2/file/upload","https://wdgwars.pl/api/v2/upload-csv","https://wardrift.net/v1/ingest/signals"};
     assert(!strcmp(c->url,urls[service])&&c->timeout_ms==10000&&c->buffer_size<=1024&&c->buffer_size_tx<=1024);
     client.active=true;used=read_at=0;sent[0]=auth[0]=content_type[0]=api_key[0]=filename[0]=0;return &client;
 }
 esp_err_t esp_http_client_set_header(esp_http_client_handle_t c,const char *key,const char *value)
 {assert(c==&client&&c->active);if(!strcmp(key,"Authorization"))strcpy(auth,value);
     else if(!strcmp(key,"Content-Type"))strcpy(content_type,value);else if(!strcmp(key,"X-API-Key"))strcpy(api_key,value);
-    else if(!strcmp(key,"X-File-Name"))strcpy(filename,value);else assert(!"unknown header");return ESP_OK;}
+    else if(!strcmp(key,"X-File-Name"))strcpy(filename,value);
+    else if(!strcmp(key,"Accept"))assert(!strcmp(value,"application/json"));else assert(!"unknown header");return ESP_OK;}
 esp_err_t esp_http_client_open(esp_http_client_handle_t c,int length){assert(c==&client&&length>0&&length<8192);expected_length=(unsigned)length;return ESP_OK;}
 int esp_http_client_write(esp_http_client_handle_t c,const char *bytes,int length)
 {assert(c==&client&&length>0);if(write_fail)return -1;int n=length>17?17:length;assert(used+(unsigned)n<sizeof(sent));memcpy(sent+used,bytes,(size_t)n);used+=(unsigned)n;sent[used]=0;return n;}
@@ -109,6 +110,12 @@ int main(int argc,char **argv)
             if(fault==3)assert(transfer.http_status==302&&transfer.response_complete);}
         response_incomplete=read_fail=write_fail=cancel_now=false;status=200;
     }
+    service=1;status=202;response="{\"ok\":true,\"job_id\":1234,\"status\":\"queued\"}";
+    cerberus_upload_transfer_t queued_transfer;
+    cerberus_upload_reply_t queued_reply=cerberus_upload_net_send(&cfg,CERBERUS_UPLOAD_WDGWARS,f,&plan,0,
+        "fixture.csv",canceled,progress,NULL,&queued_transfer);
+    assert(queued_reply.result==CERBERUS_UPLOAD_QUEUED&&!strcmp(queued_reply.transaction,"1234")&&!queued_reply.counts_valid);
+    assert(queued_transfer.error==ESP_OK&&queued_transfer.http_status==202&&queued_transfer.response_complete&&!allocs&&!client.active);
     fclose(f);stop_fail=true;assert(cerberus_upload_net_end()!=ESP_OK&&claimed&&started&&initialized);
     assert(cerberus_upload_net_begin(&cfg,canceled,progress,NULL)!=ESP_OK);
     assert(cerberus_upload_net_end()==ESP_OK&&!claimed&&!station_alive&&!initialized&&!sync_alive);

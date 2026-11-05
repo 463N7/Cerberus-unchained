@@ -25,6 +25,7 @@ static uint64_t sequence;
 static bool cancel_requested,close_requested,command_pending;
 static cerberus_log_action_t command;
 static int selection;
+static int command_service;
 
 static bool cancel(void *unused)
 {(void)unused;portENTER_CRITICAL(&lock);bool c=cancel_requested||close_requested;portEXIT_CRITICAL(&lock);return c;}
@@ -43,22 +44,32 @@ bool cerberus_log_manager_row(unsigned i,cerberus_ward_log_entry_t *out)
     bool valid=state.active&&!state.busy&&work&&i<state.count;
     if(valid)*out=work->entries[i];else memset(out,0,sizeof(*out));portEXIT_CRITICAL(&lock);return valid;
 }
-esp_err_t cerberus_log_manager_request(uint64_t session,uint32_t revision,cerberus_log_action_t action,int index)
+static esp_err_t request(uint64_t session,uint32_t revision,cerberus_log_action_t action,int index,int service)
 {
     portENTER_CRITICAL(&lock);esp_err_t e=ESP_ERR_INVALID_STATE;
+    bool retry=action==CERBERUS_LOG_RETRY_SERVICE;
+    bool reviewed=state.active&&!state.busy&&!state.closing&&retry&&service>=0&&service<3&&index>=0&&index<(int)state.count&&work&&
+        state.destination[service].result==CERBERUS_UPLOAD_UNKNOWN&&
+        state.summary.complete&&!state.summary.error&&!state.summary.legacy_metadata&&
+        state.summary.kind==CERBERUS_WARD_LOG_WIGLE&&!strcmp(state.name,work->entries[index].name);
     if(state.active&&!state.busy&&!state.closing&&state.session==session&&state.catalog_revision==revision&&
-        (unsigned)action<=CERBERUS_LOG_IMPORT_PROFILE&&index>=-1&&(index==-1||index<(int)state.count)&&
+        ((!retry&&(unsigned)action<=CERBERUS_LOG_IMPORT_PROFILE&&service==-1)||reviewed)&&
+        index>=-1&&(index==-1||index<(int)state.count)&&
         !(action==CERBERUS_LOG_INSPECT&&index==-1)&&!(action==CERBERUS_LOG_IMPORT_PROFILE&&index!=-1)){
-        command=action;selection=index;command_pending=true;cancel_requested=false;
+        command=action;selection=index;command_service=service;command_pending=true;cancel_requested=false;
         state.busy=true;state.error=ESP_OK;state.processed=state.sent=state.bytes=0;
         state.total=action==CERBERUS_LOG_IMPORT_PROFILE?1:index==-1?state.count:1;state.profile_saved=false;
         state.action=action;state.service=0;memset(&state.transfer,0,sizeof(state.transfer));
         memset(state.accepted,0,sizeof(state.accepted));
         memset(state.queued,0,sizeof(state.queued));memset(state.skipped,0,sizeof(state.skipped));
         if(action==CERBERUS_LOG_IMPORT_PROFILE)snprintf(state.name,sizeof(state.name),"UPLOAD.JSON");
-        memset(&state.summary,0,sizeof(state.summary));memset(state.destination,0,sizeof(state.destination));e=ESP_OK;
+        memset(&state.summary,0,sizeof(state.summary));if(!retry)memset(state.destination,0,sizeof(state.destination));e=ESP_OK;
     }portEXIT_CRITICAL(&lock);return e;
 }
+esp_err_t cerberus_log_manager_request(uint64_t session,uint32_t revision,cerberus_log_action_t action,int index)
+{return request(session,revision,action,index,-1);}
+esp_err_t cerberus_log_manager_retry_service(uint64_t session,uint32_t revision,int index,cerberus_upload_service_t service)
+{return request(session,revision,CERBERUS_LOG_RETRY_SERVICE,index,(int)service);}
 static esp_err_t hash_file(FILE *f,uint8_t out[32])
 {
     if(fseek(f,0,SEEK_SET))return ESP_FAIL;
@@ -110,10 +121,10 @@ static esp_err_t receipt_write(uint64_t lease,const char *key,const cerberus_upl
 }
 static void destination(unsigned s,const cerberus_upload_reply_t *reply)
 {portENTER_CRITICAL(&lock);state.destination[s]=*reply;portEXIT_CRITICAL(&lock);}
-static esp_err_t process_file(uint64_t lease,unsigned index,bool upload,bool *network)
+static esp_err_t process_file(uint64_t lease,unsigned index,bool upload,int retry_service,bool *network)
 {
     const cerberus_ward_log_entry_t *entry=&work->entries[index];FILE *file=NULL;
-    portENTER_CRITICAL(&lock);memcpy(state.name,entry->name,13);memset(state.destination,0,sizeof(state.destination));portEXIT_CRITICAL(&lock);
+    portENTER_CRITICAL(&lock);memcpy(state.name,entry->name,13);if(retry_service<0)memset(state.destination,0,sizeof(state.destination));portEXIT_CRITICAL(&lock);
     progress(NULL,"VALIDATING SAVED CSV",0,0);
     esp_err_t e=cerberus_ward_log_storage_open(lease,entry->name,&file);
     if(e!=ESP_OK)return e;
@@ -128,6 +139,7 @@ static esp_err_t process_file(uint64_t lease,unsigned index,bool upload,bool *ne
     uint8_t digest[32]={0};
     if(eligible){progress(NULL,"CHECKING FILE IDENTITY",0,0);e=hash_file(file,digest);}
     for(unsigned s=0;e==ESP_OK&&eligible&&s<3&&!cancel(NULL);++s){
+        if(retry_service>=0&&s!=(unsigned)retry_service)continue;
         if(!cerberus_upload_config_service_ready(&work->config,(cerberus_upload_service_t)s))continue;
         if(upload&&!(work->config.destinations&(1U<<s)))continue;
         portENTER_CRITICAL(&lock);state.service=s+1;portEXIT_CRITICAL(&lock);
@@ -139,7 +151,7 @@ static esp_err_t process_file(uint64_t lease,unsigned index,bool upload,bool *ne
             e=receipt_read(lease,key,&reply);
             if(e!=ESP_OK||reply.result==CERBERUS_UPLOAD_UNKNOWN){
                 destination(s,&reply);
-                if(upload||e!=ESP_OK){
+                if(e!=ESP_OK||(upload&&retry_service!=(int)s)){
                     char stage[40];snprintf(stage,sizeof(stage),"%s / CHECK ACCOUNT FIRST",
                         cerberus_upload_service_name((cerberus_upload_service_t)s));
                     progress(NULL,stage,0,0);
@@ -147,7 +159,8 @@ static esp_err_t process_file(uint64_t lease,unsigned index,bool upload,bool *ne
                     break;
                 }
             }
-            if(upload&&(reply.result==CERBERUS_UPLOAD_NEW||reply.result==CERBERUS_UPLOAD_REJECTED)){
+            if(upload&&(reply.result==CERBERUS_UPLOAD_NEW||reply.result==CERBERUS_UPLOAD_REJECTED||
+                (reply.result==CERBERUS_UPLOAD_UNKNOWN&&retry_service==(int)s))){
                 if(!*network){
                     e=cerberus_upload_net_begin(&work->config,cancel,progress,NULL);
                     *network=true; /* End also cleans partially initialized networking. */
@@ -228,16 +241,18 @@ static void worker(void *unused)
     snprintf(state.stage,sizeof(state.stage),"%s",error==ESP_OK?"SELECT A SAVED LOG":"SD BUSY / CLOSE AND RETRY");portEXIT_CRITICAL(&lock);
     while(!closing()){
         portENTER_CRITICAL(&lock);bool pending=command_pending;cerberus_log_action_t action=command;
-        int index=selection;command_pending=false;portEXIT_CRITICAL(&lock);
+        int index=selection,retry_service=command_service;command_pending=false;portEXIT_CRITICAL(&lock);
         if(!pending){vTaskDelay(pdMS_TO_TICKS(50));continue;}
         bool network=false;
-        bool upload=action==CERBERUS_LOG_UPLOAD;
+        bool upload=action==CERBERUS_LOG_UPLOAD||action==CERBERUS_LOG_RETRY_SERVICE;
         error=lease?ESP_OK:ESP_ERR_INVALID_STATE;
         if(error==ESP_OK&&action!=CERBERUS_LOG_DELETE&&action!=CERBERUS_LOG_IMPORT_PROFILE)error=cerberus_upload_settings_load(&work->config);
         if(error==ESP_OK&&action==CERBERUS_LOG_IMPORT_PROFILE)error=import_profile(lease);
         if(error==ESP_OK&&upload){
             if(!cerberus_upload_config_wifi_ready(&work->config)||!work->config.destinations)error=ESP_ERR_INVALID_STATE;
+            if(retry_service>=0&&!(work->config.destinations&(1U<<retry_service)))error=ESP_ERR_INVALID_STATE;
             for(unsigned s=0;s<3;++s)if((work->config.destinations&(1U<<s))&&
+                (retry_service<0||s==(unsigned)retry_service)&&
                 !cerberus_upload_config_service_ready(&work->config,(cerberus_upload_service_t)s))error=ESP_ERR_INVALID_STATE;
             if(error!=ESP_OK)progress(NULL,"SAVE HOME WI-FI AND API KEYS FIRST",0,0);
         }
@@ -246,7 +261,7 @@ static void worker(void *unused)
             if(index>=0&&i!=(unsigned)index)continue;
             if(action==CERBERUS_LOG_DELETE){progress(NULL,"DELETING CONFIRMED LOGS",0,0);
                 error=cerberus_ward_log_storage_delete(lease,work->entries[i].name,work->entries[i].bytes);}
-            else error=process_file(lease,i,upload,&network);
+            else error=process_file(lease,i,upload,retry_service,&network);
             if(error==ESP_OK){portENTER_CRITICAL(&lock);++state.processed;portEXIT_CRITICAL(&lock);}
         }
         if(network){esp_err_t cleanup;do{cleanup=cerberus_upload_net_end();if(cleanup!=ESP_OK){

@@ -29,10 +29,11 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source version: `0.1.0-dev.rev141`, targeting onboard C5 protocol
+**Current source version: `0.1.0-dev.rev142`, targeting onboard C5 protocol
 firmware revision 75. One JSON profile configures home Wi-Fi, WiGLE, WDGWars and
-Wardrift for manual Upload / Upload All. Rev141 identifies saved receipts that
-require account review and adds credential-free transfer diagnostics.
+Wardrift for manual Upload / Upload All. Rev142 adds WDGWars v2 queued receipts
+and a confirmed per-service retry for uncertain uploads; see the
+[rev142 development scope](docs/DUAL_RADIO_REV142.md).
 See the [setup guide](docs/WARDRIVE_UPLOADS.md), [rev141 installation and scope](docs/DUAL_RADIO_REV141.md)
 and [rev140 baseline](docs/DUAL_RADIO_REV140.md).
 Rev140 private-profile import, SD-copy removal and saved settings across restart

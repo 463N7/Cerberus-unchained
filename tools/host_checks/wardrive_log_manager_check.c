@@ -24,6 +24,10 @@
 static unsigned critical,storage_locked,allocations,phase,sends,begins,ends,deleted;
 static bool fail_alloc,fail_task,fail_sync,sd_busy,unknown_reply,network_fail,request_cancel,wdgwars_unknown;
 static const char *import_mode;
+static const char *retry_mode;
+static unsigned service_sends[3];
+static bool retry_multipart;
+static unsigned part_sends[3][2];
 static unsigned saves;
 static void (*queued)(void *);
 static cerberus_upload_config_t saved;
@@ -95,11 +99,14 @@ cerberus_upload_reply_t cerberus_upload_net_send(const cerberus_upload_config_t 
     cerberus_upload_progress_fn progress,void *context,cerberus_upload_transfer_t *transfer)
 {
     (void)c;(void)name;assert(!critical&&!storage_locked&&f&&plan->parts&&part<plan->parts&&!cancel(context));
-    ++sends;progress(context,"SENDING",10,20);*transfer=(cerberus_upload_transfer_t){.http_status=200,.attempted=true,.response_complete=true,.response_bytes=48};
+    ++sends;++service_sends[service];assert(part<2);++part_sends[service][part];
+    if(retry_multipart)assert(plan->parts==2);
+    progress(context,"SENDING",10,20);*transfer=(cerberus_upload_transfer_t){.http_status=200,.attempted=true,.response_complete=true,.response_bytes=48};
     if(request_cancel)cerberus_log_manager_cancel();
-    cerberus_upload_reply_t r={.result=unknown_reply||request_cancel||(wdgwars_unknown&&service==CERBERUS_UPLOAD_WDGWARS)?CERBERUS_UPLOAD_UNKNOWN:
-        service==CERBERUS_UPLOAD_WIGLE?CERBERUS_UPLOAD_QUEUED:CERBERUS_UPLOAD_ACCEPTED};
-    if(r.result==CERBERUS_UPLOAD_QUEUED)strcpy(r.transaction,"synthetic-transaction");return r;
+    cerberus_upload_reply_t r={.result=unknown_reply||request_cancel||(wdgwars_unknown&&service==CERBERUS_UPLOAD_WDGWARS&&(!retry_multipart||part==1))?CERBERUS_UPLOAD_UNKNOWN:
+        service==CERBERUS_UPLOAD_WIGLE||(service==CERBERUS_UPLOAD_WDGWARS&&retry_mode&&!strcmp(retry_mode,"retry_queued"))?
+        CERBERUS_UPLOAD_QUEUED:CERBERUS_UPLOAD_ACCEPTED};
+    if(r.result==CERBERUS_UPLOAD_QUEUED)strcpy(r.transaction,service==CERBERUS_UPLOAD_WDGWARS?"1234":"synthetic-transaction");return r;
 }
 
 static void issue(cerberus_log_action_t action,int index)
@@ -109,11 +116,46 @@ static void issue(cerberus_log_action_t action,int index)
     assert(cerberus_log_manager_request(s.session,s.catalog_revision,action,index)==ESP_OK);
     assert(cerberus_log_manager_request(s.session,s.catalog_revision,action,index)!=ESP_OK);
 }
+/* Simulate damaged media or a newly durable acknowledgement between review
+ * and worker execution. This touches only the synthetic temporary card. */
+static void change_uncertain_receipt(bool corrupt)
+{
+    const char *folder="card/CERBERUS/WARD/UPLOADS";DIR *dir=opendir(folder);assert(dir);
+    struct dirent *entry;unsigned changed=0;
+    while((entry=readdir(dir))!=NULL){
+        if(!strstr(entry->d_name,".RCT"))continue;
+        char path[512];snprintf(path,sizeof(path),"%s/%s",folder,entry->d_name);
+        FILE *f=fopen(path,"r+b");assert(f);assert(!fseek(f,-128,SEEK_END));
+        uint8_t bytes[128];assert(fread(bytes,1,128,f)==128);cerberus_upload_reply_t reply;
+        assert(cerberus_upload_receipt_decode(bytes,&reply));
+        if(reply.result==CERBERUS_UPLOAD_UNKNOWN){
+            if(corrupt){bytes[127]^=1;assert(!fseek(f,-128,SEEK_END));}
+            else{reply.result=CERBERUS_UPLOAD_ACCEPTED;assert(cerberus_upload_receipt_encode(&reply,bytes));assert(!fseek(f,0,SEEK_END));}
+            assert(fwrite(bytes,1,128,f)==128);++changed;
+        }assert(!fclose(f));
+    }assert(!closedir(dir)&&changed==1);
+}
 void vTaskDelay(unsigned ms)
 {
     assert(!critical&&!storage_locked);cerberus_log_manager_status_t s;cerberus_log_manager_status(&s);
     if(s.busy||ms!=50)return;
     if(sd_busy){assert(s.error!=ESP_OK&&!sd_ward_log_lease);cerberus_log_manager_close();return;}
+    if(retry_multipart){
+        switch(phase++){
+        case 0:issue(CERBERUS_LOG_INSPECT,0);break;
+        case 1:assert(s.summary.rows==14000&&s.error==ESP_OK);issue(CERBERUS_LOG_UPLOAD,0);break;
+        case 2:assert(s.error!=ESP_OK&&sends==4&&begins==1&&ends==1&&s.destination[0].result==CERBERUS_UPLOAD_QUEUED);
+            assert(service_sends[0]==2&&service_sends[1]==2&&!service_sends[2]);
+            assert(cerberus_log_manager_retry_service(s.session,s.catalog_revision,0,CERBERUS_UPLOAD_WDGWARS)==ESP_OK);
+            wdgwars_unknown=false;break;
+        case 3:assert(s.error==ESP_OK&&sends==5&&begins==2&&ends==2);
+            assert(part_sends[0][0]==1&&part_sends[0][1]==1&&part_sends[1][0]==1&&part_sends[1][1]==2&&!service_sends[2]);
+            assert(s.destination[0].result==CERBERUS_UPLOAD_QUEUED&&s.destination[1].result==CERBERUS_UPLOAD_ACCEPTED);
+            issue(CERBERUS_LOG_UPLOAD,0);break;
+        case 4:assert(s.error==ESP_OK&&sends==7&&begins==3&&ends==3&&service_sends[2]==2);cerberus_log_manager_close();break;
+        default:assert(!"unexpected multipart phase");
+        }return;
+    }
     if(import_mode){
         if(phase++==0){assert(s.active&&s.count==2);issue(CERBERUS_LOG_IMPORT_PROFILE,-1);return;}
         assert(phase==2&&!begins&&!sends&&!ends);
@@ -152,12 +194,54 @@ void vTaskDelay(unsigned ms)
         }else if(unknown_reply||s.error!=ESP_OK){
             assert(sends<=1&&strstr(s.stage,"CHECK ACCOUNT FIRST"));
         }else assert(sends==3);
-        assert(begins==1&&ends==1);issue(CERBERUS_LOG_DELETE,0);break;
+        assert(begins==1&&ends==1);
+        if(retry_mode){
+            assert(cerberus_log_manager_request(s.session,s.catalog_revision,CERBERUS_LOG_RETRY_SERVICE,0)!=ESP_OK);
+            assert(cerberus_log_manager_retry_service(s.session+1,s.catalog_revision,0,CERBERUS_UPLOAD_WDGWARS)!=ESP_OK);
+            assert(cerberus_log_manager_retry_service(s.session,s.catalog_revision+1,0,CERBERUS_UPLOAD_WDGWARS)!=ESP_OK);
+            assert(cerberus_log_manager_retry_service(s.session,s.catalog_revision,-1,CERBERUS_UPLOAD_WDGWARS)!=ESP_OK);
+            assert(cerberus_log_manager_retry_service(s.session,s.catalog_revision,1,CERBERUS_UPLOAD_WDGWARS)!=ESP_OK);
+            assert(cerberus_log_manager_retry_service(s.session,s.catalog_revision,0,CERBERUS_UPLOAD_WIGLE)!=ESP_OK);
+            assert(cerberus_log_manager_retry_service(s.session,s.catalog_revision,0,(cerberus_upload_service_t)3)!=ESP_OK);
+            assert(cerberus_log_manager_retry_service(s.session,s.catalog_revision,0,CERBERUS_UPLOAD_WDGWARS)==ESP_OK);
+            assert(cerberus_log_manager_retry_service(s.session,s.catalog_revision,0,CERBERUS_UPLOAD_WDGWARS)!=ESP_OK);
+            wdgwars_unknown=!strcmp(retry_mode,"retry_unknown");
+            if(!strcmp(retry_mode,"retry_disabled"))saved.destinations=5;
+            network_fail=!strcmp(retry_mode,"retry_network_fail");
+            request_cancel=!strcmp(retry_mode,"retry_cancel_send");
+            if(!strcmp(retry_mode,"retry_cancel_before"))cerberus_log_manager_cancel();
+            if(!strcmp(retry_mode,"retry_corrupt"))change_uncertain_receipt(true);
+            if(!strcmp(retry_mode,"retry_acknowledged"))change_uncertain_receipt(false);
+            phase=7;break;
+        }
+        issue(CERBERUS_LOG_DELETE,0);break;
     case 4:assert(s.error==ESP_OK&&s.count==1&&s.processed==1);
         {cerberus_ward_log_entry_t entry;assert(cerberus_log_manager_row(0,&entry)&&!strcmp(entry.name,"UNLOC001.CSV"));}
         issue(CERBERUS_LOG_DELETE,-1);break;
     case 5:assert(s.error==ESP_OK&&s.count==0);cerberus_log_manager_close();break;
     case 6:assert(s.error==ESP_OK&&begins==2&&ends==2&&sends==3);cerberus_log_manager_close();break;
+    case 7:{
+        assert(s.action==CERBERUS_LOG_RETRY_SERVICE&&service_sends[0]==1&&service_sends[2]==0);
+        assert(s.destination[0].result==CERBERUS_UPLOAD_QUEUED);
+        bool disabled=!strcmp(retry_mode,"retry_disabled"),before=!strcmp(retry_mode,"retry_cancel_before");
+        if(!strcmp(retry_mode,"retry_corrupt")||!strcmp(retry_mode,"retry_acknowledged")){
+            bool corrupt=!strcmp(retry_mode,"retry_corrupt");
+            assert(begins==1&&ends==1&&sends==2&&!s.transfer.attempted);
+            assert((s.error!=ESP_OK)==corrupt);
+            assert(s.destination[1].result==(corrupt?CERBERUS_UPLOAD_UNKNOWN:CERBERUS_UPLOAD_ACCEPTED));
+            cerberus_log_manager_close();break;
+        }
+        if(disabled||before){assert(begins==1&&ends==1&&sends==2&&!s.transfer.attempted);
+            assert(s.destination[1].result==CERBERUS_UPLOAD_UNKNOWN);cerberus_log_manager_close();break;}
+        assert(begins==2&&ends==2);
+        if(network_fail){assert(sends==2&&!s.transfer.attempted&&s.error!=ESP_OK);cerberus_log_manager_close();break;}
+        assert(sends==3&&service_sends[1]==2&&s.transfer.attempted);
+        if(wdgwars_unknown||request_cancel){assert(s.error!=ESP_OK&&s.destination[1].result==CERBERUS_UPLOAD_UNKNOWN);cerberus_log_manager_close();break;}
+        assert(s.error==ESP_OK&&s.destination[1].result==(!strcmp(retry_mode,"retry_queued")?CERBERUS_UPLOAD_QUEUED:CERBERUS_UPLOAD_ACCEPTED));
+        issue(CERBERUS_LOG_UPLOAD,0);break;}
+    case 8:assert(s.error==ESP_OK&&begins==3&&ends==3&&sends==4&&service_sends[0]==1&&service_sends[1]==2&&service_sends[2]==1);
+        issue(CERBERUS_LOG_UPLOAD,0);break;
+    case 9:assert(s.error==ESP_OK&&begins==3&&ends==3&&sends==4);cerberus_log_manager_close();break;
     default:assert(!"unexpected worker iteration");
     }
 }
@@ -167,6 +251,8 @@ int main(int argc,char **argv)
     strcpy(saved.wigle_token,"fixture-token");memset(saved.wdgwars_token,'a',64);strcpy(saved.wardrift_token,"fixture-token");saved.destinations=7;
     unknown_reply=!strcmp(argv[1],"unknown");request_cancel=!strcmp(argv[1],"cancel");
     wdgwars_unknown=!strcmp(argv[1],"wdgwars_unknown");
+    if(!strncmp(argv[1],"retry_",6)){retry_mode=argv[1];wdgwars_unknown=true;}
+    retry_multipart=!strcmp(argv[1],"retry_multipart");
     fail_sync=!strcmp(argv[1],"sd_fail");network_fail=!strcmp(argv[1],"network_fail");sd_busy=!strcmp(argv[1],"busy");
     if(!strncmp(argv[1],"import_",7))import_mode=argv[1];
     fail_alloc=true;assert(cerberus_log_manager_open()==ESP_ERR_NO_MEM&&!allocations);fail_alloc=false;

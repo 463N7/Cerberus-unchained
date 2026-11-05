@@ -26,7 +26,7 @@ static esp_err_t wardrive_start_error;
 static cerberus_wardrive_status_t runtime;
 static cerberus_log_manager_status_t manager;
 static cerberus_upload_config_t saved;
-static unsigned requests,saves,forgets,cancels,closes,allocs;
+static unsigned requests,saves,forgets,cancels,closes,allocs,retries;
 static cerberus_log_action_t last_action;
 static int last_index;
 static void wardrive_gps_view_close(void){}
@@ -43,6 +43,8 @@ bool cerberus_log_manager_row(unsigned index,cerberus_ward_log_entry_t *out){if(
     memset(out,0,sizeof(*out));snprintf(out->name,sizeof(out->name),"WIGLE%03u.CSV",index+1);out->bytes=123456;return true;}
 esp_err_t cerberus_log_manager_request(uint64_t session,uint32_t revision,cerberus_log_action_t action,int index)
 {assert(session==manager.session&&revision==manager.catalog_revision);++requests;last_action=action;last_index=index;return ESP_OK;}
+esp_err_t cerberus_log_manager_retry_service(uint64_t session,uint32_t revision,int index,cerberus_upload_service_t service)
+{assert(session==manager.session&&revision==manager.catalog_revision&&index==0&&service==CERBERUS_UPLOAD_WDGWARS);++retries;return ESP_OK;}
 esp_err_t cerberus_upload_settings_load(cerberus_upload_config_t *out){*out=saved;return ESP_OK;}
 esp_err_t cerberus_upload_settings_save(const cerberus_upload_config_t *c){saved=*c;++saves;return ESP_OK;}
 esp_err_t cerberus_upload_settings_forget(void){memset(&saved,0,sizeof(saved));++forgets;return ESP_OK;}
@@ -109,5 +111,24 @@ int main(int argc,char **argv)
     assert(last_action==CERBERUS_LOG_IMPORT_PROFILE&&last_index==-1&&requests==4&&wd_log_ui->page==WD_LOG_LIST);
     wardrive_logs_tap(50,450);wardrive_logs_tick(false);assert(!wardrive_logs_is_open()&&!allocs);
     wardrive_logs_open();strcpy(wd_log_ui->draft.password,"SyntheticSecret123");wardrive_logs_tick(true);assert(!wd_log_ui&&!allocs);
+    memset(&manager,0,sizeof(manager));wardrive_logs_open();wardrive_logs_tap(50,140);
+    manager.summary=located;strcpy(manager.name,"WIGLE001.CSV");saved.destinations=3;
+    manager.destination[0].result=CERBERUS_UPLOAD_QUEUED;manager.destination[1].result=CERBERUS_UPLOAD_UNKNOWN;
+    unsigned before=requests;wardrive_logs_tap(50,360);paint(argv[1],"retry-review");
+    assert(strstr(drawn,"WDGWARS: REVIEW RETRY")&&!strstr(drawn,"WIGLE: REVIEW RETRY")&&requests==before&&!retries);
+    wardrive_logs_tap(50,264);assert(wd_log_ui->page==WD_LOG_CONFIRM_RETRY);paint(argv[1],"retry-confirm");
+    assert(strstr(drawn,"THE EARLIER ATTEMPT MAY HAVE ARRIVED")&&strstr(drawn,"OTHER SERVICES ARE NOT SENT"));
+    wardrive_logs_tap(50,450);assert(wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD&&!retries);
+    wardrive_logs_tap(50,450);assert(wd_log_ui->page==WD_LOG_DETAIL&&!retries);
+    wardrive_logs_tap(50,360);wardrive_logs_tap(50,264);wardrive_logs_tap(50,395);
+    assert(wd_log_ui->page==WD_LOG_DETAIL&&retries==1&&requests==before);
+    saved.destinations=1;wardrive_logs_tap(50,360);paint(argv[1],"retry-disabled");
+    assert(!strstr(drawn,"REVIEW RETRY"));wardrive_logs_tap(50,264);assert(wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD&&retries==1);
+    wardrive_logs_tap(50,450);wardrive_logs_tap(50,450);saved.destinations=3;
+    wardrive_logs_tap(50,360);assert(wd_log_ui->confirmed_index==-1);paint(argv[1],"retry-all-excluded");
+    assert(!strstr(drawn,"REVIEW RETRY"));wardrive_logs_tap(50,264);assert(wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD&&retries==1);
+    wardrive_logs_tap(50,450);wardrive_logs_tap(50,140);strcpy(manager.name,"WIGLE007.CSV");
+    wardrive_logs_tap(50,360);paint(argv[1],"retry-wrong-file");assert(!strstr(drawn,"REVIEW RETRY"));
+    wardrive_logs_tick(true);assert(!wd_log_ui&&!allocs);
     puts("Actual upload UI: pagination, masked setup, explicit confirmations, Stop/Back/sleep passed");return 0;
 }

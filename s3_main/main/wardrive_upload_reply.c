@@ -22,6 +22,17 @@ static bool receipt_id(const json_t *j,int i,char out[81])
         (s[k]>='a'&&s[k]<='z')||s[k]=='-'||s[k]=='_'))return false;
     memcpy(out,s,n);out[n]=0;return true;
 }
+static bool queued_job_id(const json_t *j,int i,char out[81])
+{
+    if(i<0||(j->t[i].type!='0'&&j->t[i].type!='"'))return false;
+    unsigned quoted=j->t[i].type=='"',start=j->t[i].start+quoted,end=j->t[i].end-quoted;
+    unsigned n=end-start;if(!n||n>20)return false;
+    unsigned long long value=0;
+    for(unsigned k=start;k<end;++k){unsigned digit=(unsigned char)j->s[k]-'0';
+        if(digit>9||value>(ULLONG_MAX-digit)/10)return false;value=value*10+digit;}
+    if(!value)return false;
+    memcpy(out,j->s+start,n);out[n]=0;return true;
+}
 cerberus_upload_reply_t cerberus_upload_reply(cerberus_upload_service_t service,
     unsigned status,const char *body,size_t length,bool complete)
 {
@@ -35,7 +46,14 @@ cerberus_upload_reply_t cerberus_upload_reply(cerberus_upload_service_t service,
     if(literal(&j,success,"false")&&(status==400||status==401||status==403||status==413||status==422||status==429||status==200)) {
         out.result=CERBERUS_UPLOAD_REJECTED;return out;
     }
-    if(status!=200||!literal(&j,success,"true")||field(&j,0,"error")>=0)return out;
+    if(!literal(&j,success,"true")||field(&j,0,"error")>=0)return out;
+    /* WDGWars v2 acknowledges queue admission with a positive job_id.
+     * Preserve that receipt as QUEUED; it does not establish import/credit. */
+    if(service==CERBERUS_UPLOAD_WDGWARS&&status==202){
+        if(queued_job_id(&j,field(&j,0,"job_id"),out.transaction))out.result=CERBERUS_UPLOAD_QUEUED;
+        return out;
+    }
+    if(status!=200)return out;
     if(service==CERBERUS_UPLOAD_WIGLE) {
         int results=field(&j,0,"results"),trans=field(&j,results,"transids");
         if(trans<0||j.t[trans].type!='['||trans+1>=j.t[trans].next)return out;

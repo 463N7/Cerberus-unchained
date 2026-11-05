@@ -18,6 +18,16 @@ def reply(body,service=0,status=200,complete=True,expected=5):
 wigle={'success':True,'results':{'transids':[{'transId':'test-123'}]}}
 assert reply(wigle,expected=2)[-1]=='test-123'
 assert reply({'ok':True,'imported':4,'no_gps':2,'bad_rows':1},1,expected=3)[1:4]==['4','3','1']
+for job in (1,123456,2**64-1,'123456'):
+    result=reply({'ok':True,'job_id':job,'status':'queued'},1,202,expected=2)
+    assert result[-1]==str(job) and result[3]=='0'
+for job in (None,True,False,0,-1,1.5,2**64,'','0','-1','1.0','1e2','a123','../123','1\nHeader','1'*21):
+    reply({'ok':True,'job_id':job},1,202)
+for body in ({'ok':False,'job_id':1},{'ok':True,'job_id':1,'error':'failure'},
+             {'job_id':1},b'{"ok":true,"job_id":1,"job_id":2}'):
+    reply(body,1,202)
+reply({'ok':True,'job_id':1},1,202,complete=False)
+for service in (0,2):reply({'ok':True,'job_id':1},service,202)
 reply({'accepted':True,'flags':['signature_missing']},2,expected=3)
 for service,key in enumerate(('success','ok','accepted')):
     for status in (200,400,401,403,413,422,429):reply({key:False},service,status,expected=4)

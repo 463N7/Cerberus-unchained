@@ -134,7 +134,7 @@ or altitude remain warnings; HDOP is never substituted for measured accuracy.
 | --- | --- |
 | NOT SENT | No matching receipt for these contents and credentials. |
 | SENDING | Durable local intent, not a service acknowledgement. |
-| QUEUED | WiGLE returned `success: true` and a transaction ID. Processing/credit remain unverified. |
+| QUEUED | WiGLE returned `success: true` and a transaction ID, or WDGWars v2 returned HTTP 202, `ok: true` and a positive job ID. Processing/credit remain unverified. |
 | ACCEPTED | WDGWars returned synchronous `ok`/import counts, or Wardrift returned `accepted: true`. WDGWars imported/rejected-row counts are separate. |
 | REJECTED | A complete recognized reply explicitly rejected the request. Correct its cause before manually retrying. |
 | CHECK ACCOUNT | Ambiguous delivery, damaged receipt or unexpected response. No automatic resend. |
@@ -153,7 +153,19 @@ review. Do not remove receipts just to force retry without checking the account.
 If a saved uncertain receipt blocks a retry, rev141 names the service, for
 example **WDGWARS / CHECK ACCOUNT FIRST**. Rev140 could leave **VALIDATING SAVED
 CSV / ESP_ERR_INVALID_STATE** on this path despite valid CSV and saved settings.
-The original uncertain delivery still requires account review.
+Rev142 adds a recovery route after that account review: open the affected log,
+tap **UPLOAD THIS LOG**, tap **WDGWARS: REVIEW RETRY** (or the affected service),
+then read the file/service scope and **CONFIRM SERVICE RETRY**. The earlier
+attempt may already have arrived, so this can resubmit its data. Only the chosen
+service is attempted; acknowledged parts and other services are not resent.
+Cancel does not send. This does not clear journals, override corrupt receipts,
+or enable retries across Upload All. The original CSV and journal history stay
+on SD. A disabled service must first be enabled in setup.
+
+WDGWars uploads now use `/api/v2/upload-csv`, matching the current Marauder
+development implementation. A valid 202 job receipt is retained as QUEUED;
+processing is asynchronous and automatic job-status polling is not implemented.
+See the [rev142 source references and validation scope](DUAL_RADIO_REV142.md).
 
 Interrupted journal writes and invalid CRCs fail closed. Authentication/rate
 errors stop the pass without automatic retry. Requests are sequential, at least

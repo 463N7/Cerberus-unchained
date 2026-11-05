@@ -3,7 +3,8 @@
 #include "wardrive_log_manager.h"
 #include "wardrive_upload_settings.h"
 typedef enum { WD_LOG_LIST,WD_LOG_DETAIL,WD_LOG_SETUP,WD_LOG_INPUT,
-    WD_LOG_CONFIRM_UPLOAD,WD_LOG_CONFIRM_DELETE,WD_LOG_CONFIRM_FORGET,WD_LOG_CONFIRM_IMPORT } wd_log_page_t;
+    WD_LOG_CONFIRM_UPLOAD,WD_LOG_CONFIRM_DELETE,WD_LOG_CONFIRM_FORGET,WD_LOG_CONFIRM_IMPORT,
+    WD_LOG_CONFIRM_RETRY } wd_log_page_t;
 typedef struct {
     cerberus_upload_config_t draft;
     cerberus_keyboard_t keyboard;
@@ -14,6 +15,7 @@ typedef struct {
     uint64_t confirmed_session;
     uint32_t confirmed_revision;
     unsigned confirmed_count;
+    unsigned confirmed_service;
     bool closing;
 } wd_log_ui_t;
 static wd_log_ui_t *wd_log_ui;
@@ -60,6 +62,16 @@ static void wardrive_logs_confirm(wd_log_page_t page,int index,const cerberus_lo
     wd_log_ui->confirmed_session=s->session;wd_log_ui->confirmed_revision=s->catalog_revision;
     wd_log_ui->confirmed_index=index;wd_log_ui->confirmed_count=index<0?s->count:1;
 }
+static bool wardrive_logs_retry_ready(const cerberus_log_manager_status_t *s,unsigned service)
+{
+    cerberus_ward_log_entry_t entry;
+    return service<3&&wd_log_ui->confirmed_index>=0&&!s->busy&&
+        (s->error==ESP_OK||(s->error==ESP_ERR_INVALID_STATE&&strstr(s->stage," / CHECK ACCOUNT FIRST"))||
+            (s->error==ESP_ERR_INVALID_RESPONSE&&s->transfer.attempted))&&
+        s->summary.complete&&!s->summary.error&&!s->summary.legacy_metadata&&
+        s->summary.kind==CERBERUS_WARD_LOG_WIGLE&&s->destination[service].result==CERBERUS_UPLOAD_UNKNOWN&&
+        cerberus_log_manager_row((unsigned)wd_log_ui->confirmed_index,&entry)&&!strcmp(entry.name,s->name);
+}
 static esp_err_t wardrive_logs_draw(void)
 {
     cerberus_log_manager_status_t s;cerberus_log_manager_status(&s);
@@ -74,7 +86,8 @@ static esp_err_t wardrive_logs_draw(void)
     const char *message=wd_log_ui->message[0]?wd_log_ui->message:s.stage;
     if(wd_log_ui->closing)message="CLOSING / RELEASING RESOURCES";
     ESP_RETURN_ON_ERROR(draw_centered(58,message,wd_log_ui->message[0]||s.error!=ESP_OK?UI_BAD:UI_MUTED,1),TAG,"log status");
-    if(s.error!=ESP_OK){snprintf(line,sizeof(line),"%s",esp_err_to_name(s.error));
+    if(s.error!=ESP_OK){snprintf(line,sizeof(line),"%s",s.error==ESP_ERR_INVALID_STATE&&strstr(s.stage," / CHECK ACCOUNT FIRST")?
+        "OPEN UPLOAD / REVIEW SERVICE RETRY":esp_err_to_name(s.error));
         ESP_RETURN_ON_ERROR(draw_centered(74,line,UI_BAD,1),TAG,"log error");}
     if(s.busy||wd_log_ui->closing){
         ESP_RETURN_ON_ERROR(draw_centered(106,s.name[0]?s.name:"OPENING SAVED LOGS",UI_TEXT,2),TAG,"log active file");
@@ -109,6 +122,18 @@ static esp_err_t wardrive_logs_draw(void)
         ESP_RETURN_ON_ERROR(draw_small_button(8,380,304,36,"CONFIRM IMPORT"),TAG,"import confirm button");
         return draw_small_button(8,432,304,36,"CANCEL");
     }
+    if(wd_log_ui->page==WD_LOG_CONFIRM_RETRY){
+        ESP_RETURN_ON_ERROR(draw_centered(115,"RETRY UNCERTAIN UPLOAD?",UI_TEXT,1),TAG,"retry title");
+        snprintf(line,sizeof(line),"%s / %s",s.name,cerberus_upload_service_name((cerberus_upload_service_t)wd_log_ui->confirmed_service));
+        ESP_RETURN_ON_ERROR(draw_centered(150,line,UI_TEXT,1),TAG,"retry scope");
+        ESP_RETURN_ON_ERROR(draw_centered(195,"CHECK YOUR SERVICE ACCOUNT FIRST",UI_BAD,1),TAG,"retry account");
+        ESP_RETURN_ON_ERROR(draw_centered(225,"THE EARLIER ATTEMPT MAY HAVE ARRIVED",UI_BAD,1),TAG,"retry uncertainty");
+        ESP_RETURN_ON_ERROR(draw_centered(255,"RETRY CAN SUBMIT THE SAME DATA AGAIN",UI_BAD,1),TAG,"retry duplicate");
+        ESP_RETURN_ON_ERROR(draw_centered(295,"OTHER SERVICES ARE NOT SENT",UI_MUTED,1),TAG,"retry other services");
+        ESP_RETURN_ON_ERROR(draw_centered(320,"ACKNOWLEDGED PARTS ARE SKIPPED",UI_MUTED,1),TAG,"retry acknowledged");
+        ESP_RETURN_ON_ERROR(draw_small_button(8,380,304,36,"CONFIRM SERVICE RETRY"),TAG,"retry confirm");
+        return draw_small_button(8,432,304,36,"CANCEL");
+    }
     if(wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD||wd_log_ui->page==WD_LOG_CONFIRM_DELETE||wd_log_ui->page==WD_LOG_CONFIRM_FORGET){
         bool upload=wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD,forget=wd_log_ui->page==WD_LOG_CONFIRM_FORGET;
         ESP_RETURN_ON_ERROR(draw_centered(120,forget?"FORGET SAVED CREDENTIALS?":upload?"UPLOAD SELECTED CAPTURES?":"DELETE SELECTED CAPTURES?",UI_TEXT,1),TAG,"log confirm title");
@@ -117,11 +142,14 @@ static esp_err_t wardrive_logs_draw(void)
         ESP_RETURN_ON_ERROR(draw_centered(195,upload?"INCLUDES OBSERVED IDENTIFIERS AND GPS":forget?"LOGS AND RECEIPTS STAY ON SD":"THIS CANNOT BE UNDONE",UI_BAD,1),TAG,"log confirm effect");
         if(upload){
             cerberus_upload_config_t config={0};esp_err_t e=cerberus_upload_settings_load(&config);
-            for(unsigned i=0;i<3;++i){snprintf(line,sizeof(line),"%s: %s",cerberus_upload_service_name((cerberus_upload_service_t)i),
-                e!=ESP_OK?"SETUP ERROR":(config.destinations&(1U<<i))?"SELECTED":"OFF");
-                ESP_RETURN_ON_ERROR(draw_centered(234+i*22,line,UI_TEXT,1),TAG,"confirm destination");}
+            bool retry=false;
+            for(unsigned i=0;i<3;++i){bool available=e==ESP_OK&&(config.destinations&(1U<<i))&&wardrive_logs_retry_ready(&s,i);
+                snprintf(line,sizeof(line),"%s: %s",cerberus_upload_service_name((cerberus_upload_service_t)i),
+                    available?"REVIEW RETRY":e!=ESP_OK?"SETUP ERROR":(config.destinations&(1U<<i))?"SELECTED":"OFF");
+                if(available){retry=true;ESP_RETURN_ON_ERROR(draw_small_button(8,228+i*26,304,24,line),TAG,"review service retry");}
+                else ESP_RETURN_ON_ERROR(draw_centered(234+i*26,line,UI_TEXT,1),TAG,"confirm destination");}
             cerberus_upload_config_clear(&config,sizeof(config));
-            ESP_RETURN_ON_ERROR(draw_centered(318,"UNLOCATED LOGS STAY LOCAL",UI_MUTED,1),TAG,"local log note");
+            ESP_RETURN_ON_ERROR(draw_centered(318,retry?"TAP A SERVICE ABOVE TO REVIEW ITS RETRY":"UNLOCATED LOGS STAY LOCAL",UI_MUTED,1),TAG,"local log note");
         }
         ESP_RETURN_ON_ERROR(draw_small_button(8,380,304,36,upload?"CONFIRM UPLOAD":forget?"CONFIRM FORGET":"CONFIRM DELETE"),TAG,"log confirm");
         return draw_small_button(8,432,304,36,"CANCEL");
@@ -178,6 +206,7 @@ static void wardrive_logs_tap(uint16_t x,uint16_t y)
         wardrive_last_draw_ms=0;return;}
     if(y>=432&&y<468){
         if(wd_log_ui->page==WD_LOG_INPUT){cerberus_upload_config_clear(wd_log_ui->input,sizeof(wd_log_ui->input));wd_log_ui->page=WD_LOG_SETUP;}
+        else if(wd_log_ui->page==WD_LOG_CONFIRM_RETRY)wd_log_ui->page=WD_LOG_CONFIRM_UPLOAD;
         else if(wd_log_ui->page>=WD_LOG_CONFIRM_UPLOAD)wd_log_ui->page=wd_log_ui->return_page;
         else if(wd_log_ui->page==WD_LOG_LIST)wd_log_ui->closing=true;
         else{cerberus_upload_config_clear(&wd_log_ui->draft,sizeof(wd_log_ui->draft));wd_log_ui->page=WD_LOG_LIST;}
@@ -210,8 +239,20 @@ static void wardrive_logs_tap(uint16_t x,uint16_t y)
                 snprintf(wd_log_ui->message,sizeof(wd_log_ui->message),"SETUP SAVED / UPLOADS ARE MANUAL");}}
         else if(y>=394&&y<422)wardrive_logs_confirm(WD_LOG_CONFIRM_FORGET,-1,&s);
     }else if(wd_log_ui->page>=WD_LOG_CONFIRM_UPLOAD){
+        if(wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD&&y>=228&&y<306&&(y-228)%26<24){
+            unsigned service=(y-228)/26;cerberus_upload_config_t config={0};
+            if(wardrive_logs_retry_ready(&s,service)&&cerberus_upload_settings_load(&config)==ESP_OK&&
+                (config.destinations&(1U<<service))){
+                wd_log_ui->page=WD_LOG_CONFIRM_RETRY;wd_log_ui->confirmed_service=service;
+            }
+            cerberus_upload_config_clear(&config,sizeof(config));
+        }
         if(y>=380&&y<416){
-            if(wd_log_ui->page==WD_LOG_CONFIRM_IMPORT){
+            if(wd_log_ui->page==WD_LOG_CONFIRM_RETRY){
+                e=cerberus_log_manager_retry_service(wd_log_ui->confirmed_session,wd_log_ui->confirmed_revision,
+                    wd_log_ui->confirmed_index,(cerberus_upload_service_t)wd_log_ui->confirmed_service);
+                wd_log_ui->page=WD_LOG_DETAIL;
+            }else if(wd_log_ui->page==WD_LOG_CONFIRM_IMPORT){
                 e=cerberus_log_manager_request(wd_log_ui->confirmed_session,wd_log_ui->confirmed_revision,CERBERUS_LOG_IMPORT_PROFILE,-1);
                 cerberus_upload_config_clear(&wd_log_ui->draft,sizeof(wd_log_ui->draft));wd_log_ui->page=WD_LOG_LIST;
             }else if(wd_log_ui->page==WD_LOG_CONFIRM_FORGET){e=cerberus_upload_settings_forget();
