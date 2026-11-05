@@ -655,8 +655,9 @@ static void print_wardrive_logs(void)
         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     uint64_t lease = 0;
     size_t count = 0;
+    cerberus_ward_log_catalog_info_t info = {0};
     esp_err_t error = entries ? cerberus_ward_log_storage_begin(&lease) : ESP_ERR_NO_MEM;
-    if (error == ESP_OK) error = cerberus_ward_log_storage_list(lease, entries, capacity, &count);
+    if (error == ESP_OK) error = cerberus_ward_log_storage_list_info(lease, entries, capacity, &count, &info);
     esp_err_t release = ESP_OK;
     if (lease) {
         do {
@@ -667,6 +668,16 @@ static void print_wardrive_logs(void)
     }
     console_printf("ward_logs_error=%d\r\nward_logs_release_error=%d\r\nward_logs_count=%u\r\n",
         error, release, (unsigned)count);
+    console_printf("ward_logs_directory_present=%u\r\nward_logs_directory_entries=%lu\r\nward_logs_csv_entries=%lu\r\nward_logs_temporary_entries=%lu\r\nward_logs_unrecognized_csv=%lu\r\n",
+        info.directory_present,(unsigned long)info.entries,(unsigned long)info.csv_entries,
+        (unsigned long)info.temporary_entries,(unsigned long)info.unrecognized_csv);
+    if(error==ESP_OK&&info.first_unrecognized_csv[0]){
+        /* A bounded, hex-encoded basename cannot inject console fields. */
+        char encoded[CERBERUS_WARD_LOG_NAME_CAPACITY*2U]={0};
+        for(size_t i=0;info.first_unrecognized_csv[i];++i)
+            snprintf(encoded+i*2U,sizeof(encoded)-i*2U,"%02x",(unsigned char)info.first_unrecognized_csv[i]);
+        console_printf("ward_logs_first_unrecognized_hex=%s\r\n",encoded);
+    }
     for (size_t i = 0; error == ESP_OK && i < count && !atomic_load(&console_stop_requested); ++i)
         console_printf("ward_log=%s bytes=%" PRIu64 "\r\n", entries[i].name, entries[i].bytes);
     heap_caps_free(entries);

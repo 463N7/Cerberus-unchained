@@ -40,7 +40,12 @@ static int ward_log_compare(const void *a, const void *b)
 
 esp_err_t cerberus_ward_log_storage_list(uint64_t token, cerberus_ward_log_entry_t *entries,
     size_t capacity, size_t *count)
+{ return cerberus_ward_log_storage_list_info(token,entries,capacity,count,NULL); }
+
+esp_err_t cerberus_ward_log_storage_list_info(uint64_t token, cerberus_ward_log_entry_t *entries,
+    size_t capacity, size_t *count, cerberus_ward_log_catalog_info_t *info)
 {
+    if (info) memset(info,0,sizeof(*info));
     if (!entries || !count || capacity < CERBERUS_WARD_LOG_CAPACITY) return ESP_ERR_INVALID_ARG;
     *count = 0;
     ESP_RETURN_ON_ERROR(take_storage_mutex(), TAG, "log list lock");
@@ -51,11 +56,30 @@ esp_err_t cerberus_ward_log_storage_list(uint64_t token, cerberus_ward_log_entry
         if (!dir && errno != ENOENT) err = ESP_FAIL;
     }
     if (dir) {
+        if (info) info->directory_present=true;
         struct dirent *entry;
         for (;;) {
             errno = 0; entry = readdir(dir);
             if (!entry) { if (errno) err = ESP_FAIL; break; }
-            if (!cerberus_ward_log_name(entry->d_name)) continue;
+            cerberus_ward_log_kind_t kind=cerberus_ward_log_name(entry->d_name);
+            if (info && strcmp(entry->d_name,".") && strcmp(entry->d_name,"..")) {
+                if(info->entries<UINT32_MAX)++info->entries;
+                size_t length=strlen(entry->d_name);
+                const char *suffix=length>=4?entry->d_name+length-4:"";
+                bool csv=length>=4&&suffix[0]=='.'&&(suffix[1]=='c'||suffix[1]=='C')&&
+                    (suffix[2]=='s'||suffix[2]=='S')&&(suffix[3]=='v'||suffix[3]=='V');
+                bool tmp=length>=4&&suffix[0]=='.'&&(suffix[1]=='t'||suffix[1]=='T')&&
+                    (suffix[2]=='m'||suffix[2]=='M')&&(suffix[3]=='p'||suffix[3]=='P');
+                if(csv&&info->csv_entries<UINT32_MAX)++info->csv_entries;
+                if(tmp&&info->temporary_entries<UINT32_MAX)++info->temporary_entries;
+                if(csv&&!kind){
+                    if(info->unrecognized_csv<UINT32_MAX)++info->unrecognized_csv;
+                    if(!info->first_unrecognized_csv[0])
+                        snprintf(info->first_unrecognized_csv,sizeof(info->first_unrecognized_csv),"%.*s",
+                            (int)sizeof(info->first_unrecognized_csv)-1,entry->d_name);
+                }
+            }
+            if (!kind) continue;
             char path[96]; struct stat st;
             snprintf(path, sizeof(path), "%s%s/%.*s", CERBERUS_STORAGE_MOUNT_PATH,
                 CERBERUS_STORAGE_WARDRIVE_PATH, (int)CERBERUS_WARD_LOG_NAME_CAPACITY-1, entry->d_name);

@@ -270,7 +270,17 @@ int main(int argc,char **argv)
         strstr(console_output,"ward_logs_count=2\r\n")&&strstr(console_output,"UNLOC001.CSV")&&
         strstr(console_output,current_names?"CERBWardrive001.CSV":"WIGLE001.CSV"));
     assert(!strstr(console_output,"WIGLE002.TMP")&&!strstr(console_output,"KEEP.TXT"));
+    assert(strstr(console_output,"ward_logs_directory_present=1\r\n")&&
+        strstr(console_output,"ward_logs_csv_entries=3\r\n")&&
+        strstr(console_output,"ward_logs_temporary_entries=1\r\n")&&
+        strstr(console_output,"ward_logs_unrecognized_csv=1\r\n")&&
+        strstr(console_output,"ward_logs_first_unrecognized_hex=49474e4f5245442e637376\r\n"));
     assert(!sends&&!begins&&!ends&&!sd_ward_log_lease&&!allocations);
+    assert(!rename("card/CERBERUS/WARD","card/CERBERUS/WARD.AWAY"));
+    console_output[0]=0;print_wardrive_logs();
+    assert(strstr(console_output,"ward_logs_error=0\r\n")&&strstr(console_output,"ward_logs_directory_present=0\r\n"));
+    assert(!sd_ward_log_lease&&!allocations);
+    assert(!rename("card/CERBERUS/WARD.AWAY","card/CERBERUS/WARD"));
     console_output[0]=0;sd_busy=true;print_wardrive_logs();
     assert(strstr(console_output,"ward_logs_count=0\r\n")&&!strstr(console_output,"ward_log="));
     assert(!sd_ward_log_lease&&!allocations);sd_busy=false;

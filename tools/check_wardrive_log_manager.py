@@ -36,6 +36,7 @@ for mode in ('normal','current_name','unknown','wdgwars_unknown','cancel','sd_fa
         stream=io.StringIO();stream.write(unloc_header);csv.writer(stream,lineterminator='\n').writerow(unloc)
         (folder/'UNLOC001.CSV').write_text(stream.getvalue(),newline='')
         (folder/'KEEP.TXT').write_text('fixture');(folder/'WIGLE002.TMP').write_text('unfinished fixture')
+        (folder/'IGNORED.csv').write_text('not a native log')
         config=folder.parent/'CONFIG';config.mkdir()
         profile=json.loads((root/'config_examples/wardrive_upload.example.json').read_text())
         profile['home_wifi']={'ssid':'JSON fixture AP','password':'json-password'}
