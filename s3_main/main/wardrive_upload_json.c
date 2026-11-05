@@ -55,25 +55,20 @@ bool cerberus_upload_config_json(const void *bytes,size_t length,cerberus_upload
     json_t j={.s=bytes,.n=length};
     if(!value(&j,0))return false;
     space(&j);if(j.pos!=j.n)return false;
-    static const char *const root[]={"schema","home_wifi","wigle","wdgwars","wardrift","auto_upload_after_stop"};
+    static const char *const root[]={"schema","home_wifi","wigle","wdgwars","wardrift"};
     static const char *const wifi[]={"ssid","password"};
     static const char *const wigle[]={"enabled","api_name","api_token"};
     static const char *const token[]={"enabled","token"};
     int home=field(&j,0,"home_wifi"),w=field(&j,0,"wigle"),d=field(&j,0,"wdgwars"),r=field(&j,0,"wardrift");
-    bool legacy=literal(&j,field(&j,0,"schema"),"\"cerberus-wardrive-upload-v1\"");
-    if(!object_fields(&j,0,root,legacy?5:6)||(!legacy&&!literal(&j,field(&j,0,"schema"),"\"cerberus-wardrive-upload-v2\""))||
+    if(!object_fields(&j,0,root,5)||!literal(&j,field(&j,0,"schema"),"\"cerberus-wardrive-upload-v1\"")||
         !object_fields(&j,home,wifi,2)||!object_fields(&j,w,wigle,3)||!object_fields(&j,d,token,2)||!object_fields(&j,r,token,2))return false;
     cerberus_upload_config_t candidate={0};
-    if(!legacy){int automatic=field(&j,0,"auto_upload_after_stop");
-        if(literal(&j,automatic,"true"))candidate.auto_upload_after_stop=1;
-        else if(!literal(&j,automatic,"false"))return false;}
 #define READ(parent,key,member) decoded(&j,field(&j,parent,key),candidate.member,sizeof(candidate.member))
     bool valid=READ(home,"ssid",ssid)&&READ(home,"password",password)&&READ(w,"api_name",wigle_name)&&
         READ(w,"api_token",wigle_token)&&READ(d,"token",wdgwars_token)&&READ(r,"token",wardrift_token)&&
         enabled(&j,w,0,&candidate)&&enabled(&j,d,1,&candidate)&&enabled(&j,r,2,&candidate)&&
         cerberus_upload_config_invalid(&candidate)==CERBERUS_UPLOAD_FIELD_NONE;
 #undef READ
-    if(valid&&candidate.auto_upload_after_stop&&!candidate.destinations)valid=false;
     if(valid&&candidate.destinations){
         valid=cerberus_upload_config_wifi_ready(&candidate);
         for(unsigned i=0;i<3;++i)if((candidate.destinations&(1U<<i))&&!cerberus_upload_config_service_ready(&candidate,(cerberus_upload_service_t)i))valid=false;

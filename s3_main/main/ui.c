@@ -413,7 +413,6 @@ static esp_err_t wardrive_logs_draw(void);
 static void wardrive_logs_open(void);
 static void wardrive_logs_tap(uint16_t x,uint16_t y);
 static void wardrive_logs_tick(bool asleep);
-static void wardrive_logs_arm_after_stop(void);
 static esp_err_t wardrive_recent_draw(void);
 static void wardrive_recent_open(void);
 static void wardrive_recent_close(void);
@@ -11871,7 +11870,6 @@ static void wardrive_handle_tap(uint16_t x, uint16_t y)
         } else wardrive_gps_enabled = !wardrive_gps_enabled;
     } else if (y >= 380U && y < 412U) {
         if (active) {
-            wardrive_logs_arm_after_stop();
             cerberus_wardrive_request_stop();
         } else if (wardrive_start_pending) {
             wardrive_start_pending = false;
@@ -11891,7 +11889,7 @@ static void wardrive_handle_tap(uint16_t x, uint16_t y)
 
 static void wardrive_tick(uint32_t now_ms, bool asleep)
 {
-    wardrive_logs_tick(asleep || wardrive_return_pending);
+    wardrive_logs_tick(asleep);
     wardrive_gps_view_release_if_hidden(now_ms, asleep);
     gps_preview_poll(now_ms,asleep);
     if (current_page != UI_PAGE_WARDRIVE) return;

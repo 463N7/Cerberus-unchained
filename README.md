@@ -30,22 +30,18 @@ implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
 **Current source version: `0.1.0-dev.rev141`, targeting onboard C5 protocol
-firmware revision 75. One JSON profile configures home Wi-Fi, WiGLE, WDGWars,
-Wardrift and opt-in automatic uploads after Stop. Rev141 also identifies saved
-receipts requiring account review and adds credential-free transfer diagnostics.
+firmware revision 75. One JSON profile configures home Wi-Fi, WiGLE, WDGWars and
+Wardrift for manual Upload / Upload All. Rev141 identifies saved receipts that
+require account review and adds credential-free transfer diagnostics.
 See the [setup guide](docs/WARDRIVE_UPLOADS.md), [rev141 scope](docs/DUAL_RADIO_REV141.md)
 and [rev140 installation](docs/DUAL_RADIO_REV140.md).
-Rev140 is installed with paired boot/SD/idle checks. Its private profile import
-and SD-copy removal are verified. WiGLE has a matching queued transaction;
-processing/credit and WDGWars delivery remain unverified. Saved-profile restart
-persistence and physical automatic-mode acceptance remain separate checks.
-Rev139 has physical log-details/navigation acceptance. The measured capture
-baseline is rev138: its 1,438-observation combined run
-stopped cleanly, and physical SD readback accounts for every observation with
-zero reported queue drops. Its native CSV passes local preflight with missing
-accuracy/altitude warnings. Complete provider acceptance and endurance remain
-open; [rev138 proof](docs/DUAL_RADIO_REV138.md) is separate.
-Rev141 has not been published as a binary release.**
+Rev140 private-profile import, SD-copy removal and saved settings across restart
+are verified. WiGLE has a matching queued transaction; processing/credit and
+WDGWars delivery remain unverified. Rev139 has physical log-details/navigation
+acceptance. The rev138 capture baseline accounts for all 1,438 observations in
+physical SD readback, with zero reported queue drops. Complete provider acceptance,
+uploader transitions and endurance remain open. Rev141's installation evidence
+will be recorded separately; it has not been published as a binary release.**
 
 The published experimental release remains **`0.1.0-dev.rev136`**, paired with
 onboard C5 firmware revision 74 and protocol 2.

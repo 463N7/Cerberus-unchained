@@ -1384,12 +1384,12 @@ static void print_upload_profile(void)
 {
     cerberus_upload_config_t config={0};
     esp_err_t error=cerberus_upload_settings_load(&config);
-    console_printf("upload_profile_error=%d\r\nupload_profile_home_ready=%u\r\nupload_profile_wigle_ready=%u\r\nupload_profile_wdgwars_ready=%u\r\nupload_profile_wardrift_ready=%u\r\nupload_profile_destinations=0x%02x\r\nupload_profile_auto_after_stop=%u\r\n",
+    console_printf("upload_profile_error=%d\r\nupload_profile_home_ready=%u\r\nupload_profile_wigle_ready=%u\r\nupload_profile_wdgwars_ready=%u\r\nupload_profile_wardrift_ready=%u\r\nupload_profile_destinations=0x%02x\r\n",
         (int)error,(unsigned)(error==ESP_OK&&cerberus_upload_config_wifi_ready(&config)),
         (unsigned)(error==ESP_OK&&cerberus_upload_config_service_ready(&config,CERBERUS_UPLOAD_WIGLE)),
         (unsigned)(error==ESP_OK&&cerberus_upload_config_service_ready(&config,CERBERUS_UPLOAD_WDGWARS)),
         (unsigned)(error==ESP_OK&&cerberus_upload_config_service_ready(&config,CERBERUS_UPLOAD_WARDRIFT)),
-        (unsigned)(error==ESP_OK?config.destinations:0),(unsigned)(error==ESP_OK?config.auto_upload_after_stop:0));
+        (unsigned)(error==ESP_OK?config.destinations:0));
     cerberus_upload_config_clear(&config,sizeof(config));
 }
 

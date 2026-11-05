@@ -23,7 +23,6 @@
 
 static unsigned critical,storage_locked,allocations,phase,sends,begins,ends,deleted;
 static bool fail_alloc,fail_task,fail_sync,sd_busy,unknown_reply,network_fail,request_cancel,wdgwars_unknown;
-static bool automatic,auto_off,auto_rejected;
 static const char *import_mode;
 static unsigned saves;
 static void (*queued)(void *);
@@ -100,7 +99,6 @@ cerberus_upload_reply_t cerberus_upload_net_send(const cerberus_upload_config_t 
     if(request_cancel)cerberus_log_manager_cancel();
     cerberus_upload_reply_t r={.result=unknown_reply||request_cancel||(wdgwars_unknown&&service==CERBERUS_UPLOAD_WDGWARS)?CERBERUS_UPLOAD_UNKNOWN:
         service==CERBERUS_UPLOAD_WIGLE?CERBERUS_UPLOAD_QUEUED:CERBERUS_UPLOAD_ACCEPTED};
-    if(auto_rejected&&service==CERBERUS_UPLOAD_WDGWARS)r.result=CERBERUS_UPLOAD_REJECTED;
     if(r.result==CERBERUS_UPLOAD_QUEUED)strcpy(r.transaction,"synthetic-transaction");return r;
 }
 
@@ -135,25 +133,22 @@ void vTaskDelay(unsigned ms)
         assert(cerberus_ward_log_storage_end(sd_ward_log_lease+1)!=ESP_OK);
         cerberus_ward_log_entry_t entry;assert(cerberus_log_manager_row(0,&entry)&&!strcmp(entry.name,"WIGLE001.CSV"));
         assert(!cerberus_log_manager_row(2,&entry));issue(CERBERUS_LOG_INSPECT,0);break;}
-    case 1:assert(s.error==ESP_OK&&s.summary.rows==10&&s.summary.complete&&begins==0);
-        assert(cerberus_log_manager_request(s.session,s.catalog_revision,CERBERUS_LOG_AUTO_UPLOAD,0)==ESP_ERR_INVALID_STATE);
-        issue(automatic?CERBERUS_LOG_AUTO_UPLOAD:CERBERUS_LOG_UPLOAD,-1);break;
+    case 1:assert(s.error==ESP_OK&&s.summary.rows==10&&s.summary.complete&&begins==0);issue(CERBERUS_LOG_UPLOAD,-1);break;
     case 2:
-        if(auto_off){assert(s.error!=ESP_OK&&!begins&&!ends&&!sends&&strstr(s.stage,"AUTO UPLOAD OFF"));cerberus_log_manager_close();break;}
         assert(ends==1&&begins==1);
         if(network_fail||fail_sync)assert(s.error!=ESP_OK&&sends==0);
-        else if(unknown_reply||request_cancel||wdgwars_unknown||auto_rejected)assert(s.error!=ESP_OK&&sends==((wdgwars_unknown||auto_rejected)?2U:1U));
+        else if(unknown_reply||request_cancel||wdgwars_unknown)assert(s.error!=ESP_OK&&sends==(wdgwars_unknown?2U:1U));
         else assert(s.error==ESP_OK&&sends==3&&s.queued[0]==1&&s.accepted[1]==1&&s.accepted[2]==1);
         if(network_fail){network_fail=false;issue(CERBERUS_LOG_UPLOAD,0);phase=6;break;}
-        fail_sync=false;request_cancel=false;issue(automatic?CERBERUS_LOG_AUTO_UPLOAD:CERBERUS_LOG_UPLOAD,automatic?-1:0);break;
+        fail_sync=false;request_cancel=false;issue(CERBERUS_LOG_UPLOAD,0);break;
     case 3:
         console_output[0]=0;print_upload_status();
         assert(strstr(console_output,"upload_busy=0")&&!strstr(console_output,"fixture-token")&&!strstr(console_output,"synthetic-transaction"));
-        if(wdgwars_unknown||auto_rejected){
+        if(wdgwars_unknown){
             assert(s.error==ESP_ERR_INVALID_STATE&&sends==2&&s.destination[0].result==CERBERUS_UPLOAD_QUEUED);
-            assert(s.destination[1].result==(auto_rejected?CERBERUS_UPLOAD_REJECTED:CERBERUS_UPLOAD_UNKNOWN));
+            assert(s.destination[1].result==CERBERUS_UPLOAD_UNKNOWN);
             assert(!strcmp(s.stage,"WDGWARS / CHECK ACCOUNT FIRST"));
-            assert(strstr(console_output,"upload_service=2")&&strstr(console_output,auto_rejected?"upload_destination_1_result=4":"upload_destination_1_result=5"));
+            assert(strstr(console_output,"upload_service=2")&&strstr(console_output,"upload_destination_1_result=5"));
         }else if(unknown_reply||s.error!=ESP_OK){
             assert(sends<=1&&strstr(s.stage,"CHECK ACCOUNT FIRST"));
         }else assert(sends==3);
@@ -172,10 +167,6 @@ int main(int argc,char **argv)
     strcpy(saved.wigle_token,"fixture-token");memset(saved.wdgwars_token,'a',64);strcpy(saved.wardrift_token,"fixture-token");saved.destinations=7;
     unknown_reply=!strcmp(argv[1],"unknown");request_cancel=!strcmp(argv[1],"cancel");
     wdgwars_unknown=!strcmp(argv[1],"wdgwars_unknown");
-    automatic=!strncmp(argv[1],"auto_",5);auto_off=!strcmp(argv[1],"auto_off");
-    auto_rejected=!strcmp(argv[1],"auto_rejected");
-    if(!strcmp(argv[1],"auto_unknown"))wdgwars_unknown=true;
-    saved.auto_upload_after_stop=automatic&&!auto_off;
     fail_sync=!strcmp(argv[1],"sd_fail");network_fail=!strcmp(argv[1],"network_fail");sd_busy=!strcmp(argv[1],"busy");
     if(!strncmp(argv[1],"import_",7))import_mode=argv[1];
     fail_alloc=true;assert(cerberus_log_manager_open()==ESP_ERR_NO_MEM&&!allocations);fail_alloc=false;

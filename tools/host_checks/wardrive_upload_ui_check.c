@@ -21,7 +21,6 @@ static const char *TAG="upload_ui_test";
 static uint16_t pixels[480][320];
 static char drawn[8192];
 static bool wardrive_start_pending;
-static bool open_busy;
 static uint32_t wardrive_last_draw_ms;
 static esp_err_t wardrive_start_error;
 static cerberus_wardrive_status_t runtime;
@@ -36,7 +35,7 @@ void cerberus_wardrive_get_status(cerberus_wardrive_status_t *out){*out=runtime;
 const char *esp_err_to_name(esp_err_t error){return error==ESP_OK?"ESP_OK":"TEST_ERROR";}
 void *heap_caps_calloc(size_t n,size_t size,unsigned caps){assert(caps==6);void *p=calloc(n,size);if(p)++allocs;return p;}
 void heap_caps_free(void *p){if(p){assert(allocs);--allocs;free(p);}}
-esp_err_t cerberus_log_manager_open(void){memset(&manager,0,sizeof(manager));manager.active=true;manager.busy=open_busy;manager.session=19;manager.catalog_revision=7;manager.count=7;return ESP_OK;}
+esp_err_t cerberus_log_manager_open(void){manager.active=true;manager.session=19;manager.catalog_revision=7;manager.count=7;return ESP_OK;}
 void cerberus_log_manager_close(void){++closes;manager.active=false;}
 void cerberus_log_manager_cancel(void){++cancels;}
 void cerberus_log_manager_status(cerberus_log_manager_status_t *out){*out=manager;}
@@ -96,45 +95,19 @@ int main(int argc,char **argv)
     strcpy(wd_log_ui->input,"SyntheticSecret123");wd_log_ui->keyboard.length=strlen(wd_log_ui->input);
     paint(argv[1],"password");assert(!strstr(drawn,"SyntheticSecret123"));
     wardrive_logs_tap(270,366);assert(wd_log_ui->page==WD_LOG_SETUP&&!strcmp(wd_log_ui->draft.password,"SyntheticSecret123")&&!wd_log_ui->input[0]);
-    wardrive_logs_tap(50,336);assert(wd_log_ui->draft.auto_upload_after_stop);paint(argv[1],"auto-setup");
-    assert(strstr(drawn,"AUTO AFTER STOP: ON"));wardrive_logs_tap(50,336);assert(!wd_log_ui->draft.auto_upload_after_stop);
-    wardrive_logs_tap(220,360);assert(saves==1&&wd_log_ui->page==WD_LOG_LIST&&!wd_log_ui->draft.password[0]);
+    wardrive_logs_tap(50,360);assert(saves==1&&wd_log_ui->page==WD_LOG_LIST&&!wd_log_ui->draft.password[0]);
     wardrive_logs_tap(50,105);wardrive_logs_tap(50,400);assert(wd_log_ui->page==WD_LOG_CONFIRM_FORGET&&!forgets);
     wardrive_logs_tap(50,395);assert(forgets==1&&!saved.password[0]);wardrive_logs_tap(50,450);
     wardrive_logs_tap(50,400);assert(wd_log_ui->confirmed_count==7&&last_action==CERBERUS_LOG_UPLOAD);wardrive_logs_tap(50,395);
     assert(last_action==CERBERUS_LOG_DELETE&&last_index==-1&&requests==3);
     wardrive_logs_tap(50,450);wardrive_logs_tick(false);assert(!wardrive_logs_is_open()&&!allocs&&closes);
-    wardrive_logs_open();wardrive_logs_tap(50,105);wardrive_logs_tap(50,370);
+    wardrive_logs_open();wardrive_logs_tap(50,105);wardrive_logs_tap(50,336);
     assert(wd_log_ui->page==WD_LOG_CONFIRM_IMPORT&&requests==3);
     paint(argv[1],"import-confirm");assert(strstr(drawn,CERBERUS_WARD_UPLOAD_PROFILE_PATH)&&strstr(drawn,"REPLACES HOME AP"));
     wardrive_logs_tap(50,450);assert(wd_log_ui->page==WD_LOG_SETUP&&requests==3);
-    wardrive_logs_tap(50,370);wardrive_logs_tap(50,395);
+    wardrive_logs_tap(50,336);wardrive_logs_tap(50,395);
     assert(last_action==CERBERUS_LOG_IMPORT_PROFILE&&last_index==-1&&requests==4&&wd_log_ui->page==WD_LOG_LIST);
     wardrive_logs_tap(50,450);wardrive_logs_tick(false);assert(!wardrive_logs_is_open()&&!allocs);
     wardrive_logs_open();strcpy(wd_log_ui->draft.password,"SyntheticSecret123");wardrive_logs_tick(true);assert(!wd_log_ui&&!allocs);
-    unsigned prior=requests;saved.auto_upload_after_stop=1;
-    /* Never trigger from boot, idle history or merely entering the menu. */
-    wardrive_logs_tick(false);assert(!wd_log_ui&&requests==prior);
-    runtime.state=CERBERUS_WARDRIVE_STOPPING;wardrive_logs_arm_after_stop();wardrive_logs_tick(false);
-    assert(!wd_log_ui&&requests==prior);
-    runtime.state=CERBERUS_WARDRIVE_STOPPED;wardrive_logs_tick(false);
-    assert(wd_log_ui&&last_action==CERBERUS_LOG_AUTO_UPLOAD&&last_index==-1&&requests==prior+1);
-    for(unsigned i=0;i<20;++i)wardrive_logs_tick(false);assert(requests==prior+1);
-    wardrive_logs_tick(true);assert(!wd_log_ui&&!allocs);
-    for(unsigned fault=0;fault<5;++fault){
-        runtime.state=CERBERUS_WARDRIVE_STOPPING;wardrive_logs_arm_after_stop();
-        if(fault==0)wardrive_logs_tick(true); /* Sleep or Back-to-Home cancels pending auto. */
-        if(fault==1){current_page=UI_PAGE_BLE;wardrive_logs_tick(false);current_page=UI_PAGE_WARDRIVE;}
-        if(fault==2){wardrive_start_pending=true;wardrive_logs_tick(false);wardrive_start_pending=false;}
-        if(fault==3){runtime.state=CERBERUS_WARDRIVE_ERROR;wardrive_logs_tick(false);}
-        if(fault==4)saved.auto_upload_after_stop=0;
-        runtime.state=CERBERUS_WARDRIVE_STOPPED;wardrive_logs_tick(false);
-        assert(!wd_log_ui&&requests==prior+1);
-    }
-    saved.auto_upload_after_stop=1;open_busy=true;wardrive_logs_arm_after_stop();wardrive_logs_tick(false);
-    assert(wd_log_ui&&wd_log_ui->auto_pending&&requests==prior+1);
-    wardrive_logs_tap(50,395);manager.busy=false;wardrive_logs_tick(false);
-    assert(!wd_log_ui->auto_pending&&requests==prior+1);
-    wardrive_logs_tick(true);assert(!wd_log_ui&&!allocs);open_busy=false;
     puts("Actual upload UI: pagination, masked setup, explicit confirmations, Stop/Back/sleep passed");return 0;
 }

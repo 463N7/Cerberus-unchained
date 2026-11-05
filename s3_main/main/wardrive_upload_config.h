@@ -9,13 +9,11 @@ typedef enum { CERBERUS_UPLOAD_WIGLE, CERBERUS_UPLOAD_WDGWARS,
 typedef enum { CERBERUS_UPLOAD_FIELD_NONE, CERBERUS_UPLOAD_FIELD_SSID,
     CERBERUS_UPLOAD_FIELD_PASSWORD, CERBERUS_UPLOAD_FIELD_WIGLE_NAME,
     CERBERUS_UPLOAD_FIELD_WIGLE_TOKEN, CERBERUS_UPLOAD_FIELD_WDGWARS_TOKEN,
-    CERBERUS_UPLOAD_FIELD_WARDRIFT_TOKEN, CERBERUS_UPLOAD_FIELD_DESTINATIONS,
-    CERBERUS_UPLOAD_FIELD_AUTOMATIC } cerberus_upload_field_t;
+    CERBERUS_UPLOAD_FIELD_WARDRIFT_TOKEN, CERBERUS_UPLOAD_FIELD_DESTINATIONS } cerberus_upload_field_t;
 typedef struct {
     char ssid[33], password[65], wigle_name[65], wigle_token[129];
     char wdgwars_token[65], wardrift_token[129];
     uint8_t destinations;
-    uint8_t auto_upload_after_stop; /* Opt-in; 0 manual, 1 after explicit capture Stop. */
 } cerberus_upload_config_t;
 
 /* Empty credentials are valid unconfigured settings, never ready to upload.

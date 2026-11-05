@@ -14,16 +14,13 @@ typedef struct {
     uint64_t confirmed_session;
     uint32_t confirmed_revision;
     unsigned confirmed_count;
-    bool closing,auto_pending;
+    bool closing;
 } wd_log_ui_t;
 static wd_log_ui_t *wd_log_ui;
-static bool wd_log_after_stop;
-static void wardrive_logs_arm_after_stop(void){wd_log_after_stop=true;}
 
 static bool wardrive_logs_is_open(void){return wd_log_ui&&current_page==UI_PAGE_WARDRIVE;}
 static void wardrive_logs_open(void)
 {
-    wd_log_after_stop=false;
     cerberus_wardrive_status_t status;cerberus_wardrive_get_status(&status);
     if(wardrive_start_pending||status.state==CERBERUS_WARDRIVE_RUNNING||
         status.state==CERBERUS_WARDRIVE_STARTING||status.state==CERBERUS_WARDRIVE_STOPPING)return;
@@ -37,29 +34,8 @@ static void wardrive_logs_open(void)
 }
 static void wardrive_logs_tick(bool asleep)
 {
-    if(asleep||current_page!=UI_PAGE_WARDRIVE||wardrive_start_pending)wd_log_after_stop=false;
-    if(wd_log_after_stop&&!wd_log_ui){
-        cerberus_wardrive_status_t capture;cerberus_wardrive_get_status(&capture);
-        if(capture.state==CERBERUS_WARDRIVE_STOPPED){
-            wd_log_after_stop=false;cerberus_upload_config_t config={0};
-            esp_err_t e=cerberus_upload_settings_load(&config);
-            bool automatic=e==ESP_OK&&config.auto_upload_after_stop;
-            cerberus_upload_config_clear(&config,sizeof(config));
-            if(automatic){wardrive_logs_open();if(wd_log_ui)wd_log_ui->auto_pending=true;}
-        }else if(capture.state==CERBERUS_WARDRIVE_ERROR||capture.state==CERBERUS_WARDRIVE_IDLE)wd_log_after_stop=false;
-    }
     if(!wd_log_ui)return;
     if(asleep||current_page!=UI_PAGE_WARDRIVE)wd_log_ui->closing=true;
-    if(wd_log_ui->auto_pending&&!wd_log_ui->closing){
-        cerberus_log_manager_status_t s;cerberus_log_manager_status(&s);
-        if(!s.busy){
-            wd_log_ui->auto_pending=false;
-            if(s.active&&s.error==ESP_OK&&s.count){
-                esp_err_t e=cerberus_log_manager_request(s.session,s.catalog_revision,CERBERUS_LOG_AUTO_UPLOAD,-1);
-                if(e!=ESP_OK)snprintf(wd_log_ui->message,sizeof(wd_log_ui->message),"%s",esp_err_to_name(e));
-            }
-        }
-    }
     if(!wd_log_ui->closing)return;
     cerberus_log_manager_close();
     cerberus_upload_config_clear(&wd_log_ui->draft,sizeof(wd_log_ui->draft));
@@ -113,16 +89,14 @@ static esp_err_t wardrive_logs_draw(void)
         return draw_small_button(8,432,304,36,"BACK / CANCEL AND CLOSE");
     }
     if(wd_log_ui->page==WD_LOG_SETUP){
-        ESP_RETURN_ON_ERROR(draw_centered(90,"HOME AP: 2.4 GHz / UPLOAD AFTER CAPTURE",UI_GOOD,1),TAG,"upload home role");
+        ESP_RETURN_ON_ERROR(draw_centered(90,"HOME AP: 2.4 GHz / MANUAL UPLOADS",UI_GOOD,1),TAG,"upload home role");
         for(unsigned i=1;i<=6;++i){size_t cap;const char *value=wardrive_logs_field(i,&cap);(void)cap;
             snprintf(line,sizeof(line),"%s: %s",cerberus_upload_field_name((cerberus_upload_field_t)i),value&&value[0]?"SET":"EMPTY");
             ESP_RETURN_ON_ERROR(draw_small_button(8,108+(i-1)*29,304,25,line),TAG,"upload field");}
         for(unsigned i=0;i<3;++i){snprintf(line,sizeof(line),"%s %s",i==0?"WIGLE":i==1?"WDGW":"DRIFT",(wd_log_ui->draft.destinations&(1U<<i))?"ON":"OFF");
             ESP_RETURN_ON_ERROR(draw_small_button(8+i*104,288,96,26,line),TAG,"upload destination");}
-        ESP_RETURN_ON_ERROR(draw_small_button(8,322,304,28,wd_log_ui->draft.auto_upload_after_stop?
-            "AUTO AFTER STOP: ON":"AUTO AFTER STOP: OFF"),TAG,"automatic setup");
-        ESP_RETURN_ON_ERROR(draw_small_button(8,358,148,28,"IMPORT SD JSON"),TAG,"import setup");
-        ESP_RETURN_ON_ERROR(draw_small_button(164,358,148,28,"SAVE SETUP"),TAG,"save setup");
+        ESP_RETURN_ON_ERROR(draw_small_button(8,322,304,28,"IMPORT JSON FROM SD"),TAG,"import setup");
+        ESP_RETURN_ON_ERROR(draw_small_button(8,358,304,28,"SAVE SETUP"),TAG,"save setup");
         ESP_RETURN_ON_ERROR(draw_small_button(8,394,304,28,"FORGET HOME AP AND ALL KEYS"),TAG,"forget setup");
         return draw_small_button(8,432,304,36,"CANCEL SETUP / LOGS");
     }
@@ -196,9 +170,6 @@ static esp_err_t wardrive_logs_draw(void)
 static void wardrive_logs_tap(uint16_t x,uint16_t y)
 {
     if(!wd_log_ui||x<8||x>=312)return;
-    /* A touch while the catalog opens cancels an undispatched automatic pass.
-     * Otherwise Cancel could be cleared by the later request admission. */
-    wd_log_ui->auto_pending=false;
     cerberus_log_manager_status_t s;cerberus_log_manager_status(&s);
     wd_log_ui->message[0]=0;
     if(wd_log_ui->closing)return;
@@ -233,11 +204,10 @@ static void wardrive_logs_tap(uint16_t x,uint16_t y)
             if(value){wd_log_ui->edit=field;e=cerberus_keyboard_begin(&wd_log_ui->keyboard,wd_log_ui->input,cap,value);
                 cerberus_keyboard_set_masked(&wd_log_ui->keyboard,field!=1);wd_log_ui->page=WD_LOG_INPUT;}}
         else if(y>=288&&y<314){unsigned i=(x-8)/104;if(i<3)wd_log_ui->draft.destinations^=(uint8_t)(1U<<i);}
-        else if(y>=322&&y<350)wd_log_ui->draft.auto_upload_after_stop^=1U;
-        else if(y>=358&&y<386&&x<160)wardrive_logs_confirm(WD_LOG_CONFIRM_IMPORT,-1,&s);
+        else if(y>=322&&y<350)wardrive_logs_confirm(WD_LOG_CONFIRM_IMPORT,-1,&s);
         else if(y>=358&&y<386){e=cerberus_upload_settings_save(&wd_log_ui->draft);
             if(e==ESP_OK){cerberus_upload_config_clear(&wd_log_ui->draft,sizeof(wd_log_ui->draft));wd_log_ui->page=WD_LOG_LIST;
-                snprintf(wd_log_ui->message,sizeof(wd_log_ui->message),"UPLOAD SETUP SAVED");}}
+                snprintf(wd_log_ui->message,sizeof(wd_log_ui->message),"SETUP SAVED / UPLOADS ARE MANUAL");}}
         else if(y>=394&&y<422)wardrive_logs_confirm(WD_LOG_CONFIRM_FORGET,-1,&s);
     }else if(wd_log_ui->page>=WD_LOG_CONFIRM_UPLOAD){
         if(y>=380&&y<416){

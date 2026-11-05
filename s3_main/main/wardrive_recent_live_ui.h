@@ -70,7 +70,7 @@ static void wardrive_recent_handle_tap(uint16_t x, uint16_t y)
         wardrive_recent_close();
     } else if (action == WARDRIVE_RECENT_UI_STOP) {
         wardrive_start_pending = false;
-        if (active) {wardrive_logs_arm_after_stop();cerberus_wardrive_request_stop();}
+        if (active) cerberus_wardrive_request_stop();
     } else if (action != WARDRIVE_RECENT_UI_REDRAW) {
         return;
     }

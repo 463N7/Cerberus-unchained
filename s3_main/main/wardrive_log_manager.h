@@ -2,8 +2,7 @@
 #include "wardrive_log_storage.h"
 #include "wardrive_upload_reply.h"
 #include "wardrive_upload_net.h"
-typedef enum { CERBERUS_LOG_INSPECT, CERBERUS_LOG_DELETE, CERBERUS_LOG_UPLOAD, CERBERUS_LOG_IMPORT_PROFILE,
-    CERBERUS_LOG_AUTO_UPLOAD } cerberus_log_action_t;
+typedef enum { CERBERUS_LOG_INSPECT, CERBERUS_LOG_DELETE, CERBERUS_LOG_UPLOAD, CERBERUS_LOG_IMPORT_PROFILE } cerberus_log_action_t;
 typedef struct {
     uint64_t session;
     uint32_t catalog_revision;
@@ -27,8 +26,6 @@ bool cerberus_log_manager_row(unsigned index,cerberus_ward_log_entry_t *out);
 /* index=-1 means all finalized files from the reviewed catalog, or the one
  * fixed SD profile for IMPORT_PROFILE. The caller must obtain confirmation
  * before DELETE/UPLOAD/IMPORT_PROFILE and pass the exact session and catalog
- * revision shown by that confirmation. AUTO_UPLOAD requires index=-1 and is
- * additionally gated by the saved opt-in policy in the worker. It never retries
- * a rejected/uncertain part. The UI may request it only after explicit Stop. */
+ * revision shown by that confirmation. */
 esp_err_t cerberus_log_manager_request(uint64_t session,uint32_t revision,
     cerberus_log_action_t action,int index);

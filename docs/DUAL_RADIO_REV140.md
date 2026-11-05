@@ -74,8 +74,10 @@ flags OFF. A private profile was prepared, validated with the production parser
 and copied to the owner's SD card. After the owner's interaction, the console
 reported home/WiGLE/WDGWars ready, with destinations mask `0x03`. Physical SD
 inspection confirmed removal of the imported JSON and unchanged recorded CSV.
-Profile import and SD cleanup are therefore verified; saved-profile persistence
-across restart remains a separate check. Private credentials are absent from
+Profile import and SD cleanup are verified. A controlled restart on the exact
+board then preserved all three readiness flags and mask `0x03`, with no previous
+reset fault and C5 online. This verified persistence while the card was on the PC;
+it did not initiate a connection or upload. Private credentials are absent from
 the firmware source, example, diagnostics and PR.
 
 The measured capture and log-navigation baselines remain
