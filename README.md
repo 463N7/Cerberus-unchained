@@ -36,8 +36,9 @@ installed with verified image writes, mounted SD and two successful idle boot
 checks. The preceding rev137 pair completed a 16,592-observation combined-mode
 recording and clean Stop, with both saved CSV files read back. A fresh rev138
 combined run stopped cleanly with 1,438 observations and zero reported queue
-drops; its file readback, sustained GPS fix and live service import acceptance
-remain open. Validation is tracked in
+drops; physical SD readback accounts for every observation. Its native WiGLE
+CSV passes local preflight with missing-accuracy/altitude warnings. Sustained
+GPS fix, endurance and live service import acceptance remain open. Validation is tracked in
 [the rev138 checkpoint](docs/DUAL_RADIO_REV138.md).
 A public binary release has not been selected.**
 The web installer remains unavailable until a matched release is deliberately selected.

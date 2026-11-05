@@ -16,6 +16,12 @@ folder and file count, never targets other SD assets, and does not auto-delete
 after uploading. Unlocated evidence remains available for local inspection and
 deletion but is not offered to geolocation upload services.
 
+Rev138 physical readback found FAT directory timestamps in 1980 while the CSV
+rows contained valid GNSS UTC in 2026. Derive a located session's display date
+from its validated CSV data; do not sort captures or make upload decisions by
+the current FAT modification time. Unlocated sessions without valid UTC must
+show an unknown date. Accurate filesystem timestamps remain a separate fix.
+
 One setup page stores a home Wi-Fi profile and separate WiGLE API name/token,
 WDGWars token and Wardrift token. Entry is masked. Credentials stay outside CSV,
 diagnostics, logs and general settings exports. Keep them in a dedicated device

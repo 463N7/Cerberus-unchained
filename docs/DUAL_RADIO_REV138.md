@@ -66,7 +66,7 @@ diagnostic records 31.415 seconds in combined mode, with the following counts:
 | S3 2.4 GHz Wi-Fi | 263 |
 | S3 BLE | 1,054 |
 | C5 5 GHz Wi-Fi | 121 |
-| Total accepted and reported saved | 1,438 |
+| Total accepted and verified in SD files | 1,438 |
 | Geotagged | 1,436 |
 | Preserved without location | 2 |
 
@@ -77,9 +77,35 @@ LC29H had a fresh fix and valid UTC, 20 satellites and zero bad NMEA checksums
 at 115200 baud. This is a sampled fix status; the two fallback rows remain
 unlocated rather than borrowing a position.
 
-Private proof is `artifacts/device-rev138/combined-session-validation.json`,
-bound to the raw diagnostic capture. New-file SD readback is pending; these
-counts alone do not establish file contents or service acceptance.
+Private diagnostic proof is
+`artifacts/device-rev138/combined-session-validation.json`, bound to the raw
+capture. The SD card was then read directly in the PC's card reader. The two
+new files were copied locally and their bytes hash-verified against the card:
+
+| File | Rows | Contents |
+| --- | ---: | --- |
+| `WIGLE002.CSV` | 1,436 | 263 2.4 GHz Wi-Fi, 121 5 GHz Wi-Fi, 1,052 BLE |
+| `UNLOC008.CSV` | 2 | Two S3 BLE observations preserved without coordinates |
+
+Every accepted observation is accounted for, including the two fallback rows.
+The WiGLE file contains the native rev138 metadata and all Earth fields without
+a post-processing correction. The 14-column CSV passes local preflight with
+no errors. Warnings are 1,436 absent accuracy measurements and two absent
+altitudes. There are 1,368 repeated-identity rows in the located file; they were
+preserved. The original card files were not changed, and nothing was uploaded.
+
+Both fallback rows record fresh GPS state and an empty valid BLE name. The
+precise formatter rejection was not retained, so the cause cannot be inferred
+as lost GPS lock. The general GPS display accepts a fix up to five seconds old;
+WiGLE export separately requires fix/UTC age and callback-to-snapshot delay
+within one second. Per-reason fallback counters are a useful follow-up; this
+checkpoint does not loosen those checks or reconstruct missing coordinates.
+
+CSV observation UTC spans `2026-11-05 01:25:59` through `2026-11-05 01:26:30`.
+FAT directory dates still show 1980, so they must not be used as the capture
+date in a future log list. Private reconciled proof is
+`artifacts/device-rev138/sd-readback/readback-validation.json`. This establishes
+the short combined capture-to-file path, not server acceptance or endurance.
 
 ## Validation status
 
@@ -124,9 +150,9 @@ Private installation evidence is retained in
 `c4aff1d7a67994f054e992b3782c330fbbba835b724458edc20133dcee0ed423`).
 The immutable pre-install milestone remains separate from that installation
 receipt. Boot/idle checks do not establish fresh capture, GPS, touchscreen,
-SD save/reopen or sustained-load behavior. The short combined-mode run above
-adds physical capture/Stop evidence; its file readback is pending. No service
-upload or PR update has been performed.
+SD save/reopen or sustained-load behavior. The short combined-mode run and
+physical SD readback above add capture/Stop and file-content evidence. No
+service upload or PR update has been performed.
 
 Further acceptance needs sustained GPS fix/UTC, repeated combined-mode runs,
 separate-mode tests, endurance and a real service import result. Channel dwell
