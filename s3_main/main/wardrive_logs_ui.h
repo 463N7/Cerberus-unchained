@@ -2,6 +2,7 @@
  * manager worker; the touch loop reads value snapshots only. */
 #include "wardrive_log_manager.h"
 #include "wardrive_upload_settings.h"
+#include "wardrive_log_feedback.h"
 typedef enum { WD_LOG_LIST,WD_LOG_DETAIL,WD_LOG_SETUP,WD_LOG_INPUT,
     WD_LOG_CONFIRM_UPLOAD,WD_LOG_CONFIRM_DELETE,WD_LOG_CONFIRM_FORGET,WD_LOG_CONFIRM_IMPORT,
     WD_LOG_CONFIRM_RETRY } wd_log_page_t;
@@ -96,6 +97,13 @@ static esp_err_t wardrive_logs_draw(void)
     const char *message=wd_log_ui->message[0]?wd_log_ui->message:s.stage;
     if(receipt_hold&&!wd_log_ui->message[0])message="UPLOAD NEEDS RETRY CONFIRMATION";
     if(wd_log_ui->closing)message="CLOSING / RELEASING RESOURCES";
+    cerberus_wardrive_status_t capture;
+    cerberus_wardrive_get_status(&capture);
+    const char *unsaved = cerberus_wardrive_unsaved_reason(&capture);
+    bool catalog_ready = s.active && !s.busy && !wd_log_ui->closing &&
+        s.error == ESP_OK && !wd_log_ui->message[0];
+    if (wd_log_ui->page == WD_LOG_LIST && catalog_ready && unsaved)
+        message = "LAST SESSION: NO CSV SAVED";
     ESP_RETURN_ON_ERROR(draw_centered(58,message,wd_log_ui->message[0]||s.error!=ESP_OK?UI_BAD:UI_MUTED,1),TAG,"log status");
     if(s.error!=ESP_OK){snprintf(line,sizeof(line),"%s",receipt_hold?
         "OPEN LOG / CONFIRM SERVICE RETRY":esp_err_to_name(s.error));
@@ -199,6 +207,8 @@ static esp_err_t wardrive_logs_draw(void)
         return draw_small_button(8,432,304,36,"BACK TO LOGS");
     }
     unsigned pages=s.count?(s.count+4)/5:1;if(wd_log_ui->list_page>=pages)wd_log_ui->list_page=pages-1;
+    if(catalog_ready && unsaved)
+        ESP_RETURN_ON_ERROR(draw_centered(74,unsaved,UI_BAD,1),TAG,"last capture not saved");
     ESP_RETURN_ON_ERROR(draw_small_button(8,90,304,30,"HOME WI-FI / API SETUP"),TAG,"setup route");
     for(unsigned row=0;row<5;++row){cerberus_ward_log_entry_t entry;
         unsigned index=wd_log_ui->list_page*5+row;if(!cerberus_log_manager_row(index,&entry))break;
@@ -206,7 +216,14 @@ static esp_err_t wardrive_logs_draw(void)
             snprintf(line,sizeof(line),"%s / LEGACY NO GPS",entry.name);
         else snprintf(line,sizeof(line),"%s  %llu KiB",entry.name,(unsigned long long)(entry.bytes/1024));
         ESP_RETURN_ON_ERROR(draw_small_button(8,130+row*34,304,30,line),TAG,"saved log row");}
-    if(!s.count)ESP_RETURN_ON_ERROR(draw_centered(190,"NO FINALIZED CAPTURES ON THIS CARD",UI_MUTED,1),TAG,"empty logs");
+    if(!s.count){
+        ESP_RETURN_ON_ERROR(draw_centered(174,catalog_ready?"NO SAVED CSV LOGS":"LOG LIST UNAVAILABLE",UI_TEXT,2),TAG,"empty logs");
+        ESP_RETURN_ON_ERROR(draw_centered(205,catalog_ready?"/CERBERUS/WARD":"BACK AND REOPEN LOGS",UI_MUTED,1),TAG,"log location");
+        if(catalog_ready){
+            ESP_RETURN_ON_ERROR(draw_centered(237,"WAIT FOR GPS: FIX + UTC",UI_TEXT,1),TAG,"empty log GPS");
+            ESP_RETURN_ON_ERROR(draw_centered(259,"START / CHECK SD ROWS / STOP TO SAVE",UI_MUTED,1),TAG,"empty log steps");
+        }
+    }
     snprintf(line,sizeof(line),"%u / %u",wd_log_ui->list_page+1,pages);
     ESP_RETURN_ON_ERROR(draw_small_button(8,310,84,28,"PREV"),TAG,"previous logs");
     ESP_RETURN_ON_ERROR(draw_centered(320,line,UI_MUTED,1),TAG,"log pagination");

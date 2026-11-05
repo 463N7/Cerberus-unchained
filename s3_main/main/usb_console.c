@@ -95,6 +95,7 @@ static __attribute__((noinline)) void print_radio(void);
 static __attribute__((noinline)) void print_gps(void);
 static __attribute__((noinline)) void print_upload_profile(void);
 static __attribute__((noinline)) void print_upload_status(void);
+static __attribute__((noinline)) void print_wardrive_logs(void);
 static __attribute__((noinline)) void print_dual_ble(void);
 static __attribute__((noinline)) void print_ble_memory(void);
 static __attribute__((noinline)) void print_battery(void);
@@ -172,6 +173,7 @@ static void print_help(void)
         "gps      Show receiver, baud and fix health without coordinates\r\n"
         "upload_profile Show saved upload readiness without credentials\r\n"
         "upload_status Show log operation and numeric transfer diagnostics\r\n"
+        "ward_logs    List finalized wardrive filenames and sizes, read-only\r\n"
         "dual_ble Read cached two-receiver BLE/Fox state without SPI or scanning\r\n"
         "ble_memory Read cached S3 BLE lifecycle heap samples without heap walks\r\n"
         "battery  Show cached onboard battery gauge status\r\n"
@@ -642,6 +644,32 @@ static void print_usb(void)
     cerberus_usb_mass_storage_get_status(&status);
     console_printf("msc_active=%u\r\nhost_attached=%u\r\nsafe_to_release=%u\r\nlast_error=%s\r\n",
         status.active, status.host_attached, status.safe_to_release, esp_err_to_name(status.last_error));
+}
+
+static void print_wardrive_logs(void)
+{
+    /* Use the same catalog and exclusive SD lease as the touchscreen. No CSV
+     * contents, network connection, deletion, or receipt mutation is allowed. */
+    const size_t capacity = CERBERUS_WARD_LOG_CAPACITY;
+    cerberus_ward_log_entry_t *entries = heap_caps_calloc(capacity, sizeof(*entries),
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint64_t lease = 0;
+    size_t count = 0;
+    esp_err_t error = entries ? cerberus_ward_log_storage_begin(&lease) : ESP_ERR_NO_MEM;
+    if (error == ESP_OK) error = cerberus_ward_log_storage_list(lease, entries, capacity, &count);
+    esp_err_t release = ESP_OK;
+    if (lease) {
+        do {
+            release = cerberus_ward_log_storage_end(lease);
+            if (release == ESP_ERR_TIMEOUT) vTaskDelay(pdMS_TO_TICKS(20));
+        } while (release == ESP_ERR_TIMEOUT);
+        if (error == ESP_OK) error = release;
+    }
+    console_printf("ward_logs_error=%d\r\nward_logs_release_error=%d\r\nward_logs_count=%u\r\n",
+        error, release, (unsigned)count);
+    for (size_t i = 0; error == ESP_OK && i < count && !atomic_load(&console_stop_requested); ++i)
+        console_printf("ward_log=%s bytes=%" PRIu64 "\r\n", entries[i].name, entries[i].bytes);
+    heap_caps_free(entries);
 }
 
 static void print_reports(void)
@@ -1699,6 +1727,8 @@ static void execute_command(char *line)
         print_upload_profile();
     } else if (strcmp(start, "upload_status") == 0) {
         print_upload_status();
+    } else if (strcmp(start, "ward_logs") == 0) {
+        print_wardrive_logs();
     } else if (strcmp(start, "battery") == 0) {
         print_battery();
     } else {

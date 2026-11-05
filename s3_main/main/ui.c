@@ -4,6 +4,7 @@
 #include "field_survey_view.h"
 #include "field_menu.h"
 #include "wardrive_service.h"
+#include "wardrive_log_feedback.h"
 #include "wifi_target_view.h"
 #include "wifi_packet_monitor_core.h"
 #include "wifi_packet_count_scan.h"
@@ -8149,8 +8150,14 @@ static esp_err_t draw_wardrive(void)
             (unsigned long)receiver.active_baud,receiver.detecting_baud?"DETECTING":"NMEA");
         ESP_RETURN_ON_ERROR(draw_centered(93,line,UI_MUTED,1),TAG,"wardrive live GPS");
     }
+    const char *unsaved = cerberus_wardrive_unsaved_reason(&status);
+    const char *state_label = wardrive_state_label(status.state);
+    if (unsaved) state_label = "STOPPED / NO CSV SAVED";
+    else if (status.state == CERBERUS_WARDRIVE_RUNNING &&
+        (!status.gps_requested || status.gps.state != CERBERUS_WARDRIVE_GPS_FRESH || !status.gps.utc_valid))
+        state_label = "SCANNING / WAITING FOR GPS";
     snprintf(line, sizeof(line), "STATE: %s", wardrive_start_pending ?
-        "WAITING FOR RADIOS" : wardrive_state_label(status.state));
+        "WAITING FOR RADIOS" : state_label);
     ESP_RETURN_ON_ERROR(draw_centered(105, line,
         status.state == CERBERUS_WARDRIVE_ERROR ? UI_BAD :
         active ? UI_GOOD : UI_TEXT, 1), TAG, "wardrive state");
@@ -8182,7 +8189,7 @@ static esp_err_t draw_wardrive(void)
         (unsigned long long)(status.sd_bytes / 1024U));
     ESP_RETURN_ON_ERROR(draw_centered(260, line, UI_TEXT, 1), TAG, "wardrive storage");
     snprintf(line, sizeof(line), "LAST FILE: %s", status.last_file_name[0] ?
-        status.last_file_name : "NONE YET");
+        status.last_file_name : unsaved ? "NO CSV CREATED" : "NONE YET");
     ESP_RETURN_ON_ERROR(draw_centered(280, line, UI_MUTED, 1), TAG, "wardrive file");
     snprintf(line, sizeof(line), "NOT SAVED: %llu / NO FIX %lu",
         (unsigned long long)((uint64_t)status.skipped_no_fix+status.skipped_time+status.skipped_format),
@@ -8209,6 +8216,10 @@ static esp_err_t draw_wardrive(void)
         ESP_RETURN_ON_ERROR(draw_centered(324, "WAITING FOR RADIOS AND FILES", UI_GOOD, 1), TAG, "wardrive exit");
     } else if (active && (!status.gps_requested || status.gps.state != CERBERUS_WARDRIVE_GPS_FRESH || !status.gps.utc_valid)) {
         ESP_RETURN_ON_ERROR(draw_centered(324, "SCANNING / CSV NEEDS GPS FIX + UTC", UI_MUTED, 1), TAG, "wardrive fix wait");
+    } else if (unsaved) {
+        ESP_RETURN_ON_ERROR(draw_centered(324, unsaved, UI_BAD, 1), TAG, "wardrive unsaved reason");
+    } else if (status.state == CERBERUS_WARDRIVE_STOPPED && status.files_saved) {
+        ESP_RETURN_ON_ERROR(draw_centered(324, "CSV SAVED / OPEN LOGS BELOW", UI_GOOD, 1), TAG, "wardrive saved");
     }
     ESP_RETURN_ON_ERROR(draw_small_button(24, 346, 132, 28,
         wardrive_include_expansions ? "R1-R6: ON" : "R1-R6: OFF"),

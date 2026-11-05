@@ -29,13 +29,15 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source and installed development checkpoint: `0.1.0-dev.rev143`,
-with onboard C5 protocol firmware revision 75.**
+**Current source: `0.1.0-dev.rev144`; installed development checkpoint:
+`0.1.0-dev.rev143`, with onboard C5 protocol firmware revision 75.**
 Wardriving saves one `CERBWardrive001.CSV` per session,
 using WiGLE 1.6 with valid GPS/UTC rows and visible skipped-observation counts.
 One JSON profile configures home Wi-Fi, WiGLE, WDGWars and Wardrift for manual
 Upload / Upload All. Rev143 adds a direct service retry button and clearer
 legacy-log labels; see the [rev143 scope](docs/DUAL_RADIO_REV143.md).
+Rev144 makes unsaved sessions explicit, explains an empty log list, and adds a
+read-only SD catalog diagnostic; see the [missing-log fix](docs/DUAL_RADIO_REV144.md).
 See the [setup guide](docs/WARDRIVE_UPLOADS.md) for the single JSON profile and
 manual upload workflow. Rev143 passes all 166 local host suites and five native
 targets. Its paired installation has verified image writes, mounted SD, retained
@@ -57,7 +59,7 @@ onboard C5 firmware revision 74 and protocol 2.
 or [download its matched package and checksums](https://github.com/463N7/Cerberus-unchained/releases/tag/v0.1.0-dev.rev136).
 The guided installer programs the bridge, C5 and S3 using one USB cable in
 desktop Chrome or Edge. Its published files are preserved by this contribution;
-they do not install the rev143 development source described above.
+they do not install the current development source described above.
 Rev136 remains experimental with limited physical acceptance; see its
 [checkpoint](docs/DUAL_RADIO_REV136.md) and the [flasher guide](docs/WEB_FLASHER.md).
 Sentinel 1.0.0 binaries are not Unchained firmware.

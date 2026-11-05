@@ -63,7 +63,7 @@ static int64_t esp_timer_get_time(void)
 #define OTHER(name) static void name(void){++other_commands;}
 OTHER(print_info) OTHER(print_health) OTHER(print_memory) OTHER(print_c5)
 OTHER(print_storage) OTHER(print_resources) OTHER(print_capture) OTHER(print_usb)
-OTHER(print_network) OTHER(print_stations) OTHER(print_reports) OTHER(print_radio) OTHER(print_gps) OTHER(print_upload_profile) OTHER(print_upload_status) OTHER(print_battery)
+OTHER(print_network) OTHER(print_stations) OTHER(print_reports) OTHER(print_radio) OTHER(print_gps) OTHER(print_upload_profile) OTHER(print_upload_status) OTHER(print_wardrive_logs) OTHER(print_battery)
 OTHER(print_remote_id)
 OTHER(print_wifi_readout)
 OTHER(print_recon_record)

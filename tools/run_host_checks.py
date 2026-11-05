@@ -330,7 +330,7 @@ def main() -> int:
     changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
     receipt = {
         "format": 1,
-        "suite_set": "rev143",
+        "suite_set": "rev144",
         "recorded_utc": datetime.now(timezone.utc).isoformat(),
         "status": "passed" if not changed and head == head_after and
             (args.shard_count is None or clean_after) and

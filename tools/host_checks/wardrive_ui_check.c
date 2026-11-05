@@ -1,5 +1,6 @@
 #undef NDEBUG
 #include "wardrive_service.h"
+#include "wardrive_log_feedback.h"
 #include "wardrive_gps_uart.h"
 #include "ui_widgets.h"
 #include "display.h"
@@ -144,7 +145,21 @@ static void check_views(const char *prefix)
     CHECK(!strcmp(lines[105],"STATE: STOPPING / SAVING"));
     CHECK(!strcmp(lines[324],"WAITING FOR RADIOS AND FILES")&&strstr(drawn,"STOP\n"));save(prefix,"stopping");
     runtime.state=CERBERUS_WARDRIVE_STOPPED;wardrive_return_pending=false;draw();
-    CHECK(!strcmp(lines[105],"STATE: STOPPED")&&strstr(drawn,"START\n"));
+    CHECK(!strcmp(lines[105],"STATE: STOPPED / NO CSV SAVED")&&strstr(drawn,"START\n"));
+    CHECK(!strcmp(lines[280],"LAST FILE: NO CSV CREATED"));
+    CHECK(!strcmp(lines[324],"GPS WAS OFF / SCAN ONLY"));save(prefix,"stopped-gps-off");
+    runtime.gps_requested=true;wardrive_gps_enabled=true;draw();
+    CHECK(!strcmp(lines[324],"NO VALID GPS FIX + UTC DURING CAPTURE"));save(prefix,"stopped-no-fix");
+    /* A later receiver fix must not rewrite the completed session's outcome. */
+    runtime.gps.state=CERBERUS_WARDRIVE_GPS_FRESH;runtime.gps.utc_valid=true;draw();
+    CHECK(!strcmp(lines[324],"NO VALID GPS FIX + UTC DURING CAPTURE"));
+    runtime.skipped_no_fix=0;runtime.skipped_time=10;draw();
+    CHECK(!strcmp(lines[324],"OBSERVATION TIMES COULD NOT MATCH GPS"));
+    runtime.skipped_time=0;runtime.skipped_format=10;draw();
+    CHECK(!strcmp(lines[324],"NO OBSERVATIONS IN SUPPORTED CSV FORMAT"));
+    runtime.skipped_format=0;draw();CHECK(!strcmp(lines[324],"NO ELIGIBLE OBSERVATIONS RECEIVED"));
+    runtime.files_saved=1;runtime.sd_rows=138;strcpy(runtime.last_file_name,"CERBWardrive001.CSV");draw();
+    CHECK(!strcmp(lines[105],"STATE: STOPPED")&&!strcmp(lines[324],"CSV SAVED / OPEN LOGS BELOW"));save(prefix,"stopped-saved");
     runtime.state=CERBERUS_WARDRIVE_ERROR;runtime.error_code=ESP_ERR_TIMEOUT;runtime.s3_ble_error=ESP_ERR_TIMEOUT;
     draw();CHECK(!strcmp(lines[324],"S3: ESP_ERR_TIMEOUT"));save(prefix,"error");
     runtime=(cerberus_wardrive_status_t){.state=CERBERUS_WARDRIVE_RUNNING,.gps_requested=true,

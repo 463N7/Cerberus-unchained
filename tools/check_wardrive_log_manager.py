@@ -7,6 +7,8 @@ exe=out/('manager.exe' if os.name=='nt' else 'manager')
 console=(root/'s3_main/main/usb_console.c').read_text()
 start=console.index('static void print_upload_status(void)\n{')
 (out/'upload_status_impl.h').write_text(console[start:console.index('static void print_upload_profile(void)\n{',start)])
+start=console.index('static void print_wardrive_logs(void)\n{')
+(out/'ward_logs_console_impl.h').write_text(console[start:console.index('static void print_reports(void)\n{',start)])
 subprocess.run([sys.executable,'-m','ziglang','cc','-std=c11','-D_POSIX_C_SOURCE=200809L','-O1','-Wall','-Wextra','-Werror',
     '-include',str(root/'tools/host_checks/upload_stubs/host_time.h'),
     '-I',str(out),'-I',str(root/'tools/host_checks/upload_stubs'),'-I',str(root/'tools/host_checks/stubs'),

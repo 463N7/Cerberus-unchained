@@ -10,6 +10,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <stdarg.h>
+#include <stdatomic.h>
+#include <inttypes.h>
 #ifdef _WIN32
 #include <io.h>
 #include <direct.h>
@@ -19,6 +21,8 @@
 #include "wardrive_upload_settings.h"
 #include "wardrive_upload_receipt.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_heap_caps.h"
 #include "psa/crypto.h"
 
 static unsigned critical,storage_locked,allocations,phase,sends,begins,ends,deleted;
@@ -38,6 +42,8 @@ static void console_printf(const char *format,...)
     int n=vsnprintf(console_output+used,sizeof(console_output)-used,format,args);va_end(args);
     assert(n>0&&(size_t)n<sizeof(console_output)-used);}
 #include "upload_status_impl.h"
+static atomic_bool console_stop_requested;
+#include "ward_logs_console_impl.h"
 struct tm *test_gmtime_r(const time_t *t,struct tm *out){struct tm *p=gmtime(t);if(p)*out=*p;return p?out:NULL;}
 void test_enter(void){assert(!critical);critical=1;}
 void test_exit(void){assert(critical);critical=0;}
@@ -258,6 +264,18 @@ int main(int argc,char **argv)
     if(!strncmp(argv[1],"retry_",6)){retry_mode=argv[1];wdgwars_unknown=true;}
     retry_multipart=!strcmp(argv[1],"retry_multipart");
     current_names=!strcmp(argv[1],"current_name");
+    /* Diagnostic catalog uses actual leased storage, never the upload worker.
+     * It lists the existing files, omits TMP/other paths, and releases its lease. */
+    print_wardrive_logs();assert(strstr(console_output,"ward_logs_error=0\r\n")&&
+        strstr(console_output,"ward_logs_count=2\r\n")&&strstr(console_output,"UNLOC001.CSV")&&
+        strstr(console_output,current_names?"CERBWardrive001.CSV":"WIGLE001.CSV"));
+    assert(!strstr(console_output,"WIGLE002.TMP")&&!strstr(console_output,"KEEP.TXT"));
+    assert(!sends&&!begins&&!ends&&!sd_ward_log_lease&&!allocations);
+    console_output[0]=0;sd_busy=true;print_wardrive_logs();
+    assert(strstr(console_output,"ward_logs_count=0\r\n")&&!strstr(console_output,"ward_log="));
+    assert(!sd_ward_log_lease&&!allocations);sd_busy=false;
+    console_output[0]=0;fail_alloc=true;print_wardrive_logs();assert(!sd_ward_log_lease&&!allocations);
+    fail_alloc=false;console_output[0]=0;
     fail_sync=!strcmp(argv[1],"sd_fail");network_fail=!strcmp(argv[1],"network_fail");sd_busy=!strcmp(argv[1],"busy");
     if(!strncmp(argv[1],"import_",7))import_mode=argv[1];
     fail_alloc=true;assert(cerberus_log_manager_open()==ESP_ERR_NO_MEM&&!allocations);fail_alloc=false;

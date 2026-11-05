@@ -144,5 +144,15 @@ int main(int argc,char **argv)
     wardrive_logs_tap(50,140);strcpy(manager.name,"CERBWardrive001.CSV");
     paint(argv[1],"current-detail");assert(strstr(drawn,"CERBWardrive001.CSV")&&strstr(drawn,"RETRY WDGWARS UPLOAD"));
     wardrive_logs_tick(true);assert(!wd_log_ui&&!allocs);
+    wardrive_logs_open();manager.count=0;manager.error=ESP_OK;manager.stage[0]=0;
+    runtime=(cerberus_wardrive_status_t){.state=CERBERUS_WARDRIVE_STOPPED,.gps_requested=true,.skipped_no_fix=138};
+    paint(argv[1],"empty-no-fix");assert(strstr(drawn,"LAST SESSION: NO CSV SAVED")&&
+        strstr(drawn,"NO VALID GPS FIX + UTC DURING CAPTURE")&&strstr(drawn,"WAIT FOR GPS: FIX + UTC"));
+    manager.count=7;paint(argv[1],"old-logs-no-new-fix");
+    assert(strstr(drawn,"CERBWardrive001.CSV")&&strstr(drawn,"LAST SESSION: NO CSV SAVED"));
+    runtime.files_saved=1;runtime.sd_rows=10;paint(argv[1],"saved-session");assert(!strstr(drawn,"NO CSV SAVED"));
+    manager.count=0;manager.error=ESP_ERR_INVALID_STATE;paint(argv[1],"catalog-error");
+    assert(strstr(drawn,"LOG LIST UNAVAILABLE")&&!strstr(drawn,"NO SAVED CSV LOGS"));
+    wardrive_logs_tap(50,450);wardrive_logs_tick(false);assert(!wd_log_ui&&!allocs);
     puts("Actual upload UI: pagination, masked setup, explicit confirmations, Stop/Back/sleep passed");return 0;
 }
