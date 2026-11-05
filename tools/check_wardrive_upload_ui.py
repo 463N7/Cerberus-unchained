@@ -12,7 +12,7 @@ display=(root/'s3_main/main/display.c').read_text();start=display.index('static 
 (out/'display_font.h').write_text(display[start:display.index('\nesp_err_t ',start)])
 env=dict(os.environ,ZIG_GLOBAL_CACHE_DIR=str(out/'zig-global'),ZIG_LOCAL_CACHE_DIR=str(out/'zig-local'))
 exe=out/('ui.exe' if os.name=='nt' else 'ui')
-subprocess.run([sys.executable,'-m','ziglang','cc','-std=c11','-O1','-Wall','-Wextra','-Werror','-Wno-unused-function',
+subprocess.run([sys.executable,'-m','ziglang','cc','-std=c11','-D_POSIX_C_SOURCE=200809L','-O1','-Wall','-Wextra','-Werror','-Wno-unused-function',
     '-I',str(out),'-I',str(root/'tools/host_checks/upload_stubs'),'-I',str(root/'tools/host_checks/stubs'),'-I',str(root/'s3_main/main'),'-I',str(root/'shared'),
     str(root/'tools/host_checks/wardrive_upload_ui_check.c'),*[str(root/'s3_main/main'/n) for n in ['ui_widgets.c','keyboard.c','wardrive_upload_config.c','wardrive_upload_reply.c','wardrive_log.c']],
     '-o',str(exe)],check=True,env=env)

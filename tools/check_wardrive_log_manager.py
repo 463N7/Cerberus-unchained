@@ -4,7 +4,7 @@ import os,subprocess,sys
 root=Path(__file__).resolve().parents[1];out=root/'artifacts/wardrive-log-manager-checks';out.mkdir(parents=True,exist_ok=True)
 env=dict(os.environ,ZIG_GLOBAL_CACHE_DIR=str(out/'zig-global'),ZIG_LOCAL_CACHE_DIR=str(out/'zig-local'))
 exe=out/('manager.exe' if os.name=='nt' else 'manager')
-subprocess.run([sys.executable,'-m','ziglang','cc','-std=c11','-O1','-Wall','-Wextra','-Werror',
+subprocess.run([sys.executable,'-m','ziglang','cc','-std=c11','-D_POSIX_C_SOURCE=200809L','-O1','-Wall','-Wextra','-Werror',
     '-include',str(root/'tools/host_checks/upload_stubs/host_time.h'),
     '-I',str(root/'tools/host_checks/upload_stubs'),'-I',str(root/'tools/host_checks/stubs'),
     '-I',str(root/'s3_main/main'),'-I',str(root/'shared'),str(root/'tools/host_checks/wardrive_log_manager_check.c'),
