@@ -113,6 +113,44 @@ static bool ward_receipt_key(const char *key)
     return key[68] == 0;
 }
 
+esp_err_t cerberus_ward_log_profile_read(uint64_t token,void *out,size_t capacity,size_t *bytes)
+{
+    if(!out||!bytes||!capacity||capacity>4096)return ESP_ERR_INVALID_ARG;
+    *bytes=0;
+    ESP_RETURN_ON_ERROR(take_storage_mutex(),TAG,"profile read lock");
+    esp_err_t err=ward_log_token_valid(token)&&!ward_log_open_files?ESP_OK:ESP_ERR_INVALID_STATE;
+    if(err==ESP_OK){
+        const char *path=CERBERUS_STORAGE_MOUNT_PATH CERBERUS_WARD_UPLOAD_PROFILE_PATH;
+        struct stat st;
+        if(stat(path,&st))err=errno==ENOENT?ESP_ERR_NOT_FOUND:ESP_FAIL;
+        else if(!S_ISREG(st.st_mode)||st.st_size<=0||(uint64_t)st.st_size>capacity)err=ESP_ERR_INVALID_SIZE;
+        else{
+            FILE *file=fopen(path,"rb");
+            if(!file)err=ESP_FAIL;
+            else{
+                size_t n=fread(out,1,capacity,file);
+                if(n!=(size_t)st.st_size||fgetc(file)!=EOF||ferror(file))err=ESP_FAIL;
+                if(fclose(file))err=ESP_FAIL;
+                if(err==ESP_OK)*bytes=n;
+            }
+        }
+    }
+    release_storage_mutex();return err;
+}
+esp_err_t cerberus_ward_log_profile_remove(uint64_t token,size_t expected_bytes)
+{
+    if(!expected_bytes||expected_bytes>4096)return ESP_ERR_INVALID_ARG;
+    ESP_RETURN_ON_ERROR(take_storage_mutex(),TAG,"profile remove lock");
+    esp_err_t err=ward_log_token_valid(token)&&!ward_log_open_files?ESP_OK:ESP_ERR_INVALID_STATE;
+    if(err==ESP_OK){
+        const char *path=CERBERUS_STORAGE_MOUNT_PATH CERBERUS_WARD_UPLOAD_PROFILE_PATH;
+        struct stat st;
+        if(stat(path,&st)||!S_ISREG(st.st_mode)||st.st_size!=(long)expected_bytes)err=ESP_ERR_INVALID_STATE;
+        else if(remove(path))err=ESP_FAIL;
+    }
+    release_storage_mutex();return err;
+}
+
 static esp_err_t ward_receipt(uint64_t token, const char *key, void *data, size_t bytes, bool write)
 {
     if (!ward_receipt_key(key) || !data || !bytes || bytes > 512) return ESP_ERR_INVALID_ARG;

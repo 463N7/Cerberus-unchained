@@ -96,6 +96,13 @@ int main(int argc,char **argv)
     wardrive_logs_tap(50,400);assert(wd_log_ui->confirmed_count==7&&last_action==CERBERUS_LOG_UPLOAD);wardrive_logs_tap(50,395);
     assert(last_action==CERBERUS_LOG_DELETE&&last_index==-1&&requests==3);
     wardrive_logs_tap(50,450);wardrive_logs_tick(false);assert(!wardrive_logs_is_open()&&!allocs&&closes);
+    wardrive_logs_open();wardrive_logs_tap(50,105);wardrive_logs_tap(50,336);
+    assert(wd_log_ui->page==WD_LOG_CONFIRM_IMPORT&&requests==3);
+    paint(argv[1],"import-confirm");assert(strstr(drawn,CERBERUS_WARD_UPLOAD_PROFILE_PATH)&&strstr(drawn,"REPLACES HOME AP"));
+    wardrive_logs_tap(50,450);assert(wd_log_ui->page==WD_LOG_SETUP&&requests==3);
+    wardrive_logs_tap(50,336);wardrive_logs_tap(50,395);
+    assert(last_action==CERBERUS_LOG_IMPORT_PROFILE&&last_index==-1&&requests==4&&wd_log_ui->page==WD_LOG_LIST);
+    wardrive_logs_tap(50,450);wardrive_logs_tick(false);assert(!wardrive_logs_is_open()&&!allocs);
     wardrive_logs_open();strcpy(wd_log_ui->draft.password,"SyntheticSecret123");wardrive_logs_tick(true);assert(!wd_log_ui&&!allocs);
     puts("Actual upload UI: pagination, masked setup, explicit confirmations, Stop/Back/sleep passed");return 0;
 }

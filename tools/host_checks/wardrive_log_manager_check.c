@@ -22,6 +22,8 @@
 
 static unsigned critical,storage_locked,allocations,phase,sends,begins,ends,deleted;
 static bool fail_alloc,fail_task,fail_sync,sd_busy,unknown_reply,network_fail,request_cancel;
+static const char *import_mode;
+static unsigned saves;
 static void (*queued)(void *);
 static cerberus_upload_config_t saved;
 struct tm *test_gmtime_r(const time_t *t,struct tm *out){struct tm *p=gmtime(t);if(p)*out=*p;return p?out:NULL;}
@@ -67,9 +69,17 @@ static int test_fsync(int fd){assert(storage_locked);if(fail_sync)return -1;
 #endif
 }
 #define fsync test_fsync
+static int test_remove(const char *path)
+{if(import_mode&&!strcmp(import_mode,"import_remove_fail")&&strstr(path,"/CONFIG/UPLOAD.JSON")){errno=EIO;return -1;}return remove(path);}
+#define remove test_remove
 #include "storage_wardrive_logs_impl.h"
 #undef fsync
-esp_err_t cerberus_upload_settings_load(cerberus_upload_config_t *out){*out=saved;return ESP_OK;}
+#undef remove
+esp_err_t cerberus_upload_settings_load(cerberus_upload_config_t *out)
+{if(import_mode&&!strcmp(import_mode,"import_readback_fail"))return ESP_FAIL;*out=saved;return ESP_OK;}
+esp_err_t cerberus_upload_settings_save(const cerberus_upload_config_t *config)
+{++saves;if(import_mode&&!strcmp(import_mode,"import_save_fail"))return ESP_FAIL;saved=*config;
+    if(import_mode&&!strcmp(import_mode,"import_cancel_after_save"))cerberus_log_manager_cancel();return ESP_OK;}
 esp_err_t cerberus_upload_net_begin(const cerberus_upload_config_t *c,cerberus_upload_cancel_fn cancel,cerberus_upload_progress_fn progress,void *context)
 {assert(!critical&&!storage_locked&&sd_ward_log_lease&&c->destinations==7&&!cancel(context));++begins;progress(context,"CONNECTING",0,0);return network_fail?ESP_FAIL:ESP_OK;}
 esp_err_t cerberus_upload_net_end(void){assert(!critical&&!storage_locked);++ends;return ESP_OK;}
@@ -97,6 +107,19 @@ void vTaskDelay(unsigned ms)
     assert(!critical&&!storage_locked);cerberus_log_manager_status_t s;cerberus_log_manager_status(&s);
     if(s.busy||ms!=50)return;
     if(sd_busy){assert(s.error!=ESP_OK&&!sd_ward_log_lease);cerberus_log_manager_close();return;}
+    if(import_mode){
+        if(phase++==0){assert(s.active&&s.count==2);issue(CERBERUS_LOG_IMPORT_PROFILE,-1);return;}
+        assert(phase==2&&!begins&&!sends&&!ends);
+        bool invalid=!strcmp(import_mode,"import_invalid"),save_fail=!strcmp(import_mode,"import_save_fail");
+        bool read_fail=!strcmp(import_mode,"import_readback_fail"),remove_fail=!strcmp(import_mode,"import_remove_fail");
+        assert(s.profile_saved==!(invalid||save_fail||read_fail));
+        assert((s.error==ESP_OK)==!(invalid||save_fail||read_fail||remove_fail));
+        assert(saves==(unsigned)!invalid);
+        assert(!strcmp(saved.ssid,invalid||save_fail?"fixture":"JSON fixture AP"));
+        struct stat st;assert((stat("card/CERBERUS/CONFIG/UPLOAD.JSON",&st)==0)==(invalid||save_fail||read_fail||remove_fail));
+        if(s.profile_saved)assert(strstr(s.stage,"PROFILE SAVED"));
+        cerberus_log_manager_close();return;
+    }
     switch(phase++){
     case 0:{assert(s.count==2&&s.active&&s.error==ESP_OK&&sd_ward_log_lease);
         uint64_t token=1;assert(cerberus_ward_log_storage_begin(&token)!=ESP_OK&&!token);
@@ -128,6 +151,7 @@ int main(int argc,char **argv)
     strcpy(saved.wigle_token,"fixture-token");memset(saved.wdgwars_token,'a',64);strcpy(saved.wardrift_token,"fixture-token");saved.destinations=7;
     unknown_reply=!strcmp(argv[1],"unknown");request_cancel=!strcmp(argv[1],"cancel");
     fail_sync=!strcmp(argv[1],"sd_fail");network_fail=!strcmp(argv[1],"network_fail");sd_busy=!strcmp(argv[1],"busy");
+    if(!strncmp(argv[1],"import_",7))import_mode=argv[1];
     fail_alloc=true;assert(cerberus_log_manager_open()==ESP_ERR_NO_MEM&&!allocations);fail_alloc=false;
     fail_task=true;assert(cerberus_log_manager_open()==ESP_ERR_NO_MEM&&!allocations);fail_task=false;
     assert(cerberus_log_manager_open()==ESP_OK&&queued&&allocations);

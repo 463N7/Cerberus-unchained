@@ -8,7 +8,7 @@ subprocess.run([sys.executable,'-m','ziglang','cc','-std=c11','-O1','-Wall','-We
     '-include',str(root/'tools/host_checks/upload_stubs/host_time.h'),
     '-I',str(root/'tools/host_checks/upload_stubs'),'-I',str(root/'tools/host_checks/stubs'),
     '-I',str(root/'s3_main/main'),'-I',str(root/'shared'),str(root/'tools/host_checks/wardrive_log_manager_check.c'),
-    *[str(root/'s3_main/main'/n) for n in ['wardrive_log_manager.c','wardrive_upload_config.c','wardrive_upload_file.c','wardrive_upload_receipt.c','wardrive_upload_reply.c','wardrive_log.c']],
+    *[str(root/'s3_main/main'/n) for n in ['wardrive_log_manager.c','wardrive_upload_config.c','wardrive_upload_json.c','wardrive_upload_file.c','wardrive_upload_receipt.c','wardrive_upload_reply.c','wardrive_log.c']],
     '-o',str(exe)],check=True,env=env)
 meta='WigleWifi-1.6,appRelease=fixture,model=Cerberus,release=fixture,device=Cerberus,display=ST7796,board=ESP32-S3-C5,brand=Cerberus,star=Sol,body=3,subBody=0\n'
 columns='MAC,SSID,AuthMode,FirstSeen,Channel,Frequency,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,RCOIs,MfgrId,Type\n'
@@ -21,13 +21,18 @@ start=header.index('#define CERBERUS_WARDRIVE_UNLOCATED_HEADER')
 section=header[start:header.index('\n\n',start)]
 unloc_header=''.join(bytes(s,'utf8').decode('unicode_escape') for s in re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"',section))
 unloc=['']*34;unloc[:5]=['1','2','S3','BLE','02:00:00:00:00:02']
-import csv,io,tempfile
-for mode in ('normal','unknown','cancel','sd_fail','network_fail','busy'):
+import csv,io,tempfile,json
+for mode in ('normal','unknown','cancel','sd_fail','network_fail','busy','import_ok','import_invalid','import_save_fail','import_readback_fail','import_remove_fail','import_cancel_after_save'):
     with tempfile.TemporaryDirectory(dir=out,prefix=mode+'-') as td:
         folder=Path(td)/'card/CERBERUS/WARD';folder.mkdir(parents=True)
         (folder/'WIGLE001.CSV').write_text(meta+columns+row*10,newline='')
         stream=io.StringIO();stream.write(unloc_header);csv.writer(stream,lineterminator='\n').writerow(unloc)
         (folder/'UNLOC001.CSV').write_text(stream.getvalue(),newline='')
         (folder/'KEEP.TXT').write_text('fixture');(folder/'WIGLE002.TMP').write_text('unfinished fixture')
+        config=folder.parent/'CONFIG';config.mkdir()
+        profile=json.loads((root/'config_examples/wardrive_upload.example.json').read_text())
+        profile['home_wifi']={'ssid':'JSON fixture AP','password':'json-password'}
+        profile['wigle']={'enabled':True,'api_name':'json-name','api_token':'json-token'}
+        (config/'UPLOAD.JSON').write_text('invalid {' if mode=='import_invalid' else json.dumps(profile))
         subprocess.run([str(exe),mode],cwd=td,check=True,env=env)
-print('Log manager: six lifecycle/failure scenarios passed; no real network/card accessed')
+print('Log manager: twelve lifecycle/failure/import scenarios passed; no real network/card accessed')

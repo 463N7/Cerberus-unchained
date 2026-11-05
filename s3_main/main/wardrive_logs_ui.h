@@ -3,7 +3,7 @@
 #include "wardrive_log_manager.h"
 #include "wardrive_upload_settings.h"
 typedef enum { WD_LOG_LIST,WD_LOG_DETAIL,WD_LOG_SETUP,WD_LOG_INPUT,
-    WD_LOG_CONFIRM_UPLOAD,WD_LOG_CONFIRM_DELETE,WD_LOG_CONFIRM_FORGET } wd_log_page_t;
+    WD_LOG_CONFIRM_UPLOAD,WD_LOG_CONFIRM_DELETE,WD_LOG_CONFIRM_FORGET,WD_LOG_CONFIRM_IMPORT } wd_log_page_t;
 typedef struct {
     cerberus_upload_config_t draft;
     cerberus_keyboard_t keyboard;
@@ -92,12 +92,22 @@ static esp_err_t wardrive_logs_draw(void)
         ESP_RETURN_ON_ERROR(draw_centered(90,"HOME AP: 2.4 GHz / MANUAL UPLOADS",UI_GOOD,1),TAG,"upload home role");
         for(unsigned i=1;i<=6;++i){size_t cap;const char *value=wardrive_logs_field(i,&cap);(void)cap;
             snprintf(line,sizeof(line),"%s: %s",cerberus_upload_field_name((cerberus_upload_field_t)i),value&&value[0]?"SET":"EMPTY");
-            ESP_RETURN_ON_ERROR(draw_small_button(8,108+(i-1)*33,304,29,line),TAG,"upload field");}
+            ESP_RETURN_ON_ERROR(draw_small_button(8,108+(i-1)*29,304,25,line),TAG,"upload field");}
         for(unsigned i=0;i<3;++i){snprintf(line,sizeof(line),"%s %s",i==0?"WIGLE":i==1?"WDGW":"DRIFT",(wd_log_ui->draft.destinations&(1U<<i))?"ON":"OFF");
-            ESP_RETURN_ON_ERROR(draw_small_button(8+i*104,312,96,28,line),TAG,"upload destination");}
-        ESP_RETURN_ON_ERROR(draw_small_button(8,350,304,32,"SAVE SETUP"),TAG,"save setup");
-        ESP_RETURN_ON_ERROR(draw_small_button(8,390,304,28,"FORGET HOME AP AND ALL KEYS"),TAG,"forget setup");
+            ESP_RETURN_ON_ERROR(draw_small_button(8+i*104,288,96,26,line),TAG,"upload destination");}
+        ESP_RETURN_ON_ERROR(draw_small_button(8,322,304,28,"IMPORT JSON FROM SD"),TAG,"import setup");
+        ESP_RETURN_ON_ERROR(draw_small_button(8,358,304,28,"SAVE SETUP"),TAG,"save setup");
+        ESP_RETURN_ON_ERROR(draw_small_button(8,394,304,28,"FORGET HOME AP AND ALL KEYS"),TAG,"forget setup");
         return draw_small_button(8,432,304,36,"CANCEL SETUP / LOGS");
+    }
+    if(wd_log_ui->page==WD_LOG_CONFIRM_IMPORT){
+        ESP_RETURN_ON_ERROR(draw_centered(120,"IMPORT UPLOAD PROFILE?",UI_TEXT,1),TAG,"profile confirm");
+        ESP_RETURN_ON_ERROR(draw_centered(155,CERBERUS_WARD_UPLOAD_PROFILE_PATH,UI_TEXT,1),TAG,"profile path");
+        ESP_RETURN_ON_ERROR(draw_centered(205,"REPLACES HOME AP AND ALL SERVICE KEYS",UI_BAD,1),TAG,"profile replacement");
+        ESP_RETURN_ON_ERROR(draw_centered(245,"SD COPY REMOVED AFTER VERIFIED SAVE",UI_MUTED,1),TAG,"profile consume");
+        ESP_RETURN_ON_ERROR(draw_centered(285,"SAVING DOES NOT CONNECT OR UPLOAD",UI_MUTED,1),TAG,"profile no network");
+        ESP_RETURN_ON_ERROR(draw_small_button(8,380,304,36,"CONFIRM IMPORT"),TAG,"import confirm button");
+        return draw_small_button(8,432,304,36,"CANCEL");
     }
     if(wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD||wd_log_ui->page==WD_LOG_CONFIRM_DELETE||wd_log_ui->page==WD_LOG_CONFIRM_FORGET){
         bool upload=wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD,forget=wd_log_ui->page==WD_LOG_CONFIRM_FORGET;
@@ -186,17 +196,21 @@ static void wardrive_logs_tap(uint16_t x,uint16_t y)
             memset(&wd_log_ui->keyboard,0,sizeof(wd_log_ui->keyboard));
         }
     }else if(wd_log_ui->page==WD_LOG_SETUP){
-        if(y>=108&&y<306){unsigned field=(y-108)/33+1;size_t cap;char *value=wardrive_logs_field(field,&cap);
+        if(y>=108&&y<282){unsigned field=(y-108)/29+1;size_t cap;char *value=wardrive_logs_field(field,&cap);
             if(value){wd_log_ui->edit=field;e=cerberus_keyboard_begin(&wd_log_ui->keyboard,wd_log_ui->input,cap,value);
                 cerberus_keyboard_set_masked(&wd_log_ui->keyboard,field!=1);wd_log_ui->page=WD_LOG_INPUT;}}
-        else if(y>=312&&y<340){unsigned i=(x-8)/104;if(i<3)wd_log_ui->draft.destinations^=(uint8_t)(1U<<i);}
-        else if(y>=350&&y<382){e=cerberus_upload_settings_save(&wd_log_ui->draft);
+        else if(y>=288&&y<314){unsigned i=(x-8)/104;if(i<3)wd_log_ui->draft.destinations^=(uint8_t)(1U<<i);}
+        else if(y>=322&&y<350)wardrive_logs_confirm(WD_LOG_CONFIRM_IMPORT,-1,&s);
+        else if(y>=358&&y<386){e=cerberus_upload_settings_save(&wd_log_ui->draft);
             if(e==ESP_OK){cerberus_upload_config_clear(&wd_log_ui->draft,sizeof(wd_log_ui->draft));wd_log_ui->page=WD_LOG_LIST;
                 snprintf(wd_log_ui->message,sizeof(wd_log_ui->message),"SETUP SAVED / UPLOADS ARE MANUAL");}}
-        else if(y>=390&&y<418)wardrive_logs_confirm(WD_LOG_CONFIRM_FORGET,-1,&s);
+        else if(y>=394&&y<422)wardrive_logs_confirm(WD_LOG_CONFIRM_FORGET,-1,&s);
     }else if(wd_log_ui->page>=WD_LOG_CONFIRM_UPLOAD){
         if(y>=380&&y<416){
-            if(wd_log_ui->page==WD_LOG_CONFIRM_FORGET){e=cerberus_upload_settings_forget();
+            if(wd_log_ui->page==WD_LOG_CONFIRM_IMPORT){
+                e=cerberus_log_manager_request(wd_log_ui->confirmed_session,wd_log_ui->confirmed_revision,CERBERUS_LOG_IMPORT_PROFILE,-1);
+                cerberus_upload_config_clear(&wd_log_ui->draft,sizeof(wd_log_ui->draft));wd_log_ui->page=WD_LOG_LIST;
+            }else if(wd_log_ui->page==WD_LOG_CONFIRM_FORGET){e=cerberus_upload_settings_forget();
                 cerberus_upload_config_clear(&wd_log_ui->draft,sizeof(wd_log_ui->draft));wd_log_ui->page=WD_LOG_SETUP;}
             else{bool upload=wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD;
                 e=cerberus_log_manager_request(wd_log_ui->confirmed_session,wd_log_ui->confirmed_revision,

@@ -31,6 +31,7 @@
 #include "system_health.h"
 #include "wardrive_service.h"
 #include "wardrive_gps_uart.h"
+#include "wardrive_upload_settings.h"
 
 #include "driver/usb_serial_jtag.h"
 #include "driver/usb_serial_jtag_vfs.h"
@@ -91,6 +92,7 @@ static __attribute__((noinline)) void print_stations(void);
 static __attribute__((noinline)) void print_reports(void);
 static __attribute__((noinline)) void print_radio(void);
 static __attribute__((noinline)) void print_gps(void);
+static __attribute__((noinline)) void print_upload_profile(void);
 static __attribute__((noinline)) void print_dual_ble(void);
 static __attribute__((noinline)) void print_ble_memory(void);
 static __attribute__((noinline)) void print_battery(void);
@@ -166,6 +168,7 @@ static void print_help(void)
         "reports  Read the first 32 SD log names and network CSVs\r\n"
         "radio    Show C5, S3 BLE/Wi-Fi and Wardriving status without renewing leases\r\n"
         "gps      Show receiver, baud and fix health without coordinates\r\n"
+        "upload_profile Show saved upload readiness without credentials\r\n"
         "dual_ble Read cached two-receiver BLE/Fox state without SPI or scanning\r\n"
         "ble_memory Read cached S3 BLE lifecycle heap samples without heap walks\r\n"
         "battery  Show cached onboard battery gauge status\r\n"
@@ -1362,6 +1365,19 @@ static void print_wardrive_relations(const cerberus_wardrive_status_t *status)
 }
 /* END WIFI RELATION DIAGNOSTICS. */
 
+static void print_upload_profile(void)
+{
+    cerberus_upload_config_t config={0};
+    esp_err_t error=cerberus_upload_settings_load(&config);
+    console_printf("upload_profile_error=%d\r\nupload_profile_home_ready=%u\r\nupload_profile_wigle_ready=%u\r\nupload_profile_wdgwars_ready=%u\r\nupload_profile_wardrift_ready=%u\r\nupload_profile_destinations=0x%02x\r\n",
+        (int)error,(unsigned)(error==ESP_OK&&cerberus_upload_config_wifi_ready(&config)),
+        (unsigned)(error==ESP_OK&&cerberus_upload_config_service_ready(&config,CERBERUS_UPLOAD_WIGLE)),
+        (unsigned)(error==ESP_OK&&cerberus_upload_config_service_ready(&config,CERBERUS_UPLOAD_WDGWARS)),
+        (unsigned)(error==ESP_OK&&cerberus_upload_config_service_ready(&config,CERBERUS_UPLOAD_WARDRIFT)),
+        (unsigned)(error==ESP_OK?config.destinations:0));
+    cerberus_upload_config_clear(&config,sizeof(config));
+}
+
 static void print_gps(void)
 {
     cerberus_wardrive_gps_uart_state_t state={0};
@@ -1658,6 +1674,8 @@ static void execute_command(char *line)
         print_radio();
     } else if (strcmp(start, "gps") == 0) {
         print_gps();
+    } else if (strcmp(start, "upload_profile") == 0) {
+        print_upload_profile();
     } else if (strcmp(start, "battery") == 0) {
         print_battery();
     } else {

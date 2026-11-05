@@ -6,6 +6,11 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdarg.h>
+static char console_output[512];
+static void console_printf(const char *format,...)
+{va_list args;va_start(args,format);int n=vsnprintf(console_output,sizeof(console_output),format,args);va_end(args);assert(n>0&&(size_t)n<sizeof(console_output));}
+#include "upload_profile_impl.h"
 
 static unsigned calls, closes, fail_at;
 static bool exists, pending, erase_pending, opened;
@@ -106,6 +111,9 @@ int main(int argc, char **argv)
     assert(cerberus_upload_settings_load(&d) == ESP_OK && zero(&d, sizeof(d)) && !opened);
     assert(cerberus_upload_settings_save(&c) == ESP_OK);
     assert(cerberus_upload_settings_load(&d) == ESP_OK && !memcmp(&c, &d, sizeof(c)));
+    print_upload_profile();assert(strstr(console_output,"upload_profile_home_ready=1"));
+    assert(!strstr(console_output,c.ssid)&&!strstr(console_output,c.password)&&!strstr(console_output,c.wigle_name)&&
+        !strstr(console_output,c.wigle_token)&&!strstr(console_output,c.wdgwars_token)&&!strstr(console_output,c.wardrift_token));
     for (unsigned failure = 1; failure <= 3; ++failure) {
         reset_calls(failure); assert(cerberus_upload_settings_save(&c) != ESP_OK); assert(!opened);
         assert(closes == (failure == 1 ? 0U : 1U));

@@ -1,9 +1,60 @@
 # Wardriving logs, home Wi-Fi and uploads
 
-Rev139 adds one **Scan → Wardriving → LOGS / UPLOAD** branch to the main
-firmware. Stop capture first. Installation and physical acceptance are recorded
-separately in [the checkpoint](DUAL_RADIO_REV139.md). No live service upload has
-been performed during development. CSV validation is not a WiGLE acceptance receipt.
+Use **Scan → Wardriving → LOGS / UPLOAD** after stopping capture. Rev139 adds
+the integrated log manager and uploader; rev140 adds one JSON profile for home
+Wi-Fi and all three services. Installation and physical acceptance are recorded
+separately in the [rev139](DUAL_RADIO_REV139.md) and [rev140](DUAL_RADIO_REV140.md)
+checkpoints. No live service upload has been performed during development.
+CSV validation is not a WiGLE acceptance receipt.
+
+## Import one JSON profile from SD
+
+1. Copy [wardrive_upload.example.json](../config_examples/wardrive_upload.example.json)
+   to your PC and fill in the home network and service fields. The distributed
+   example contains empty values only. Keep your filled copy private.
+2. Set `enabled` to `true` for each destination you want to use. WiGLE needs
+   both `api_name` and `api_token`; WDGWars needs its 64-character hexadecimal
+   token; Wardrift needs its token. Leave unused services empty and disabled.
+3. Save as UTF-8 without a byte-order mark, named **UPLOAD.JSON**. Copy it to
+   **/CERBERUS/CONFIG/UPLOAD.JSON** on the SD card. Create `CONFIG` if necessary.
+   Safely eject the card or USB drive and return SD ownership to Cerberus.
+4. Open **LOGS / UPLOAD → HOME WI-FI / API SETUP → IMPORT JSON FROM SD**.
+   Review the replacement notice and tap **CONFIRM IMPORT**. This replaces the
+   entire saved upload profile, including fields left empty or disabled.
+5. Wait for **PROFILE SAVED / SD COPY REMOVED**. Reopen setup to check the
+   SET/EMPTY labels and enabled destinations. The saved settings persist across
+   restarts. Importing or saving never starts a connection or upload.
+
+The JSON contains these exact sections:
+
+```json
+{
+  "schema": "cerberus-wardrive-upload-v1",
+  "home_wifi": { "ssid": "", "password": "" },
+  "wigle": { "enabled": false, "api_name": "", "api_token": "" },
+  "wdgwars": { "enabled": false, "token": "" },
+  "wardrift": { "enabled": false, "token": "" }
+}
+```
+
+All sections and fields are required; comments, unknown or repeated keys and
+incomplete enabled destinations are rejected. Maximum file size is 4,096 bytes.
+Limits are measured in UTF-8 bytes: SSID 32, password 64, WiGLE API name 64,
+WiGLE token 128, WDGWars token exactly 64 when present, and Wardrift token 128.
+JSON supports UTF-8 SSIDs even though the on-device keyboard is ASCII. The home
+AP must offer 2.4 GHz; the authentication limits below still apply.
+
+Malformed JSON leaves saved settings unchanged. The worker saves valid settings,
+reads them back and compares them before removing the SD copy. If saving or
+verification fails, the SD file stays available for review/retry. **PROFILE SAVED
+/ SD COPY REMAINS** means settings were verified but SD cleanup failed; remove
+that file after checking setup. File removal is not a secure erase. The private
+PC copy also remains under the user's control. Filled profile filenames are
+ignored by Git; never include credentials in an issue, PR or firmware image.
+
+The read-only `upload_profile` console command reports readiness flags and the
+enabled-destination mask only. It does not print the network name, password,
+tokens or credential fingerprints.
 
 ## Set up home Wi-Fi and services
 

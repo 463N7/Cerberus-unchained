@@ -28,6 +28,7 @@ idf_component_register(
         "wardrive_wigle.c"
         "wardrive_log.c"
         "wardrive_upload_config.c"
+        "wardrive_upload_json.c"
         "wardrive_upload_settings.c"
         "wardrive_upload_reply.c"
         "wardrive_upload_file.c"

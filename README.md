@@ -29,12 +29,14 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source version: `0.1.0-dev.rev139`, targeting onboard C5 protocol
+**Current source version: `0.1.0-dev.rev140`, targeting onboard C5 protocol
 firmware revision 75. Rev139 adds saved-log management, home Wi-Fi/API setup and
-manual WiGLE, WDGWars and provisional Wardrift uploads. See the
-[setup guide](docs/WARDRIVE_UPLOADS.md) and [rev139 scope](docs/DUAL_RADIO_REV139.md).
-Rev139 is installed with paired boot/SD/idle checks; physical upload acceptance
-remains open. The measured capture baseline is rev138: its 1,438-observation combined run
+manual WiGLE, WDGWars and provisional Wardrift uploads. Rev140 adds a validated
+single-JSON SD import for that setup, with a blank public example and verified
+save before SD-profile removal. See the [setup guide](docs/WARDRIVE_UPLOADS.md),
+[rev139 scope](docs/DUAL_RADIO_REV139.md) and [rev140 scope](docs/DUAL_RADIO_REV140.md).
+Rev139 has physical paired boot/SD/idle and log-navigation acceptance; the new
+JSON import has separate acceptance below. The measured capture baseline is rev138: its 1,438-observation combined run
 stopped cleanly, and physical SD readback accounts for every observation with
 zero reported queue drops. Its native CSV passes local preflight with missing
 accuracy/altitude warnings. Live service acceptance, physical uploader acceptance

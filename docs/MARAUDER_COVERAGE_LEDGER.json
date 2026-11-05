@@ -1,7 +1,7 @@
 {
   "format": 2,
-  "audit_checkpoint": "rev139-development",
-  "scope": "Rev138 is the installed capture baseline: a 31.415-second combined run and physical SD readback reconcile all 1,438 observations with no reported drops or service errors. Rev139 adds stopped-capture log management and saved home-Wi-Fi/three-service uploads, with software and physical acceptance recorded separately in DUAL_RADIO_REV139.md. Live service acceptance, expansion hardware and complete Marauder parity remain open. GitHub develop was rechecked on 2026-11-05 UTC and remains 79cc6bcba1db6679baee1dab2b0c1ad5010e6363.",
+  "audit_checkpoint": "rev140-development",
+  "scope": "Rev138 is the physically measured capture baseline: SD readback reconciles all 1,438 observations with no reported drops or service errors. Rev139 adds saved-log management and home-Wi-Fi/three-service uploads, with installed log-details/navigation acceptance. Rev140 adds a single JSON profile import with strict validation and verified NVS save before SD cleanup; see DUAL_RADIO_REV140.md for its separate validation. Live service acceptance, expansion hardware and complete Marauder parity remain open. The retained develop audit was rechecked on 2026-11-05 UTC at 79cc6bcba1db6679baee1dab2b0c1ad5010e6363.",
   "contribution_summary": "docs/CONTRIBUTION_REV93.md",
   "prior_public_contribution": "docs/CONTRIBUTION_REV81.md",
   "upstream": "https://github.com/justcallmekoko/ESP32Marauder",

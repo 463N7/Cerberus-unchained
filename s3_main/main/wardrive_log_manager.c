@@ -3,6 +3,7 @@
 #include "wardrive_upload_settings.h"
 #include "wardrive_upload_net.h"
 #include "wardrive_upload_receipt.h"
+#include "wardrive_upload_json.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -46,12 +47,14 @@ esp_err_t cerberus_log_manager_request(uint64_t session,uint32_t revision,cerber
 {
     portENTER_CRITICAL(&lock);esp_err_t e=ESP_ERR_INVALID_STATE;
     if(state.active&&!state.busy&&!state.closing&&state.session==session&&state.catalog_revision==revision&&
-        (unsigned)action<=CERBERUS_LOG_UPLOAD&&index>=-1&&(index==-1||index<(int)state.count)&&
-        !(action==CERBERUS_LOG_INSPECT&&index==-1)){
+        (unsigned)action<=CERBERUS_LOG_IMPORT_PROFILE&&index>=-1&&(index==-1||index<(int)state.count)&&
+        !(action==CERBERUS_LOG_INSPECT&&index==-1)&&!(action==CERBERUS_LOG_IMPORT_PROFILE&&index!=-1)){
         command=action;selection=index;command_pending=true;cancel_requested=false;
         state.busy=true;state.error=ESP_OK;state.processed=state.sent=state.bytes=0;
-        state.total=index==-1?state.count:1;memset(state.accepted,0,sizeof(state.accepted));
+        state.total=action==CERBERUS_LOG_IMPORT_PROFILE?1:index==-1?state.count:1;state.profile_saved=false;
+        memset(state.accepted,0,sizeof(state.accepted));
         memset(state.queued,0,sizeof(state.queued));memset(state.skipped,0,sizeof(state.skipped));
+        if(action==CERBERUS_LOG_IMPORT_PROFILE)snprintf(state.name,sizeof(state.name),"UPLOAD.JSON");
         memset(&state.summary,0,sizeof(state.summary));memset(state.destination,0,sizeof(state.destination));e=ESP_OK;
     }portEXIT_CRITICAL(&lock);return e;
 }
@@ -179,6 +182,32 @@ static esp_err_t catalog(uint64_t lease)
     size_t count=0;esp_err_t e=cerberus_ward_log_storage_list(lease,work->entries,CERBERUS_WARD_LOG_CAPACITY,&count);
     portENTER_CRITICAL(&lock);state.count=(unsigned)count;++state.catalog_revision;portEXIT_CRITICAL(&lock);return e;
 }
+static esp_err_t import_profile(uint64_t lease)
+{
+    progress(NULL,"READING SD UPLOAD PROFILE",0,0);
+    size_t length=0;
+    esp_err_t e=cerberus_ward_log_profile_read(lease,work->buffer,sizeof(work->buffer),&length);
+    if(e==ESP_OK&&!cerberus_upload_config_json(work->buffer,length,&work->config)){
+        progress(NULL,"INVALID JSON / SETUP UNCHANGED",0,0);e=ESP_ERR_INVALID_ARG;
+    }
+    cerberus_upload_config_clear(work->buffer,sizeof(work->buffer));
+    if(e==ESP_OK&&cancel(NULL))e=ESP_ERR_INVALID_STATE;
+    if(e==ESP_OK){
+        progress(NULL,"SAVING UPLOAD PROFILE",0,0);
+        e=cerberus_upload_settings_save(&work->config);
+        if(e==ESP_OK){
+            cerberus_upload_config_t verified={0};e=cerberus_upload_settings_load(&verified);
+            if(e==ESP_OK&&memcmp(&verified,&work->config,sizeof(verified)))e=ESP_ERR_INVALID_RESPONSE;
+            cerberus_upload_config_clear(&verified,sizeof(verified));
+        }
+        if(e==ESP_OK){
+            portENTER_CRITICAL(&lock);state.profile_saved=true;state.processed=1;portEXIT_CRITICAL(&lock);
+            e=cerberus_ward_log_profile_remove(lease,length);
+            progress(NULL,e==ESP_OK?"PROFILE SAVED / SD COPY REMOVED":"PROFILE SAVED / SD COPY REMAINS",0,0);
+        }
+    }
+    cerberus_upload_config_clear(&work->config,sizeof(work->config));return e;
+}
 static void worker(void *unused)
 {
     (void)unused;uint64_t lease=0;esp_err_t error=cerberus_ward_log_storage_begin(&lease);
@@ -191,7 +220,8 @@ static void worker(void *unused)
         if(!pending){vTaskDelay(pdMS_TO_TICKS(50));continue;}
         bool network=false;
         error=lease?ESP_OK:ESP_ERR_INVALID_STATE;
-        if(error==ESP_OK&&action!=CERBERUS_LOG_DELETE)error=cerberus_upload_settings_load(&work->config);
+        if(error==ESP_OK&&action!=CERBERUS_LOG_DELETE&&action!=CERBERUS_LOG_IMPORT_PROFILE)error=cerberus_upload_settings_load(&work->config);
+        if(error==ESP_OK&&action==CERBERUS_LOG_IMPORT_PROFILE)error=import_profile(lease);
         if(error==ESP_OK&&action==CERBERUS_LOG_UPLOAD){
             if(!cerberus_upload_config_wifi_ready(&work->config)||!work->config.destinations)error=ESP_ERR_INVALID_STATE;
             for(unsigned s=0;s<3;++s)if((work->config.destinations&(1U<<s))&&
@@ -199,7 +229,7 @@ static void worker(void *unused)
             if(error!=ESP_OK)progress(NULL,"SAVE HOME WI-FI AND API KEYS FIRST",0,0);
         }
         unsigned count;portENTER_CRITICAL(&lock);count=state.count;portEXIT_CRITICAL(&lock);
-        for(unsigned i=0;error==ESP_OK&&i<count&&!cancel(NULL);++i){
+        for(unsigned i=0;action!=CERBERUS_LOG_IMPORT_PROFILE&&error==ESP_OK&&i<count&&!cancel(NULL);++i){
             if(index>=0&&i!=(unsigned)index)continue;
             if(action==CERBERUS_LOG_DELETE){progress(NULL,"DELETING CONFIRMED LOGS",0,0);
                 error=cerberus_ward_log_storage_delete(lease,work->entries[i].name,work->entries[i].bytes);}
@@ -212,8 +242,9 @@ static void worker(void *unused)
         if(action==CERBERUS_LOG_DELETE){esp_err_t list_error=catalog(lease);if(error==ESP_OK)error=list_error;}
         bool stopped=cancel(NULL);
         portENTER_CRITICAL(&lock);state.error=error;state.busy=false;
-        if(stopped)snprintf(state.stage,sizeof(state.stage),"%s",action==CERBERUS_LOG_DELETE?
+        if(stopped&&action!=CERBERUS_LOG_IMPORT_PROFILE)snprintf(state.stage,sizeof(state.stage),"%s",action==CERBERUS_LOG_DELETE?
             "DELETE CANCELED / CHECK FILE COUNT":"CANCELED / ORIGINAL LOGS RETAINED");
+        else if(stopped&&!state.profile_saved)snprintf(state.stage,sizeof(state.stage),"PROFILE CANCELED / CHECK SETUP");
         else if(error==ESP_OK&&action==CERBERUS_LOG_UPLOAD)snprintf(state.stage,sizeof(state.stage),"UPLOAD PASS FINISHED / SEE RECEIPTS");
         else if(error==ESP_OK&&action==CERBERUS_LOG_DELETE)snprintf(state.stage,sizeof(state.stage),"CONFIRMED LOGS DELETED");
         else if(error==ESP_OK&&state.summary.kind==CERBERUS_WARD_LOG_WIGLE&&!state.summary.legacy_metadata)

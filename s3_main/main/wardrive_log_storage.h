@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #define CERBERUS_WARD_LOG_CAPACITY 1998U
+#define CERBERUS_WARD_UPLOAD_PROFILE_PATH "/CERBERUS/CONFIG/UPLOAD.JSON"
 typedef struct { char name[13]; uint64_t bytes; } cerberus_ward_log_entry_t;
 /* One worker owns the lease and every FILE it opens. End only after closing
  * them. USB, capture and File Tools mutations are excluded for its lifetime.
@@ -15,6 +16,9 @@ esp_err_t cerberus_ward_log_storage_list(uint64_t token, cerberus_ward_log_entry
 esp_err_t cerberus_ward_log_storage_open(uint64_t token, const char *name, FILE **file);
 esp_err_t cerberus_ward_log_storage_close(uint64_t token, FILE **file);
 esp_err_t cerberus_ward_log_storage_delete(uint64_t token, const char *name, uint64_t expected_bytes);
+/* Exact profile path only; the same lease excludes USB/File Tools mutations. */
+esp_err_t cerberus_ward_log_profile_read(uint64_t token,void *out,size_t capacity,size_t *bytes);
+esp_err_t cerberus_ward_log_profile_remove(uint64_t token,size_t expected_bytes);
 /* Receipt key is SHA-256 hex + '-' + three decimal part digits. Exact bounded
  * records only; append + fsync preserves the prior sending intent. Truncated
  * journal tails fail closed so an ambiguous POST is never blindly repeated. */
