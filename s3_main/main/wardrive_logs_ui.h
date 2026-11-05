@@ -120,10 +120,12 @@ static esp_err_t wardrive_logs_draw(void)
         ESP_RETURN_ON_ERROR(draw_centered(100,s.name,UI_TEXT,2),TAG,"selected log");
         snprintf(line,sizeof(line),"%lu ROWS / %llu KiB",(unsigned long)s.summary.rows,(unsigned long long)(s.summary.bytes/1024));
         ESP_RETURN_ON_ERROR(draw_centered(135,line,UI_TEXT,1),TAG,"log rows");
-        snprintf(line,sizeof(line),"2.4G %lu / 5G %lu / BLE %lu",(unsigned long)s.summary.wifi_24,(unsigned long)s.summary.wifi_5,(unsigned long)s.summary.ble);
+        if(s.summary.kind==CERBERUS_WARD_LOG_UNLOCATED)snprintf(line,sizeof(line),"RADIO SUBTOTALS NOT AVAILABLE");
+        else snprintf(line,sizeof(line),"2.4G %lu / 5G %lu / BLE %lu",(unsigned long)s.summary.wifi_24,(unsigned long)s.summary.wifi_5,(unsigned long)s.summary.ble);
         ESP_RETURN_ON_ERROR(draw_centered(157,line,UI_TEXT,1),TAG,"log radios");
         ESP_RETURN_ON_ERROR(draw_centered(180,s.summary.first_utc[0]?s.summary.first_utc:"UTC NOT AVAILABLE",UI_MUTED,1),TAG,"log date");
-        snprintf(line,sizeof(line),"NO ACCURACY %lu / NO ALTITUDE %lu",(unsigned long)s.summary.missing_accuracy,(unsigned long)s.summary.missing_altitude);
+        if(s.summary.kind==CERBERUS_WARD_LOG_UNLOCATED)snprintf(line,sizeof(line),"UNLOCATED / LOCAL EVIDENCE ONLY");
+        else snprintf(line,sizeof(line),"NO ACCURACY %lu / NO ALTITUDE %lu",(unsigned long)s.summary.missing_accuracy,(unsigned long)s.summary.missing_altitude);
         ESP_RETURN_ON_ERROR(draw_centered(202,line,UI_MUTED,1),TAG,"log quality");
         for(unsigned i=0;i<3;++i){snprintf(line,sizeof(line),"%s: %s",cerberus_upload_service_name((cerberus_upload_service_t)i),cerberus_upload_result_name(s.destination[i].result));
             ESP_RETURN_ON_ERROR(draw_centered(234+i*23,line,UI_TEXT,1),TAG,"log receipt");}

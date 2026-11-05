@@ -74,6 +74,12 @@ int main(int argc,char **argv)
     wardrive_logs_tap(50,320);wardrive_logs_tap(50,140);assert(last_action==CERBERUS_LOG_INSPECT&&last_index==0&&requests==1);
     strcpy(manager.name,"WIGLE001.CSV");manager.summary=(cerberus_ward_log_summary_t){.kind=CERBERUS_WARD_LOG_WIGLE,.complete=true,.rows=1436,.wifi_24=263,.wifi_5=121,.ble=1052,.missing_accuracy=1436,.missing_altitude=2,.bytes=139042};
     strcpy(manager.summary.first_utc,"2026-11-04 12:00:00");paint(argv[1],"detail");
+    cerberus_ward_log_summary_t located=manager.summary;
+    manager.summary=(cerberus_ward_log_summary_t){.kind=CERBERUS_WARD_LOG_UNLOCATED,.complete=true,.rows=2,.bytes=717};
+    paint(argv[1],"unlocated");assert(strstr(drawn,"RADIO SUBTOTALS NOT AVAILABLE")&&strstr(drawn,"UNLOCATED / LOCAL EVIDENCE ONLY"));
+    assert(!strstr(drawn,"BLE 0")&&!strstr(drawn,"NO ACCURACY 0"));
+    wardrive_logs_tap(50,360);assert(wd_log_ui->page==WD_LOG_DETAIL&&requests==1);
+    manager.summary=located;
     wardrive_logs_tap(50,400);assert(wd_log_ui->page==WD_LOG_CONFIRM_DELETE&&requests==1);
     paint(argv[1],"delete-confirm");wardrive_logs_tap(50,450);assert(wd_log_ui->page==WD_LOG_DETAIL&&requests==1);
     wardrive_logs_tap(50,360);assert(wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD&&requests==1);

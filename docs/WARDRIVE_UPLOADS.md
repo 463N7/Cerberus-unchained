@@ -43,9 +43,10 @@ with their providers.
 The paged list includes finalized native `WIGLE001.CSV`–`WIGLE999.CSV` and
 `UNLOC001.CSV`–`UNLOC999.CSV` in `/CERBERUS/WARD`, up to 1,998 files. It sorts
 by filename, not FAT timestamps. Selected-file details validate complete CSV
-contents and show size, rows, 2.4/5 GHz Wi-Fi and BLE counts, earliest CSV UTC,
-missing-measurement warnings and per-destination receipts. Unlocated evidence
-shows no invented UTC/location. Filename order across prefixes is not a timeline.
+contents and show size and rows. Located files also show 2.4/5 GHz Wi-Fi and BLE
+counts, earliest CSV UTC, missing-measurement warnings and destination receipts.
+Unlocated files explicitly mark radio subtotals unavailable and show no invented
+UTC/location. Filename order across prefixes is not a timeline.
 
 - Choose **UPLOAD THIS LOG** on a valid located file, or **UPLOAD ALL LOCATED
   LOGS** on the list. Review count, selected services and GPS/identifier
