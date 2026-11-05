@@ -33,7 +33,8 @@ imply upstream endorsement of Cerberus Unchained.
 firmware revision 75. Rev139 adds saved-log management, home Wi-Fi/API setup and
 manual WiGLE, WDGWars and provisional Wardrift uploads. See the
 [setup guide](docs/WARDRIVE_UPLOADS.md) and [rev139 scope](docs/DUAL_RADIO_REV139.md).
-The installed capture baseline is rev138: its 1,438-observation combined run
+Rev139 is installed with paired boot/SD/idle checks; physical upload acceptance
+remains open. The measured capture baseline is rev138: its 1,438-observation combined run
 stopped cleanly, and physical SD readback accounts for every observation with
 zero reported queue drops. Its native CSV passes local preflight with missing
 accuracy/altitude warnings. Live service acceptance, physical uploader acceptance
