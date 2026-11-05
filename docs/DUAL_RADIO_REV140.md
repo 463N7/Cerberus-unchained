@@ -28,9 +28,62 @@ include invalid input, save failure, readback failure, removal failure and
 cancellation after a completed save. They exercise the real worker and leased
 storage with synthetic credentials, without accessing a live service.
 
-Full build, package, installation and physical import evidence will be recorded
-at the checkpoint after validation. The measured capture and log-navigation
-baselines remain [rev138](DUAL_RADIO_REV138.md) and [rev139](DUAL_RADIO_REV139.md).
-Live home association/TLS, provider processing/credit and upload cancellation
-remain separate acceptance tasks. The Wardrift adapter remains provisional.
-This is not a claim of complete Marauder parity or encrypted credential storage.
+## Build and installation checkpoint
+
+All **166 registered host suites** and **five native targets** pass on the same
+1,299 unchanged inputs at source commit
+`8ed554564c6d8deeacd25f45a010a5001357dbea`. The full run exposed three older
+console fixtures that needed an isolation stub for the new command; those were
+corrected before the passing run. Windows fixture-directory permission failures
+were resolved by running with the required local access. The 21 CI shard checks,
+20 build/package failure-path checks and SD-resource checks also pass.
+
+Native interrupt, console-stack and C5 parser placement gates pass. The new
+console handler has a 560-byte native frame. The reviewed known console call
+chain leaves 1,856 bytes of the 4,096-byte task stack; this remains a partial
+static bound, not a bound on every SDK call or interrupt path.
+
+The matched development package is
+`dist/cerberus-unchained-0.1.0-dev.rev140-20261105T034853Z`. All 22 listed package
+files pass checksum verification. Manifest SHA-256:
+`3e1141bddf3df131ee0c3b5fece18e4b5722f2110f08d15c7643df5f44edb538`.
+S3 app size is 2,325,648 bytes, 5,312 bytes above rev139; C5 is 1,728,736 bytes
+and the bridge is 255,296 bytes. Immutable pre-install evidence is retained in
+`artifacts/rev140-validation-final/local-milestone.json`.
+
+Rev140 is installed on the identified device. Fresh recovery backups cover
+2,392,064 S3 bytes and 2,097,152 C5 bytes, including every erase-rounded write.
+Six exact-loader identity checks pass. All nine bridge/C5/S3 image writes verify
+their programmed digests. The installer performs no blanket erase or NVS rewrite.
+
+Two post-install captures 77.78 seconds apart confirm mounted SD, C5 capability
+75 online, released owners and no previous-reset fault. S3 internal free memory
+stays at 135,344 bytes, its largest block at 94,208 and free PSRAM at 1,426,140;
+ten tasks are observed. These values match the sampled rev139 baseline. C5
+reports 53,460 free bytes. Console stack low-water reaches 1,168 bytes after
+diagnostic use; these are sampled values, not loaded-operation guarantees.
+
+SPI exchanges advance from 151 to 496 with unchanged C5 boot count and no
+additional listed transport errors. Four initial READY timeouts and four legacy
+fallbacks remain visible at both samples. The private installation receipt is
+`artifacts/device-rev140/installation-receipt.json`, SHA-256
+`4298dcc8ea158d066e8a6d02d850cd9616865ac1fe4b19f6440cdf0b9cb6f9bf`.
+
+The installed read-only profile diagnostic works and initially reports all
+destinations and readiness flags OFF. A private profile was prepared, validated
+with the production parser and copied to the owner's SD card. The owner has
+been asked to perform **IMPORT JSON FROM SD** and return Home. At this checkpoint
+that interaction is still pending: physical profile import, SD-copy removal and
+saved-profile persistence across restart are **not yet accepted**. Private
+credentials are absent from the firmware source, example, diagnostics and PR.
+
+The measured capture and log-navigation baselines remain
+[rev138](DUAL_RADIO_REV138.md) and [rev139](DUAL_RADIO_REV139.md). Live home
+association/TLS, provider processing/credit and upload cancellation remain
+separate acceptance tasks. The Wardrift adapter remains provisional. This is
+not a claim of complete Marauder parity or encrypted credential storage.
+
+The contribution incorporates upstream main through `db1dfdc`, preserving its
+published rev136 installer, firmware and SD downloads. The README distinguishes
+that published release from this development source; no rev140 binary release
+is published by this checkpoint.

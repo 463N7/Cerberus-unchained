@@ -35,8 +35,11 @@ manual WiGLE, WDGWars and provisional Wardrift uploads. Rev140 adds a validated
 single-JSON SD import for that setup, with a blank public example and verified
 save before SD-profile removal. See the [setup guide](docs/WARDRIVE_UPLOADS.md),
 [rev139 scope](docs/DUAL_RADIO_REV139.md) and [rev140 scope](docs/DUAL_RADIO_REV140.md).
-Rev139 has physical paired boot/SD/idle and log-navigation acceptance; the new
-JSON import has separate acceptance below. The measured capture baseline is rev138: its 1,438-observation combined run
+Rev140 is installed with paired boot/SD/idle checks and unchanged sampled idle
+memory from rev139. Physical JSON-import/persistence acceptance remains pending
+in its checkpoint.
+Rev139 has physical log-details/navigation acceptance. The measured capture
+baseline is rev138: its 1,438-observation combined run
 stopped cleanly, and physical SD readback accounts for every observation with
 zero reported queue drops. Its native CSV passes local preflight with missing
 accuracy/altitude warnings. Live service acceptance, physical uploader acceptance
