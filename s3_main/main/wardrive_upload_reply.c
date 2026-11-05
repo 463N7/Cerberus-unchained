@@ -28,8 +28,11 @@ static bool queued_job_id(const json_t *j,int i,char out[81])
     unsigned quoted=j->t[i].type=='"',start=j->t[i].start+quoted,end=j->t[i].end-quoted;
     unsigned n=end-start;if(!n||n>20)return false;
     unsigned long long value=0;
-    for(unsigned k=start;k<end;++k){unsigned digit=(unsigned char)j->s[k]-'0';
-        if(digit>9||value>(ULLONG_MAX-digit)/10)return false;value=value*10+digit;}
+    for(unsigned k=start;k<end;++k){
+        unsigned digit=(unsigned char)j->s[k]-'0';
+        if(digit>9||value>(ULLONG_MAX-digit)/10)return false;
+        value=value*10+digit;
+    }
     if(!value)return false;
     memcpy(out,j->s+start,n);out[n]=0;return true;
 }
