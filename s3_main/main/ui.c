@@ -8129,15 +8129,15 @@ static esp_err_t draw_wardrive(void)
         if(status.gps_error==ESP_OK&&gps_preview_error!=ESP_ERR_NOT_FINISHED)status.gps_error=gps_preview_error;
     }
     const char *gps_line = gps_selected ? "GPS DATA > ON / NO RECENT NMEA" :
-        "GPS DATA > OFF / UNLOC CSV";
+        "GPS DATA > OFF / SCAN ONLY";
     uint16_t gps_color = UI_MUTED;
     if (gps_selected && status.gps_error != ESP_OK) {
-        gps_line = "GPS DATA > UART ERROR / UNLOC CSV";
+        gps_line = "GPS DATA > UART ERROR / SCAN ONLY";
         gps_color = UI_BAD;
     } else if (gps_selected && status.gps.state == CERBERUS_WARDRIVE_GPS_NO_FIX) {
         gps_line = "GPS DATA > NMEA / NO FIX";
     } else if (gps_selected && status.gps.state == CERBERUS_WARDRIVE_GPS_STALE) {
-        gps_line = "GPS DATA > FIX STALE / UNLOC CSV";
+        gps_line = "GPS DATA > FIX STALE / SCAN ONLY";
     } else if (gps_selected && status.gps.state == CERBERUS_WARDRIVE_GPS_FRESH) {
         gps_line = status.gps.utc_valid ?
             "GPS DATA > FIX + UTC / WIGLE CSV" : "GPS DATA > FIX / UTC UNVERIFIED";
@@ -8184,8 +8184,9 @@ static esp_err_t draw_wardrive(void)
     snprintf(line, sizeof(line), "LAST FILE: %s", status.last_file_name[0] ?
         status.last_file_name : "NONE YET");
     ESP_RETURN_ON_ERROR(draw_centered(280, line, UI_MUTED, 1), TAG, "wardrive file");
-    snprintf(line, sizeof(line), "GEO %lu / UNLOC %lu ROWS",
-        (unsigned long)status.geotagged_rows, (unsigned long)status.unlocated_rows);
+    snprintf(line, sizeof(line), "NOT SAVED: %llu / NO FIX %lu",
+        (unsigned long long)((uint64_t)status.skipped_no_fix+status.skipped_time+status.skipped_format),
+        (unsigned long)status.skipped_no_fix);
     ESP_RETURN_ON_ERROR(draw_centered(300, line, UI_MUTED, 1), TAG, "wardrive format");
     esp_err_t error = wardrive_start_error != ESP_OK ? wardrive_start_error : status.error_code;
     if (error != ESP_OK) {
@@ -8197,6 +8198,8 @@ static esp_err_t draw_wardrive(void)
             snprintf(line, sizeof(line), "S3: %s", esp_err_to_name(status.s3_ble_error));
         else if (status.expansion_error != ESP_OK)
             snprintf(line, sizeof(line), "R1-R6: %s", esp_err_to_name(status.expansion_error));
+        else if (status.sd_error == ESP_ERR_INVALID_SIZE)
+            snprintf(line, sizeof(line), "LOG SIZE LIMIT / START A NEW SESSION");
         else if (status.sd_error != ESP_OK)
             snprintf(line, sizeof(line), "SD: %s", esp_err_to_name(status.sd_error));
         else
@@ -8204,6 +8207,8 @@ static esp_err_t draw_wardrive(void)
         ESP_RETURN_ON_ERROR(draw_centered(324, line, UI_BAD, 1), TAG, "wardrive error");
     } else if (wardrive_return_pending) {
         ESP_RETURN_ON_ERROR(draw_centered(324, "WAITING FOR RADIOS AND FILES", UI_GOOD, 1), TAG, "wardrive exit");
+    } else if (active && (!status.gps_requested || status.gps.state != CERBERUS_WARDRIVE_GPS_FRESH || !status.gps.utc_valid)) {
+        ESP_RETURN_ON_ERROR(draw_centered(324, "SCANNING / CSV NEEDS GPS FIX + UTC", UI_MUTED, 1), TAG, "wardrive fix wait");
     }
     ESP_RETURN_ON_ERROR(draw_small_button(24, 346, 132, 28,
         wardrive_include_expansions ? "R1-R6: ON" : "R1-R6: OFF"),

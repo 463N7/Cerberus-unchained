@@ -44,7 +44,49 @@ wrong file/service, disabled destination, cancellation, network failure, damaged
 receipts, a receipt becoming acknowledged after review, preserving other-service
 acknowledgements, two-part files and a queued retry being skipped on the next pass.
 The actual rendered retry screens were checked for layout and Cancel/Back routing.
-These fixtures use synthetic files and network boundaries. Full regression,
-native build, installation and a real v2 acknowledgement are tracked separately.
-The verified installed baseline remains [rev141](DUAL_RADIO_REV141.md) until the
-new image passes installation checks.
+These fixtures use synthetic files and network boundaries; live service
+acknowledgement remains a separate acceptance step.
+
+Firmware source `8cfe45f6d5cb3c085a442fc4289cc62d1c6766a1` passes all 166 host
+suites and five native targets on 1,299 identical inputs. Native READY, C5
+Locate/parser placement and console-stack gates pass. The known console frame
+path uses 2,240 of 4,096 bytes; this is a partial static bound. The S3 application
+is 2,329,744 bytes, 2,336 bytes above rev141. C5 remains 1,728,736 bytes and the
+bridge 255,296 bytes. All 22 package checksums verify for
+`cerberus-unchained-0.1.0-dev.rev142-20261105T055639Z`.
+Manifest SHA-256:
+`501167b7ca9e5da013589a774d04938c2e55a0d806a06db86026a97c9f2d736e`.
+Effective firmware-source digest:
+`3bfbaa8e336321fe419a3d8dcc8da71ee96afea2466555474c77e3089b3f36be`.
+This is a local development package, not a published binary release.
+
+The matched rev142 pair is installed. Fresh rev141 recovery backups cover
+2,396,160 S3 bytes and 2,097,152 C5 bytes, with baseline-image and flash-digest
+verification. All nine bridge/C5/S3 image writes verify. No blanket erase, NVS
+rewrite or SD-file deletion was performed. Two post-update idle captures
+62.45 seconds apart confirm mounted SD, released radio and log-manager owners,
+advancing S3/C5 uptime, C5 protocol 2/capability 75 and no previous reset fault.
+
+Across those samples, S3 free internal memory stays at 135,268 bytes, largest
+block 94,208 bytes, free PSRAM 1,426,140 bytes and task count 10. C5 free memory
+stays at 53,460 bytes. Four startup READY timeouts and legacy fallbacks remain
+visible; none were added between samples, and the other listed SPI error
+counters stayed zero. The observed console stack minimum after diagnostics
+was 1,252 bytes; this is not a loaded-feature bound. These captures do not
+establish RF completeness or upload performance.
+
+The saved home/WiGLE/WDGWars profile remains ready after the paired update;
+Wardrift remains empty/disabled. Both idle upload snapshots show zero attempts.
+The owner reported another CHECK ACCOUNT message. The console recorded the
+normal Upload action held on the existing WDGWars receipt, with zero new HTTP
+attempts. A later read showed inspection of a legacy unlocated log, which cannot
+upload. The new explicit retry itself has no physical success evidence yet.
+This feedback drives the clearer direct retry button and single-session CSV
+layout in rev143; the original uncertain receipt remains retained.
+
+An offline comparison of the fresh verified recovery backup found one complete,
+CRC-valid v1 settings blob. Every field matched the private profile, and its
+WiGLE name/token and WDGWars token matched the owner-supplied key files. The
+post-update profile load succeeded. Only match/readiness results are recorded;
+credentials and backup contents remain private. This verifies configuration
+persistence, not current network reachability or service delivery.

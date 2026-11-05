@@ -11,15 +11,19 @@ cerberus_ward_log_kind_t cerberus_ward_log_name(const char *name)
 {
     size_t length = 0;
     if (name) while (length < CERBERUS_WARD_LOG_NAME_CAPACITY && name[length]) ++length;
-    if (!name || length != 12U || strcmp(name + 8, ".CSV"))
+    const size_t prefix = sizeof(CERBERUS_WARD_LOG_PREFIX) - 1U;
+    const bool current = name && length == prefix + 7U &&
+        !memcmp(name, CERBERUS_WARD_LOG_PREFIX, prefix);
+    const size_t digits = current ? prefix : 5U;
+    if (!name || (!current && length != 12U) || strcmp(name + digits + 3U, ".CSV"))
         return CERBERUS_WARD_LOG_UNKNOWN;
     unsigned index = 0;
-    for (unsigned i = 5; i < 8; ++i) {
+    for (size_t i = digits; i < digits + 3U; ++i) {
         if (name[i] < '0' || name[i] > '9') return CERBERUS_WARD_LOG_UNKNOWN;
         index = index * 10U + (unsigned)(name[i] - '0');
     }
     if (!index) return CERBERUS_WARD_LOG_UNKNOWN;
-    return !memcmp(name, "WIGLE", 5) ? CERBERUS_WARD_LOG_WIGLE :
+    return current || !memcmp(name, "WIGLE", 5) ? CERBERUS_WARD_LOG_WIGLE :
         !memcmp(name, "UNLOC", 5) ? CERBERUS_WARD_LOG_UNLOCATED : CERBERUS_WARD_LOG_UNKNOWN;
 }
 

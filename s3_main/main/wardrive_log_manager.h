@@ -15,7 +15,7 @@ typedef struct {
     unsigned service; /* 0 = none, otherwise service enum + 1. */
     cerberus_upload_transfer_t transfer; /* Current attempt only; never response contents. */
     esp_err_t error;
-    char stage[40], name[13];
+    char stage[40], name[CERBERUS_WARD_LOG_NAME_CAPACITY];
     cerberus_ward_log_summary_t summary;
     cerberus_upload_reply_t destination[3];
 } cerberus_log_manager_status_t;

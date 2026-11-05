@@ -29,7 +29,7 @@ static int wardrive_lock;
 static uint32_t plus_one(uint32_t v){return v==UINT32_MAX?v:v+1;}
 static uint32_t plus_saturated(uint32_t v,uint32_t n){return n>UINT32_MAX-v?UINT32_MAX:v+n;}
 static bool wants_stop(void){return stop;}
-static void publish_sighting(const cerberus_wardrive_observation_t *o,bool logged);
+static void publish_sighting(const cerberus_wardrive_observation_t *o,bool logged,bool duplicate);
 esp_err_t cerberus_s3_ble_scanner_passive_copy_wardrive(uint64_t epoch,uint8_t count,
     cerberus_c5_ble_result_t *rows,cerberus_s3_ble_wardrive_evidence_t *hints,size_t capacity,
     cerberus_s3_ble_passive_state_t *state)
@@ -59,7 +59,7 @@ static esp_err_t append_observation_impl(const cerberus_wardrive_observation_t *
         assert(saved_count<32);saved[saved_count++]=*o;
         cerberus_wardrive_commit(&dedupe,o,decision,1234);
     }
-    publish_sighting(o,decision.should_log);
+    publish_sighting(o,decision.should_log,!decision.should_log);
     if(stop_after_first)stop=true;
     return ESP_OK;
 }
@@ -163,13 +163,13 @@ int main(void)
     reset();
     cerberus_wardrive_observation_t relation={.type=CERBERUS_WARDRIVE_WIFI_RELATION,
         .radio=CERBERUS_WARDRIVE_RADIO_C5};
-    publish_sighting(&relation,true);publish_sighting(&relation,false);
+    publish_sighting(&relation,true,false);publish_sighting(&relation,false,true);
     assert(wardrive_status.c5_relation_observations==2&&wardrive_status.c5_relation_logged==1);
     assert(!wardrive_status.c5_wifi_observations&&!wardrive_status.c5_probe_observations&&!wardrive_status.s3_ble_observations);
     assert(wardrive_status.sd_rows==1&&wardrive_status.duplicate_sightings==1);
     wardrive_status.c5_relation_observations=wardrive_status.c5_relation_logged=UINT32_MAX;
     relation_dedupe.evicted=UINT32_MAX;probe_dedupe.evicted=2;
-    publish_sighting(&relation,true);
+    publish_sighting(&relation,true,false);
     assert(wardrive_status.c5_relation_observations==UINT32_MAX&&wardrive_status.c5_relation_logged==UINT32_MAX&&
         wardrive_status.dedupe_evicted==UINT32_MAX);
     puts("Wardriving BLE: atomic banks, source evidence, independent relation counters, terminal SD failure and Stop drain pass");

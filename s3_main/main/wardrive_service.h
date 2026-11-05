@@ -70,6 +70,7 @@ typedef struct {
     uint32_t duplicate_sightings, invalid_sightings, dedupe_evicted;
     uint32_t sd_rows, files_saved;
     uint32_t geotagged_rows, unlocated_rows, gps_fallback_rows;
+    uint32_t skipped_no_fix, skipped_time, skipped_format;
     uint64_t sd_bytes;
     esp_err_t c5_error, s3_ble_error, expansion_error, sd_error;
     esp_err_t error_code;
@@ -108,8 +109,9 @@ esp_err_t cerberus_wardrive_clear_recent(void);
 /* Start requires exclusive access to the onboard C5 scan and S3 BLE scanner.
  * The UI must suspend/drain Recon before calling. R1-R6 are opt-in; enabling
  * them does not imply that expansion radios are installed. GPS is opt-in;
- * without a wired receiver, leave enable_gps false. Scans and unlocated CSV
- * continue with no GPS reader or UART driver. With GPS enabled, fresh GPS/RMC
+ * without a wired receiver, leave enable_gps false. Scanning continues without
+ * a GPS reader, but the production stream saves only valid located WiGLE rows
+ * to one CERBWardrive CSV. Skipped observations have explicit counters. Fresh GPS/RMC
  * results enter WiGLE; other valid observations enter an unlocated sidecar. */
 esp_err_t cerberus_wardrive_start(bool include_expansions, bool enable_gps);
 /* Idle-only mode selection. Applies to the next integrated session. */

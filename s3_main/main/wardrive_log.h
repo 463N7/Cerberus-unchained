@@ -6,7 +6,8 @@
 
 /* Native finalized logs only. Interrupted .TMP captures are never upload or
  * bulk-delete candidates. This parser retains no observed identifiers. */
-#define CERBERUS_WARD_LOG_NAME_CAPACITY 13U
+#define CERBERUS_WARD_LOG_NAME_CAPACITY 24U
+#define CERBERUS_WARD_LOG_PREFIX "CERBWardrive"
 #define CERBERUS_WARD_LOG_LINE_CAPACITY 1024U
 #define CERBERUS_WARD_LOG_MAX_BYTES (64U * 1024U * 1024U)
 typedef enum { CERBERUS_WARD_LOG_UNKNOWN, CERBERUS_WARD_LOG_WIGLE,

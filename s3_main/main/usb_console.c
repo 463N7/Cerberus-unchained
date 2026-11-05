@@ -1491,6 +1491,10 @@ static void print_radio(void)
         (unsigned long)wardrive.geotagged_rows,
         (unsigned long)wardrive.unlocated_rows,
         (unsigned long)wardrive.gps_fallback_rows);
+    console_printf("skipped_no_fix=%lu\r\nskipped_time=%lu\r\nskipped_format=%lu\r\n",
+        (unsigned long)wardrive.skipped_no_fix,
+        (unsigned long)wardrive.skipped_time,
+        (unsigned long)wardrive.skipped_format);
     console_printf("ble_hint_scope=processed_typed_rows_per_sweep_not_unique_devices\r\n"
         "ble_flock_observations=%lu\r\nble_flock_clue=%lu\r\n"
         "ble_flock_signature=%lu\r\nble_flock_corroborated=%lu\r\n",

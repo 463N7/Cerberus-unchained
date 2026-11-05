@@ -25,8 +25,18 @@ esp_err_t cerberus_ward_log_storage_end(uint64_t token)
     release_storage_mutex(); return err;
 }
 
+static unsigned ward_log_group(const char *name)
+{
+    if (!strncmp(name, CERBERUS_WARD_LOG_PREFIX, sizeof(CERBERUS_WARD_LOG_PREFIX)-1U)) return 0;
+    return cerberus_ward_log_name(name)==CERBERUS_WARD_LOG_WIGLE ? 1U : 2U;
+}
 static int ward_log_compare(const void *a, const void *b)
-{ return strcmp(((const cerberus_ward_log_entry_t *)b)->name, ((const cerberus_ward_log_entry_t *)a)->name); }
+{
+    const char *left=((const cerberus_ward_log_entry_t *)a)->name;
+    const char *right=((const cerberus_ward_log_entry_t *)b)->name;
+    unsigned ga=ward_log_group(left),gb=ward_log_group(right);
+    return ga!=gb ? (ga<gb ? -1 : 1) : strcmp(right,left);
+}
 
 esp_err_t cerberus_ward_log_storage_list(uint64_t token, cerberus_ward_log_entry_t *entries,
     size_t capacity, size_t *count)
@@ -47,13 +57,13 @@ esp_err_t cerberus_ward_log_storage_list(uint64_t token, cerberus_ward_log_entry
             if (!entry) { if (errno) err = ESP_FAIL; break; }
             if (!cerberus_ward_log_name(entry->d_name)) continue;
             char path[96]; struct stat st;
-            snprintf(path, sizeof(path), "%s%s/%.12s", CERBERUS_STORAGE_MOUNT_PATH,
-                CERBERUS_STORAGE_WARDRIVE_PATH, entry->d_name);
+            snprintf(path, sizeof(path), "%s%s/%.*s", CERBERUS_STORAGE_MOUNT_PATH,
+                CERBERUS_STORAGE_WARDRIVE_PATH, (int)CERBERUS_WARD_LOG_NAME_CAPACITY-1, entry->d_name);
             if (stat(path, &st)) { err = ESP_FAIL; break; }
             if (!S_ISREG(st.st_mode)) continue;
             if (*count == capacity || st.st_size < 0) { err = ESP_ERR_INVALID_SIZE; break; }
             cerberus_ward_log_entry_t *out = &entries[(*count)++];
-            memset(out, 0, sizeof(*out)); memcpy(out->name, entry->d_name, 13);
+            memset(out, 0, sizeof(*out)); memcpy(out->name, entry->d_name, strlen(entry->d_name)+1U);
             out->bytes = (uint64_t)st.st_size;
         }
         if (closedir(dir)) err = ESP_FAIL;

@@ -27,6 +27,7 @@ static const char *import_mode;
 static const char *retry_mode;
 static unsigned service_sends[3];
 static bool retry_multipart;
+static bool current_names;
 static unsigned part_sends[3][2];
 static unsigned saves;
 static void (*queued)(void *);
@@ -98,7 +99,8 @@ cerberus_upload_reply_t cerberus_upload_net_send(const cerberus_upload_config_t 
     FILE *f,const cerberus_upload_file_t *plan,unsigned part,const char *name,cerberus_upload_cancel_fn cancel,
     cerberus_upload_progress_fn progress,void *context,cerberus_upload_transfer_t *transfer)
 {
-    (void)c;(void)name;assert(!critical&&!storage_locked&&f&&plan->parts&&part<plan->parts&&!cancel(context));
+    (void)c;assert(!critical&&!storage_locked&&f&&plan->parts&&part<plan->parts&&!cancel(context));
+    if(current_names)assert(!strncmp(name,"CERBWardrive001-",sizeof("CERBWardrive001-")-1U));
     ++sends;++service_sends[service];assert(part<2);++part_sends[service][part];
     if(retry_multipart)assert(plan->parts==2);
     progress(context,"SENDING",10,20);*transfer=(cerberus_upload_transfer_t){.http_status=200,.attempted=true,.response_complete=true,.response_bytes=48};
@@ -173,7 +175,9 @@ void vTaskDelay(unsigned ms)
     case 0:{assert(s.count==2&&s.active&&s.error==ESP_OK&&sd_ward_log_lease);
         uint64_t token=1;assert(cerberus_ward_log_storage_begin(&token)!=ESP_OK&&!token);
         assert(cerberus_ward_log_storage_end(sd_ward_log_lease+1)!=ESP_OK);
-        cerberus_ward_log_entry_t entry;assert(cerberus_log_manager_row(0,&entry)&&!strcmp(entry.name,"WIGLE001.CSV"));
+        cerberus_ward_log_entry_t entry;assert(cerberus_log_manager_row(0,&entry)&&!strcmp(entry.name,current_names?"CERBWardrive001.CSV":"WIGLE001.CSV"));
+        cerberus_ward_log_entry_t modern={.name="CERBWardrive001.CSV"},legacy={.name="WIGLE999.CSV"};
+        assert(ward_log_compare(&modern,&legacy)<0&&ward_log_compare(&legacy,&modern)>0);
         assert(!cerberus_log_manager_row(2,&entry));issue(CERBERUS_LOG_INSPECT,0);break;}
     case 1:assert(s.error==ESP_OK&&s.summary.rows==10&&s.summary.complete&&begins==0);issue(CERBERUS_LOG_UPLOAD,-1);break;
     case 2:
@@ -253,6 +257,7 @@ int main(int argc,char **argv)
     wdgwars_unknown=!strcmp(argv[1],"wdgwars_unknown");
     if(!strncmp(argv[1],"retry_",6)){retry_mode=argv[1];wdgwars_unknown=true;}
     retry_multipart=!strcmp(argv[1],"retry_multipart");
+    current_names=!strcmp(argv[1],"current_name");
     fail_sync=!strcmp(argv[1],"sd_fail");network_fail=!strcmp(argv[1],"network_fail");sd_busy=!strcmp(argv[1],"busy");
     if(!strncmp(argv[1],"import_",7))import_mode=argv[1];
     fail_alloc=true;assert(cerberus_log_manager_open()==ESP_ERR_NO_MEM&&!allocations);fail_alloc=false;

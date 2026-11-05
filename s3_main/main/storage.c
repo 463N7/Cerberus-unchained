@@ -1360,7 +1360,7 @@ esp_err_t cerberus_storage_wardrive_finish(bool keep, char *name,
     size_t capacity, uint64_t *bytes)
 { return wardrive_stream_finish(&sd_wardrive_stream, keep, name, capacity, bytes); }
 esp_err_t cerberus_storage_wardrive_wigle_begin(const char *header, size_t length)
-{ return wardrive_stream_begin(&sd_wigle_stream, "WIGLE", header, length); }
+{ return wardrive_stream_begin(&sd_wigle_stream, "CERBWardrive", header, length); }
 esp_err_t cerberus_storage_wardrive_wigle_append(const char *row, size_t length)
 { return wardrive_stream_append(&sd_wigle_stream, row, length); }
 esp_err_t cerberus_storage_wardrive_wigle_sync(void)

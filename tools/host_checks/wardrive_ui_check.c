@@ -127,17 +127,17 @@ static void save(const char *prefix,const char *name)
 }
 static void check_views(const char *prefix)
 {
-    reset();draw();CHECK(!strcmp(lines[80],"GPS DATA > OFF / UNLOC CSV"));
+    reset();draw();CHECK(!strcmp(lines[80],"GPS DATA > OFF / SCAN ONLY"));
     CHECK(!strcmp(lines[178],"C5 5G: 0 WIFI / 0 BLE")&&strstr(drawn,"START\n"));save(prefix,"idle-no-gps");
     runtime=(cerberus_wardrive_status_t){.state=CERBERUS_WARDRIVE_RUNNING,.c5_wifi_sweeps=12,.c5_wifi_observations=96,
         .c5_stream={.wifi_reports=96},.s3_stream={.ble_reports=173},.s3_ble_sweeps=9,.s3_ble_observations=173,.s3_ble_flock_observations=23,
         .s3_ble_flock_clue=3,.s3_ble_flock_signature=15,.s3_ble_flock_corroborated=5,
         .c5_probe_state=CERBERUS_WARDRIVE_PROBE_AVAILABLE,.c5_probe_observations=4,
-        .c5_wifi_logged=31,.s3_ble_logged=48,.sd_rows=79,.sd_bytes=32768,.unlocated_rows=79,
-        .last_file_name="UNLOC0001.CSV"};
+        .skipped_no_fix=269};
     draw();CHECK(!strcmp(lines[178],"C5 5G: 96 WIFI / 0 BLE"));
     CHECK(!strcmp(lines[158],"S3 2.4G/BLE: 0 WIFI / 173 BLE")&&strstr(drawn,"STOP\n"));
-    CHECK(!strcmp(lines[300],"GEO 0 / UNLOC 79 ROWS"));save(prefix,"running-no-gps");
+    CHECK(!strcmp(lines[300],"NOT SAVED: 269 / NO FIX 269"));
+    CHECK(!strcmp(lines[324],"SCANNING / CSV NEEDS GPS FIX + UTC"));save(prefix,"running-no-gps");
     runtime.c5_stream.wifi_reports=runtime.c5_stream.ble_reports=UINT32_MAX;draw();
     CHECK(!strcmp(lines[178],"C5 5G: 4294967295 WIFI / 4294967295 BLE"));save(prefix,"max-counts");
     runtime.state=CERBERUS_WARDRIVE_STOPPING;wardrive_return_pending=true;draw();
@@ -153,8 +153,14 @@ static void check_views(const char *prefix)
     CHECK(!strcmp(lines[80],"GPS DATA > FIX + UTC / WIGLE CSV"));
     CHECK(!strcmp(lines[240],"EXPANSION R1-R6: 6 ONLINE"));save(prefix,"gps-format-preview");
     runtime.gps.utc_valid=false;draw();CHECK(!strcmp(lines[80],"GPS DATA > FIX / UTC UNVERIFIED"));
-    runtime.gps.state=CERBERUS_WARDRIVE_GPS_STALE;draw();CHECK(!strcmp(lines[80],"GPS DATA > FIX STALE / UNLOC CSV"));
-    runtime.gps_error=ESP_FAIL;draw();CHECK(!strcmp(lines[80],"GPS DATA > UART ERROR / UNLOC CSV"));
+    strcpy(runtime.last_file_name,"CERBWardrive001.CSV");runtime.files_saved=1;draw();
+    CHECK(!strcmp(lines[280],"LAST FILE: CERBWardrive001.CSV"));
+    runtime.skipped_no_fix=runtime.skipped_time=runtime.skipped_format=UINT32_MAX;draw();
+    CHECK(!strcmp(lines[300],"NOT SAVED: 12884901885 / NO FIX 4294967295"));
+    runtime.gps.state=CERBERUS_WARDRIVE_GPS_STALE;draw();CHECK(!strcmp(lines[80],"GPS DATA > FIX STALE / SCAN ONLY"));
+    runtime.gps_error=ESP_FAIL;draw();CHECK(!strcmp(lines[80],"GPS DATA > UART ERROR / SCAN ONLY"));
+    runtime.error_code=runtime.sd_error=ESP_ERR_INVALID_SIZE;draw();
+    CHECK(!strcmp(lines[324],"LOG SIZE LIMIT / START A NEW SESSION"));
 }
 static void check_routes(void)
 {

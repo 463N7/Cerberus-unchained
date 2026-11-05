@@ -9,7 +9,7 @@ typedef struct {
     cerberus_upload_config_t draft;
     cerberus_keyboard_t keyboard;
     char input[129],message[48];
-    wd_log_page_t page,return_page;
+    wd_log_page_t page,return_page,retry_return_page;
     unsigned list_page,edit;
     int selected,confirmed_index;
     uint64_t confirmed_session;
@@ -62,16 +62,25 @@ static void wardrive_logs_confirm(wd_log_page_t page,int index,const cerberus_lo
     wd_log_ui->confirmed_session=s->session;wd_log_ui->confirmed_revision=s->catalog_revision;
     wd_log_ui->confirmed_index=index;wd_log_ui->confirmed_count=index<0?s->count:1;
 }
-static bool wardrive_logs_retry_ready(const cerberus_log_manager_status_t *s,unsigned service)
+static bool wardrive_logs_retry_ready(const cerberus_log_manager_status_t *s,unsigned service,int index)
 {
     cerberus_ward_log_entry_t entry;
-    return service<3&&wd_log_ui->confirmed_index>=0&&!s->busy&&
+    return service<3&&index>=0&&!s->busy&&
         (s->error==ESP_OK||(s->error==ESP_ERR_INVALID_STATE&&strstr(s->stage," / CHECK ACCOUNT FIRST"))||
             (s->error==ESP_ERR_INVALID_RESPONSE&&s->transfer.attempted))&&
         s->summary.complete&&!s->summary.error&&!s->summary.legacy_metadata&&
         s->summary.kind==CERBERUS_WARD_LOG_WIGLE&&s->destination[service].result==CERBERUS_UPLOAD_UNKNOWN&&
-        cerberus_log_manager_row((unsigned)wd_log_ui->confirmed_index,&entry)&&!strcmp(entry.name,s->name);
+        cerberus_log_manager_row((unsigned)index,&entry)&&!strcmp(entry.name,s->name);
 }
+static unsigned wardrive_logs_retry_mask(const cerberus_log_manager_status_t *s,int index)
+{
+    cerberus_upload_config_t config={0};unsigned mask=0;
+    if(cerberus_upload_settings_load(&config)==ESP_OK)
+        for(unsigned i=0;i<3;++i)if((config.destinations&(1U<<i))&&wardrive_logs_retry_ready(s,i,index))mask|=1U<<i;
+    cerberus_upload_config_clear(&config,sizeof(config));return mask;
+}
+static int wardrive_logs_single_retry(unsigned mask)
+{return mask==1?0:mask==2?1:mask==4?2:-1;}
 static esp_err_t wardrive_logs_draw(void)
 {
     cerberus_log_manager_status_t s;cerberus_log_manager_status(&s);
@@ -83,11 +92,13 @@ static esp_err_t wardrive_logs_draw(void)
         return draw_small_button(8,432,304,36,"CANCEL FIELD");
     }
     char line[64];
+    bool receipt_hold=s.error==ESP_ERR_INVALID_STATE&&strstr(s.stage," / CHECK ACCOUNT FIRST");
     const char *message=wd_log_ui->message[0]?wd_log_ui->message:s.stage;
+    if(receipt_hold&&!wd_log_ui->message[0])message="UPLOAD NEEDS RETRY CONFIRMATION";
     if(wd_log_ui->closing)message="CLOSING / RELEASING RESOURCES";
     ESP_RETURN_ON_ERROR(draw_centered(58,message,wd_log_ui->message[0]||s.error!=ESP_OK?UI_BAD:UI_MUTED,1),TAG,"log status");
-    if(s.error!=ESP_OK){snprintf(line,sizeof(line),"%s",s.error==ESP_ERR_INVALID_STATE&&strstr(s.stage," / CHECK ACCOUNT FIRST")?
-        "OPEN UPLOAD / REVIEW SERVICE RETRY":esp_err_to_name(s.error));
+    if(s.error!=ESP_OK){snprintf(line,sizeof(line),"%s",receipt_hold?
+        "OPEN LOG / CONFIRM SERVICE RETRY":esp_err_to_name(s.error));
         ESP_RETURN_ON_ERROR(draw_centered(74,line,UI_BAD,1),TAG,"log error");}
     if(s.busy||wd_log_ui->closing){
         ESP_RETURN_ON_ERROR(draw_centered(106,s.name[0]?s.name:"OPENING SAVED LOGS",UI_TEXT,2),TAG,"log active file");
@@ -143,7 +154,7 @@ static esp_err_t wardrive_logs_draw(void)
         if(upload){
             cerberus_upload_config_t config={0};esp_err_t e=cerberus_upload_settings_load(&config);
             bool retry=false;
-            for(unsigned i=0;i<3;++i){bool available=e==ESP_OK&&(config.destinations&(1U<<i))&&wardrive_logs_retry_ready(&s,i);
+            for(unsigned i=0;i<3;++i){bool available=e==ESP_OK&&(config.destinations&(1U<<i))&&wardrive_logs_retry_ready(&s,i,wd_log_ui->confirmed_index);
                 snprintf(line,sizeof(line),"%s: %s",cerberus_upload_service_name((cerberus_upload_service_t)i),
                     available?"REVIEW RETRY":e!=ESP_OK?"SETUP ERROR":(config.destinations&(1U<<i))?"SELECTED":"OFF");
                 if(available){retry=true;ESP_RETURN_ON_ERROR(draw_small_button(8,228+i*26,304,24,line),TAG,"review service retry");}
@@ -151,7 +162,11 @@ static esp_err_t wardrive_logs_draw(void)
             cerberus_upload_config_clear(&config,sizeof(config));
             ESP_RETURN_ON_ERROR(draw_centered(318,retry?"TAP A SERVICE ABOVE TO REVIEW ITS RETRY":"UNLOCATED LOGS STAY LOCAL",UI_MUTED,1),TAG,"local log note");
         }
-        ESP_RETURN_ON_ERROR(draw_small_button(8,380,304,36,upload?"CONFIRM UPLOAD":forget?"CONFIRM FORGET":"CONFIRM DELETE"),TAG,"log confirm");
+        const char *confirm_label=upload?"CONFIRM UPLOAD":forget?"CONFIRM FORGET":"CONFIRM DELETE";
+        if(upload){unsigned retry=wardrive_logs_retry_mask(&s,wd_log_ui->confirmed_index);int one=wardrive_logs_single_retry(retry);
+            if(one>=0){snprintf(line,sizeof(line),"RETRY %s ONLY",cerberus_upload_service_name((cerberus_upload_service_t)one));confirm_label=line;}
+            else if(retry)confirm_label="CHOOSE A SERVICE ABOVE";}
+        ESP_RETURN_ON_ERROR(draw_small_button(8,380,304,36,confirm_label),TAG,"log confirm");
         return draw_small_button(8,432,304,36,"CANCEL");
     }
     if(wd_log_ui->page==WD_LOG_DETAIL){
@@ -162,7 +177,7 @@ static esp_err_t wardrive_logs_draw(void)
         else snprintf(line,sizeof(line),"2.4G %lu / 5G %lu / BLE %lu",(unsigned long)s.summary.wifi_24,(unsigned long)s.summary.wifi_5,(unsigned long)s.summary.ble);
         ESP_RETURN_ON_ERROR(draw_centered(157,line,UI_TEXT,1),TAG,"log radios");
         ESP_RETURN_ON_ERROR(draw_centered(180,s.summary.first_utc[0]?s.summary.first_utc:"UTC NOT AVAILABLE",UI_MUTED,1),TAG,"log date");
-        if(s.summary.kind==CERBERUS_WARD_LOG_UNLOCATED)snprintf(line,sizeof(line),"UNLOCATED / LOCAL EVIDENCE ONLY");
+        if(s.summary.kind==CERBERUS_WARD_LOG_UNLOCATED)snprintf(line,sizeof(line),"LEGACY LOG / NO GPS / CANNOT UPLOAD");
         else snprintf(line,sizeof(line),"NO ACCURACY %lu / NO ALTITUDE %lu",(unsigned long)s.summary.missing_accuracy,(unsigned long)s.summary.missing_altitude);
         ESP_RETURN_ON_ERROR(draw_centered(202,line,UI_MUTED,1),TAG,"log quality");
         for(unsigned i=0;i<3;++i){snprintf(line,sizeof(line),"%s: %s",cerberus_upload_service_name((cerberus_upload_service_t)i),cerberus_upload_result_name(s.destination[i].result));
@@ -176,7 +191,10 @@ static esp_err_t wardrive_logs_draw(void)
             snprintf(line,sizeof(line),"WDGW IMPORTED %lu / REJECTED ROWS %lu",(unsigned long)s.destination[1].imported,(unsigned long)s.destination[1].rejected_rows);
             ESP_RETURN_ON_ERROR(draw_centered(312,line,UI_TEXT,1),TAG,"server row counts");}
         bool eligible=s.summary.complete&&!s.summary.error&&!s.summary.legacy_metadata&&s.summary.kind==CERBERUS_WARD_LOG_WIGLE;
-        ESP_RETURN_ON_ERROR(draw_small_button(8,346,304,32,eligible?"UPLOAD THIS LOG":"LOCAL ONLY / EXPORT USING SD"),TAG,"upload one");
+        const char *upload_label=eligible?"UPLOAD THIS LOG":"NO GPS DATA / LOCAL ONLY";
+        if(eligible){int one=wardrive_logs_single_retry(wardrive_logs_retry_mask(&s,wd_log_ui->selected));
+            if(one>=0){snprintf(line,sizeof(line),"RETRY %s UPLOAD",cerberus_upload_service_name((cerberus_upload_service_t)one));upload_label=line;}}
+        ESP_RETURN_ON_ERROR(draw_small_button(8,346,304,32,upload_label),TAG,"upload one");
         ESP_RETURN_ON_ERROR(draw_small_button(8,388,304,30,"DELETE THIS LOG"),TAG,"delete one");
         return draw_small_button(8,432,304,36,"BACK TO LOGS");
     }
@@ -184,7 +202,9 @@ static esp_err_t wardrive_logs_draw(void)
     ESP_RETURN_ON_ERROR(draw_small_button(8,90,304,30,"HOME WI-FI / API SETUP"),TAG,"setup route");
     for(unsigned row=0;row<5;++row){cerberus_ward_log_entry_t entry;
         unsigned index=wd_log_ui->list_page*5+row;if(!cerberus_log_manager_row(index,&entry))break;
-        snprintf(line,sizeof(line),"%s  %llu KiB",entry.name,(unsigned long long)(entry.bytes/1024));
+        if(cerberus_ward_log_name(entry.name)==CERBERUS_WARD_LOG_UNLOCATED)
+            snprintf(line,sizeof(line),"%s / LEGACY NO GPS",entry.name);
+        else snprintf(line,sizeof(line),"%s  %llu KiB",entry.name,(unsigned long long)(entry.bytes/1024));
         ESP_RETURN_ON_ERROR(draw_small_button(8,130+row*34,304,30,line),TAG,"saved log row");}
     if(!s.count)ESP_RETURN_ON_ERROR(draw_centered(190,"NO FINALIZED CAPTURES ON THIS CARD",UI_MUTED,1),TAG,"empty logs");
     snprintf(line,sizeof(line),"%u / %u",wd_log_ui->list_page+1,pages);
@@ -206,7 +226,7 @@ static void wardrive_logs_tap(uint16_t x,uint16_t y)
         wardrive_last_draw_ms=0;return;}
     if(y>=432&&y<468){
         if(wd_log_ui->page==WD_LOG_INPUT){cerberus_upload_config_clear(wd_log_ui->input,sizeof(wd_log_ui->input));wd_log_ui->page=WD_LOG_SETUP;}
-        else if(wd_log_ui->page==WD_LOG_CONFIRM_RETRY)wd_log_ui->page=WD_LOG_CONFIRM_UPLOAD;
+        else if(wd_log_ui->page==WD_LOG_CONFIRM_RETRY)wd_log_ui->page=wd_log_ui->retry_return_page;
         else if(wd_log_ui->page>=WD_LOG_CONFIRM_UPLOAD)wd_log_ui->page=wd_log_ui->return_page;
         else if(wd_log_ui->page==WD_LOG_LIST)wd_log_ui->closing=true;
         else{cerberus_upload_config_clear(&wd_log_ui->draft,sizeof(wd_log_ui->draft));wd_log_ui->page=WD_LOG_LIST;}
@@ -241,9 +261,10 @@ static void wardrive_logs_tap(uint16_t x,uint16_t y)
     }else if(wd_log_ui->page>=WD_LOG_CONFIRM_UPLOAD){
         if(wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD&&y>=228&&y<306&&(y-228)%26<24){
             unsigned service=(y-228)/26;cerberus_upload_config_t config={0};
-            if(wardrive_logs_retry_ready(&s,service)&&cerberus_upload_settings_load(&config)==ESP_OK&&
+            if(wardrive_logs_retry_ready(&s,service,wd_log_ui->confirmed_index)&&cerberus_upload_settings_load(&config)==ESP_OK&&
                 (config.destinations&(1U<<service))){
                 wd_log_ui->page=WD_LOG_CONFIRM_RETRY;wd_log_ui->confirmed_service=service;
+                wd_log_ui->retry_return_page=WD_LOG_CONFIRM_UPLOAD;
             }
             cerberus_upload_config_clear(&config,sizeof(config));
         }
@@ -258,13 +279,20 @@ static void wardrive_logs_tap(uint16_t x,uint16_t y)
             }else if(wd_log_ui->page==WD_LOG_CONFIRM_FORGET){e=cerberus_upload_settings_forget();
                 cerberus_upload_config_clear(&wd_log_ui->draft,sizeof(wd_log_ui->draft));wd_log_ui->page=WD_LOG_SETUP;}
             else{bool upload=wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD;
+                unsigned mask=upload?wardrive_logs_retry_mask(&s,wd_log_ui->confirmed_index):0;
+                if(mask){int one=wardrive_logs_single_retry(mask);
+                    if(one>=0){wd_log_ui->confirmed_service=(unsigned)one;wd_log_ui->retry_return_page=WD_LOG_CONFIRM_UPLOAD;wd_log_ui->page=WD_LOG_CONFIRM_RETRY;}
+                    wardrive_last_draw_ms=0;return;}
                 e=cerberus_log_manager_request(wd_log_ui->confirmed_session,wd_log_ui->confirmed_revision,
                     upload?CERBERUS_LOG_UPLOAD:CERBERUS_LOG_DELETE,wd_log_ui->confirmed_index);
                 wd_log_ui->page=upload&&wd_log_ui->confirmed_index>=0?WD_LOG_DETAIL:WD_LOG_LIST;}
         }
     }else if(wd_log_ui->page==WD_LOG_DETAIL){
         if(y>=346&&y<378&&s.summary.complete&&!s.summary.error&&!s.summary.legacy_metadata&&
-            s.summary.kind==CERBERUS_WARD_LOG_WIGLE)wardrive_logs_confirm(WD_LOG_CONFIRM_UPLOAD,wd_log_ui->selected,&s);
+            s.summary.kind==CERBERUS_WARD_LOG_WIGLE){
+            int one=wardrive_logs_single_retry(wardrive_logs_retry_mask(&s,wd_log_ui->selected));
+            wardrive_logs_confirm(one>=0?WD_LOG_CONFIRM_RETRY:WD_LOG_CONFIRM_UPLOAD,wd_log_ui->selected,&s);
+            if(one>=0){wd_log_ui->confirmed_service=(unsigned)one;wd_log_ui->retry_return_page=WD_LOG_DETAIL;}}
         else if(y>=388&&y<418)wardrive_logs_confirm(WD_LOG_CONFIRM_DELETE,wd_log_ui->selected,&s);
     }else{
         if(y>=90&&y<120){e=cerberus_upload_settings_load(&wd_log_ui->draft);wd_log_ui->page=WD_LOG_SETUP;}

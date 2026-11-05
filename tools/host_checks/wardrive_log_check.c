@@ -9,11 +9,15 @@ static void boundaries(void)
     assert(cerberus_ward_log_name(NULL) == CERBERUS_WARD_LOG_UNKNOWN);
     assert(cerberus_ward_log_name("WIGLE001.CSV") == CERBERUS_WARD_LOG_WIGLE);
     assert(cerberus_ward_log_name("UNLOC999.CSV") == CERBERUS_WARD_LOG_UNLOCATED);
+    assert(cerberus_ward_log_name("CERBWardrive001.CSV") == CERBERUS_WARD_LOG_WIGLE);
+    assert(cerberus_ward_log_name("CERBWardrive999.CSV") == CERBERUS_WARD_LOG_WIGLE);
     const char *bad[] = {"WIGLE000.CSV", "WIGLE001.TMP", "WIGLE001.csv", "WIGLE1000.CSV",
-        "UNLOC01.CSV", "../WIGLE001.CSV", "/WIGLE001.CSV", "WIGLE001.CSV/", "OTHER001.CSV", ""};
+        "UNLOC01.CSV", "../WIGLE001.CSV", "/WIGLE001.CSV", "WIGLE001.CSV/", "OTHER001.CSV", "",
+        "CERBWardrive000.CSV","CERBWardrive01.CSV","CERBWardrive1000.CSV","CERBWardrive001.TMP",
+        "../CERBWardrive001.CSV","CERBWardrive001.CSV/","CERBWardrive001.csv"};
     for (size_t i = 0; i < sizeof(bad)/sizeof(bad[0]); ++i)
         assert(cerberus_ward_log_name(bad[i]) == CERBERUS_WARD_LOG_UNKNOWN);
-    char raw[13]; memset(raw, 'x', sizeof(raw));
+    char raw[CERBERUS_WARD_LOG_NAME_CAPACITY]; memset(raw, 'x', sizeof(raw));
     assert(cerberus_ward_log_name(raw) == CERBERUS_WARD_LOG_UNKNOWN);
     assert(!cerberus_ward_log_feed(NULL, "", 0));
     assert(!cerberus_ward_log_finish(NULL));

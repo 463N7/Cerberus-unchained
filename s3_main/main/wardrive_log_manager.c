@@ -124,7 +124,7 @@ static void destination(unsigned s,const cerberus_upload_reply_t *reply)
 static esp_err_t process_file(uint64_t lease,unsigned index,bool upload,int retry_service,bool *network)
 {
     const cerberus_ward_log_entry_t *entry=&work->entries[index];FILE *file=NULL;
-    portENTER_CRITICAL(&lock);memcpy(state.name,entry->name,13);if(retry_service<0)memset(state.destination,0,sizeof(state.destination));portEXIT_CRITICAL(&lock);
+    portENTER_CRITICAL(&lock);memcpy(state.name,entry->name,sizeof(state.name));if(retry_service<0)memset(state.destination,0,sizeof(state.destination));portEXIT_CRITICAL(&lock);
     progress(NULL,"VALIDATING SAVED CSV",0,0);
     esp_err_t e=cerberus_ward_log_storage_open(lease,entry->name,&file);
     if(e!=ESP_OK)return e;
@@ -173,7 +173,8 @@ static esp_err_t process_file(uint64_t lease,unsigned index,bool upload,int retr
                     progress(NULL,"CSV UTC IS IN THE FUTURE",0,0);e=ESP_ERR_INVALID_RESPONSE;break;
                 }
                 reply.result=CERBERUS_UPLOAD_SENDING;e=receipt_write(lease,key,&reply);if(e!=ESP_OK)break;
-                char name[64];snprintf(name,sizeof(name),"%.8s-%.16s-%03u.csv",entry->name,key,p+1);
+                char name[64];snprintf(name,sizeof(name),"%.*s-%.16s-%03u.csv",
+                    (int)strlen(entry->name)-4,entry->name,key,p+1);
                 cerberus_upload_transfer_t transfer={0};
                 reply=cerberus_upload_net_send(&work->config,(cerberus_upload_service_t)s,file,&work->plan,p,name,cancel,progress,NULL,&transfer);
                 portENTER_CRITICAL(&lock);state.transfer=transfer;portEXIT_CRITICAL(&lock);

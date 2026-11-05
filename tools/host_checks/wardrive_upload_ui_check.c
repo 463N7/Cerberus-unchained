@@ -27,6 +27,7 @@ static cerberus_wardrive_status_t runtime;
 static cerberus_log_manager_status_t manager;
 static cerberus_upload_config_t saved;
 static unsigned requests,saves,forgets,cancels,closes,allocs,retries;
+static bool current_names;
 static cerberus_log_action_t last_action;
 static int last_index;
 static void wardrive_gps_view_close(void){}
@@ -40,7 +41,7 @@ void cerberus_log_manager_close(void){++closes;manager.active=false;}
 void cerberus_log_manager_cancel(void){++cancels;}
 void cerberus_log_manager_status(cerberus_log_manager_status_t *out){*out=manager;}
 bool cerberus_log_manager_row(unsigned index,cerberus_ward_log_entry_t *out){if(index>=manager.count)return false;
-    memset(out,0,sizeof(*out));snprintf(out->name,sizeof(out->name),"WIGLE%03u.CSV",index+1);out->bytes=123456;return true;}
+    memset(out,0,sizeof(*out));snprintf(out->name,sizeof(out->name),"%s%03u.CSV",current_names?"CERBWardrive":"WIGLE",index+1);out->bytes=123456;return true;}
 esp_err_t cerberus_log_manager_request(uint64_t session,uint32_t revision,cerberus_log_action_t action,int index)
 {assert(session==manager.session&&revision==manager.catalog_revision);++requests;last_action=action;last_index=index;return ESP_OK;}
 esp_err_t cerberus_log_manager_retry_service(uint64_t session,uint32_t revision,int index,cerberus_upload_service_t service)
@@ -79,11 +80,11 @@ int main(int argc,char **argv)
     manager.destination[0].result=CERBERUS_UPLOAD_QUEUED;manager.destination[1].result=CERBERUS_UPLOAD_UNKNOWN;
     strcpy(manager.stage,"WDGWARS / CHECK ACCOUNT FIRST");manager.error=ESP_ERR_INVALID_STATE;
     manager.transfer=(cerberus_upload_transfer_t){.attempted=true,.http_status=200,.response_bytes=18};
-    paint(argv[1],"uncertain");assert(strstr(drawn,"WDGWARS / CHECK ACCOUNT FIRST")&&strstr(drawn,"WIGLE: QUEUED")&&strstr(drawn,"HTTP 200 / NO COMPLETE REPLY"));
+    paint(argv[1],"uncertain");assert(strstr(drawn,"UPLOAD NEEDS RETRY CONFIRMATION")&&strstr(drawn,"WIGLE: QUEUED")&&strstr(drawn,"HTTP 200 / NO COMPLETE REPLY"));
     manager.error=ESP_OK;manager.stage[0]=0;memset(&manager.transfer,0,sizeof(manager.transfer));
     cerberus_ward_log_summary_t located=manager.summary;
     manager.summary=(cerberus_ward_log_summary_t){.kind=CERBERUS_WARD_LOG_UNLOCATED,.complete=true,.rows=2,.bytes=717};
-    paint(argv[1],"unlocated");assert(strstr(drawn,"RADIO SUBTOTALS NOT AVAILABLE")&&strstr(drawn,"UNLOCATED / LOCAL EVIDENCE ONLY"));
+    paint(argv[1],"unlocated");assert(strstr(drawn,"RADIO SUBTOTALS NOT AVAILABLE")&&strstr(drawn,"LEGACY LOG / NO GPS / CANNOT UPLOAD"));
     assert(!strstr(drawn,"BLE 0")&&!strstr(drawn,"NO ACCURACY 0"));
     wardrive_logs_tap(50,360);assert(wd_log_ui->page==WD_LOG_DETAIL&&requests==1);
     manager.summary=located;
@@ -114,14 +115,23 @@ int main(int argc,char **argv)
     memset(&manager,0,sizeof(manager));wardrive_logs_open();wardrive_logs_tap(50,140);
     manager.summary=located;strcpy(manager.name,"WIGLE001.CSV");saved.destinations=3;
     manager.destination[0].result=CERBERUS_UPLOAD_QUEUED;manager.destination[1].result=CERBERUS_UPLOAD_UNKNOWN;
-    unsigned before=requests;wardrive_logs_tap(50,360);paint(argv[1],"retry-review");
-    assert(strstr(drawn,"WDGWARS: REVIEW RETRY")&&!strstr(drawn,"WIGLE: REVIEW RETRY")&&requests==before&&!retries);
-    wardrive_logs_tap(50,264);assert(wd_log_ui->page==WD_LOG_CONFIRM_RETRY);paint(argv[1],"retry-confirm");
+    unsigned before=requests;paint(argv[1],"retry-direct");assert(strstr(drawn,"RETRY WDGWARS UPLOAD"));
+    wardrive_logs_tap(50,360);assert(wd_log_ui->page==WD_LOG_CONFIRM_RETRY);paint(argv[1],"retry-confirm");
     assert(strstr(drawn,"THE EARLIER ATTEMPT MAY HAVE ARRIVED")&&strstr(drawn,"OTHER SERVICES ARE NOT SENT"));
-    wardrive_logs_tap(50,450);assert(wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD&&!retries);
     wardrive_logs_tap(50,450);assert(wd_log_ui->page==WD_LOG_DETAIL&&!retries);
-    wardrive_logs_tap(50,360);wardrive_logs_tap(50,264);wardrive_logs_tap(50,395);
+    wardrive_logs_tap(50,360);wardrive_logs_tap(50,395);
     assert(wd_log_ui->page==WD_LOG_DETAIL&&retries==1&&requests==before);
+    /* Multiple uncertain destinations require one selected service. The main
+     * confirmation button must not reissue the normal action and hit the hold. */
+    manager.destination[0].result=CERBERUS_UPLOAD_UNKNOWN;
+    wardrive_logs_tap(50,360);paint(argv[1],"retry-review");
+    assert(wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD&&strstr(drawn,"CHOOSE A SERVICE ABOVE"));
+    wardrive_logs_tap(50,395);assert(wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD&&requests==before);
+    wardrive_logs_tap(50,264);assert(wd_log_ui->page==WD_LOG_CONFIRM_RETRY);
+    wardrive_logs_tap(50,450);assert(wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD);
+    manager.destination[0].result=CERBERUS_UPLOAD_QUEUED;
+    wardrive_logs_tap(50,395);assert(wd_log_ui->page==WD_LOG_CONFIRM_RETRY&&requests==before);
+    wardrive_logs_tap(50,450);wardrive_logs_tap(50,450);assert(wd_log_ui->page==WD_LOG_DETAIL);
     saved.destinations=1;wardrive_logs_tap(50,360);paint(argv[1],"retry-disabled");
     assert(!strstr(drawn,"REVIEW RETRY"));wardrive_logs_tap(50,264);assert(wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD&&retries==1);
     wardrive_logs_tap(50,450);wardrive_logs_tap(50,450);saved.destinations=3;
@@ -129,6 +139,10 @@ int main(int argc,char **argv)
     assert(!strstr(drawn,"REVIEW RETRY"));wardrive_logs_tap(50,264);assert(wd_log_ui->page==WD_LOG_CONFIRM_UPLOAD&&retries==1);
     wardrive_logs_tap(50,450);wardrive_logs_tap(50,140);strcpy(manager.name,"WIGLE007.CSV");
     wardrive_logs_tap(50,360);paint(argv[1],"retry-wrong-file");assert(!strstr(drawn,"REVIEW RETRY"));
+    wardrive_logs_tap(50,450);wardrive_logs_tap(50,450);current_names=true;
+    paint(argv[1],"current-list");assert(strstr(drawn,"CERBWardrive001.CSV"));
+    wardrive_logs_tap(50,140);strcpy(manager.name,"CERBWardrive001.CSV");
+    paint(argv[1],"current-detail");assert(strstr(drawn,"CERBWardrive001.CSV")&&strstr(drawn,"RETRY WDGWARS UPLOAD"));
     wardrive_logs_tick(true);assert(!wd_log_ui&&!allocs);
     puts("Actual upload UI: pagination, masked setup, explicit confirmations, Stop/Back/sleep passed");return 0;
 }

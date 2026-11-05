@@ -29,11 +29,12 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source version: `0.1.0-dev.rev142`, targeting onboard C5 protocol
-firmware revision 75. One JSON profile configures home Wi-Fi, WiGLE, WDGWars and
-Wardrift for manual Upload / Upload All. Rev142 adds WDGWars v2 queued receipts
-and a confirmed per-service retry for uncertain uploads; see the
-[rev142 development scope](docs/DUAL_RADIO_REV142.md).
+**Current source version: `0.1.0-dev.rev143`, targeting onboard C5 protocol
+firmware revision 75. Wardriving saves one `CERBWardrive001.CSV` per session,
+using WiGLE 1.6 with valid GPS/UTC rows and visible skipped-observation counts.
+One JSON profile configures home Wi-Fi, WiGLE, WDGWars and Wardrift for manual
+Upload / Upload All. Rev143 adds a direct service retry button and clearer
+legacy-log labels; see the [rev143 scope](docs/DUAL_RADIO_REV143.md).
 See the [setup guide](docs/WARDRIVE_UPLOADS.md), [rev141 installation and scope](docs/DUAL_RADIO_REV141.md)
 and [rev140 baseline](docs/DUAL_RADIO_REV140.md).
 Rev140 private-profile import, SD-copy removal and saved settings across restart
@@ -41,10 +42,11 @@ are verified. WiGLE has a matching queued transaction; processing/credit and
 WDGWars delivery remain unverified. Rev139 has physical log-details/navigation
 acceptance. The rev138 capture baseline accounts for all 1,438 observations in
 physical SD readback, with zero reported queue drops. Complete provider acceptance,
-uploader transitions and endurance remain open. The paired rev141 images are
+uploader transitions and endurance remain open. The paired rev142 images are
 installed with verified writes, mounted SD, retained profile readiness and two
-stable idle samples 85 seconds apart. The owner confirmed receipt details and
-Back navigation. All 166 local host suites and five native targets pass; this
+stable idle samples 62 seconds apart. Rev141 receipt details and Back navigation
+are owner-confirmed; the rev143 capture/retry changes await physical acceptance.
+Rev142 passes all 166 local host suites and five native targets; this
 package is not published as a binary release.**
 
 The published experimental release remains **`0.1.0-dev.rev136`**, paired with
@@ -53,7 +55,7 @@ onboard C5 firmware revision 74 and protocol 2.
 or [download its matched package and checksums](https://github.com/463N7/Cerberus-unchained/releases/tag/v0.1.0-dev.rev136).
 The guided installer programs the bridge, C5 and S3 using one USB cable in
 desktop Chrome or Edge. Its published files are preserved by this contribution;
-they do not install the rev141 development source described above.
+they do not install the rev143 development source described above.
 Rev136 remains experimental with limited physical acceptance; see its
 [checkpoint](docs/DUAL_RADIO_REV136.md) and the [flasher guide](docs/WEB_FLASHER.md).
 Sentinel 1.0.0 binaries are not Unchained firmware.

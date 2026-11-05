@@ -4,10 +4,11 @@ Use **Scan → Wardriving → LOGS / UPLOAD** after stopping capture. Rev139 add
 the integrated log manager and uploader; rev140 adds one JSON profile for home
 Wi-Fi and all three services. Installation and physical acceptance are recorded
 separately in the [rev139](DUAL_RADIO_REV139.md) and [rev140](DUAL_RADIO_REV140.md)
-checkpoints and the [rev141 update](DUAL_RADIO_REV141.md). Upload and Upload All
+checkpoints and the [rev143 update](DUAL_RADIO_REV143.md). Upload and Upload All
 remain manual and require confirmation. Stopping capture, importing a profile
-or rebooting never starts an upload. Paired rev141 installation preserves the
-saved profile, and the owner confirmed log receipt details and Back navigation.
+or rebooting never starts an upload. Paired rev142 installation preserves the
+saved profile. The owner confirmed log receipt details and Back navigation on
+rev141; rev142 adds service retries and rev143 makes them directly accessible.
 The owner's rev140 upload has a matching
 queued WiGLE transaction; processing/credit are still unverified. WDGWars delivery
 remains uncertain. CSV validation alone is not a WiGLE acceptance receipt.
@@ -99,13 +100,26 @@ with their providers.
 
 ## Review, upload and delete
 
-The paged list includes finalized native `WIGLE001.CSV`–`WIGLE999.CSV` and
-`UNLOC001.CSV`–`UNLOC999.CSV` in `/CERBERUS/WARD`, up to 1,998 files. It sorts
-by filename, not FAT timestamps. Selected-file details validate complete CSV
+Production recording saves one **CERBWardrive001.CSV**–**CERBWardrive999.CSV**
+in `/CERBERUS/WARD` per session. The first qualifying Wi-Fi/BLE observation opens
+it; Stop flushes and finalizes it. It uses the standard WiGLE 1.6 schema and
+preserves repeated valid sightings. Scanning continues without a GPS fix, but
+no row is saved until position and UTC are valid. Missing GPS/UTC, uncertain RF
+age and unsupported format have explicit skipped counters. No new UNLOC file is
+created, and a session without qualifying rows produces no empty CSV. The
+existing 64 MiB limit ends the recording with a size-limit message and preserves
+its one file instead of rotating another. Failed writes retain recoverable TMP
+files and are not published as completed CSVs.
+
+The paged list includes these names plus finalized legacy `WIGLE001.CSV`–
+`WIGLE999.CSV` and `UNLOC001.CSV`–`UNLOC999.CSV`, up to 2,997 files. New-format
+names appear first, then legacy WIGLE, then legacy UNLOC, with descending names
+within each group. This is not a timestamp timeline. Selected-file details validate complete CSV
 contents and show size and rows. Located files also show 2.4/5 GHz Wi-Fi and BLE
 counts, earliest CSV UTC, missing-measurement warnings and destination receipts.
-Unlocated files explicitly mark radio subtotals unavailable and show no invented
-UTC/location. Filename order across prefixes is not a timeline.
+Legacy UNLOC entries are labeled **LEGACY NO GPS**; their details explain that
+they cannot upload. Their radio subtotals are unavailable and no UTC/location is
+invented. Old files are not renamed, rewritten or deleted by the update.
 
 - Choose **UPLOAD THIS LOG** on a valid located file, or **UPLOAD ALL LOCATED
   LOGS** on the list. Review count, selected services and GPS/identifier
@@ -153,9 +167,11 @@ review. Do not remove receipts just to force retry without checking the account.
 If a saved uncertain receipt blocks a retry, rev141 names the service, for
 example **WDGWARS / CHECK ACCOUNT FIRST**. Rev140 could leave **VALIDATING SAVED
 CSV / ESP_ERR_INVALID_STATE** on this path despite valid CSV and saved settings.
-Rev142 adds a recovery route after that account review: open the affected log,
-tap **UPLOAD THIS LOG**, tap **WDGWARS: REVIEW RETRY** (or the affected service),
-then read the file/service scope and **CONFIRM SERVICE RETRY**. The earlier
+Rev143 presents **RETRY WDGWARS UPLOAD** directly on the affected log's details
+when one enabled service has an uncertain receipt. Tap it, read the file/service
+scope and **CONFIRM SERVICE RETRY**. Cancel returns to the log without sending.
+If multiple services are uncertain, **UPLOAD THIS LOG** opens the service
+choices; select the affected service's **REVIEW RETRY** button. The earlier
 attempt may already have arrived, so this can resubmit its data. Only the chosen
 service is attempted; acknowledged parts and other services are not resent.
 Cancel does not send. This does not clear journals, override corrupt receipts,
@@ -165,7 +181,8 @@ on SD. A disabled service must first be enabled in setup.
 WDGWars uploads now use `/api/v2/upload-csv`, matching the current Marauder
 development implementation. A valid 202 job receipt is retained as QUEUED;
 processing is asynchronous and automatic job-status polling is not implemented.
-See the [rev142 source references and validation scope](DUAL_RADIO_REV142.md).
+See the [rev142 API references](DUAL_RADIO_REV142.md) and
+[rev143 recording/retry scope](DUAL_RADIO_REV143.md).
 
 Interrupted journal writes and invalid CRCs fail closed. Authentication/rate
 errors stop the pass without automatic retry. Requests are sequential, at least

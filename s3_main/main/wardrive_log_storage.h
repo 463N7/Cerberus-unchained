@@ -3,9 +3,9 @@
 #include "wardrive_log.h"
 #include <stdio.h>
 
-#define CERBERUS_WARD_LOG_CAPACITY 1998U
+#define CERBERUS_WARD_LOG_CAPACITY 2997U
 #define CERBERUS_WARD_UPLOAD_PROFILE_PATH "/CERBERUS/CONFIG/UPLOAD.JSON"
-typedef struct { char name[13]; uint64_t bytes; } cerberus_ward_log_entry_t;
+typedef struct { char name[CERBERUS_WARD_LOG_NAME_CAPACITY]; uint64_t bytes; } cerberus_ward_log_entry_t;
 /* One worker owns the lease and every FILE it opens. End only after closing
  * them. USB, capture and File Tools mutations are excluded for its lifetime.
  * The token is never reused; no arbitrary paths are accepted. */

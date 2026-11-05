@@ -33,14 +33,15 @@ static esp_err_t fail_append;
 static struct {
     bool gps_requested;
     uint32_t files_saved, geotagged_rows, unlocated_rows, gps_fallback_rows;
+    uint32_t skipped_no_fix, skipped_time, skipped_format;
     uint64_t sd_bytes;
     char last_file_name[24];
 } wardrive_status;
 static void publish_error(esp_err_t error, char source)
 { assert(error != ESP_OK && source == 'S'); ++errors; }
 static void publish_invalid(void) { ++invalid; }
-static void publish_sighting(const cerberus_wardrive_observation_t *o, bool logged)
-{ (void)o; if (!logged) ++duplicates; }
+static void publish_sighting(const cerberus_wardrive_observation_t *o, bool logged, bool duplicate)
+{ (void)o; (void)logged; if (duplicate) ++duplicates; }
 static void snapshot_optional_gps(bool enabled,
     cerberus_wardrive_gps_snapshot_t *gps, esp_err_t *error)
 { *gps = enabled ? gps_fixture : (cerberus_wardrive_gps_snapshot_t){0}; if (error) *error = ESP_OK; }
@@ -236,8 +237,29 @@ int main(void)
     ap.channel=0;ap.manufacturer_id=76;
     assert(append_observation(&ap)==ESP_OK&&appends[1]==recorded+1001);
     stream_observed_ms=clock_ms-1001;unsigned unlocated=appends[0];
-    assert(append_observation(&ap)==ESP_OK&&appends[0]==unlocated+1&&appends[1]==recorded+1001);
+    assert(append_observation(&ap)==ESP_OK&&appends[0]==unlocated&&appends[1]==recorded+1001);
+    assert(wardrive_status.skipped_time==1);
+    stream_observed_ms=clock_ms;
+    unsigned stream_begins=begins[1],plain_begins=begins[0],stream_closes=closes[1];
+    unsigned duplicate_count=duplicates;
+    gps_fixture.state=CERBERUS_WARDRIVE_GPS_STALE;
+    for(unsigned i=0;i<20;++i)assert(append_observation(&ap)==ESP_OK);
+    gps_fixture.state=CERBERUS_WARDRIVE_GPS_FRESH;gps_fixture.utc_valid=false;
+    assert(append_observation(&ap)==ESP_OK&&wardrive_status.skipped_no_fix==21);
+    gps_fixture.utc_valid=true;
+    assert(append_observation(&ap)==ESP_OK&&appends[1]==recorded+1002);
+    ap.label[0]=0xff;
+    assert(append_observation(&ap)==ESP_OK&&wardrive_status.skipped_format==1);
+    ap.label[0]='A';wardrive_status.gps_requested=false;
+    assert(append_observation(&ap)==ESP_OK&&wardrive_status.skipped_no_fix==22);
+    wardrive_status.gps_requested=true;
+    assert(duplicates==duplicate_count&&appends[0]==unlocated&&begins[0]==plain_begins);
+    /* A full stream stops with its one existing log, never rotates a second
+     * recording into the same session. Successfully written rows still close. */
+    fail_append=ESP_ERR_INVALID_SIZE;
+    assert(append_observation(&ap)==ESP_ERR_INVALID_SIZE&&begins[1]==stream_begins&&closes[1]==stream_closes);
+    assert(save_log_stream(true,true)==ESP_OK);
     assert(history_lookups == legacy_lookups);
-    puts("wardrive routing: GPS recovery, separate probe/relation histories, unlocated-only evidence, SD retry and rotation passed");
+    puts("wardrive routing: one streaming CSV, GPS loss/recovery counters, repeated rows, size-limit stop and legacy evidence passed");
     return 0;
 }

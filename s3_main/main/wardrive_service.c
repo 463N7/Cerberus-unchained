@@ -328,7 +328,7 @@ static void publish_error(esp_err_t error, char radio)
 }
 
 static void publish_sighting(const cerberus_wardrive_observation_t *observation,
-    bool logged)
+    bool logged, bool duplicate)
 {
     portENTER_CRITICAL(&wardrive_lock);
     if (observation->type == CERBERUS_WARDRIVE_WIFI_RELATION) {
@@ -362,7 +362,7 @@ static void publish_sighting(const cerberus_wardrive_observation_t *observation,
         if (logged) wardrive_status.expansion_logged = plus_one(wardrive_status.expansion_logged);
     }
     if (logged) wardrive_status.sd_rows = plus_one(wardrive_status.sd_rows);
-    else wardrive_status.duplicate_sightings = plus_one(wardrive_status.duplicate_sightings);
+    else if (duplicate) wardrive_status.duplicate_sightings = plus_one(wardrive_status.duplicate_sightings);
     wardrive_status.dedupe_evicted = plus_saturated(
         plus_saturated(dedupe.evicted, wigle_dedupe.evicted),
         plus_saturated(probe_dedupe.evicted, relation_dedupe.evicted));
@@ -445,6 +445,8 @@ static esp_err_t append_observation_impl(const cerberus_wardrive_observation_t *
     bool located = false;
     bool probe = observation->type == CERBERUS_WARDRIVE_WIFI_PROBE;
     bool relation = observation->type == CERBERUS_WARDRIVE_WIFI_RELATION;
+    cerberus_wigle_result_t format = probe || relation ?
+        CERBERUS_WIGLE_INVALID_ARG : CERBERUS_WIGLE_NO_LOCATION;
     if (wardrive_status.gps_requested && !probe && !relation) {
         /* Radio scan results do not carry synchronized RF timestamps. Match
          * the preserved firmware's GPS-at-result-receipt semantics and label
@@ -458,8 +460,23 @@ static esp_err_t append_observation_impl(const cerberus_wardrive_observation_t *
             time.source=CERBERUS_WIGLE_TIME_RF_CALLBACK;
             time.rf_observed_monotonic_ms=stream_observed_ms;
         }
-        located = cerberus_wardrive_wigle_format_observation(observation, &gps,
-            &time, row_buffer, sizeof(row_buffer), &row_length) == CERBERUS_WIGLE_OK;
+        format = cerberus_wardrive_wigle_format_observation(observation, &gps,
+            &time, row_buffer, sizeof(row_buffer), &row_length);
+        located = format == CERBERUS_WIGLE_OK;
+    }
+    if (stream_recording && !located) {
+        /* One directly uploadable CSV per recording. A missing/stale fix,
+         * unaligned RF time or unrepresentable row must not invent location
+         * or open a second UNLOC file. The radios and live preview continue. */
+        portENTER_CRITICAL(&wardrive_lock);
+        if (format == CERBERUS_WIGLE_NO_LOCATION || format == CERBERUS_WIGLE_NO_VALID_UTC)
+            wardrive_status.skipped_no_fix = plus_one(wardrive_status.skipped_no_fix);
+        else if (format == CERBERUS_WIGLE_UNCERTAIN_OBSERVATION_TIME)
+            wardrive_status.skipped_time = plus_one(wardrive_status.skipped_time);
+        else wardrive_status.skipped_format = plus_one(wardrive_status.skipped_format);
+        portEXIT_CRITICAL(&wardrive_lock);
+        publish_sighting(observation, false, false);
+        return ESP_OK;
     }
     if (!located) {
         row_length = cerberus_wardrive_format_unlocated_row(observation, &gps,
@@ -483,7 +500,7 @@ static esp_err_t append_observation_impl(const cerberus_wardrive_observation_t *
             cerberus_wardrive_decide_evidence(history, observation, (uint32_t)uptime);
         if (!decision.should_log) {
             *outcome = CERBERUS_WARDRIVE_RECENT_DUPLICATE;
-            publish_sighting(observation, false);
+            publish_sighting(observation, false, true);
             return ESP_OK;
         }
     }
@@ -493,7 +510,7 @@ static esp_err_t append_observation_impl(const cerberus_wardrive_observation_t *
     if (error == ESP_OK)
         error = located ? cerberus_storage_wardrive_wigle_append(row_buffer, row_length) :
             cerberus_storage_wardrive_append(row_buffer, row_length);
-    if (error == ESP_ERR_INVALID_SIZE &&
+    if (!stream_recording && error == ESP_ERR_INVALID_SIZE &&
         (located ? wigle_file_open : wardrive_file_open)) {
         error = save_log_stream(located, true);
         if (error == ESP_OK) error = begin_log_stream(located);
@@ -521,7 +538,7 @@ static esp_err_t append_observation_impl(const cerberus_wardrive_observation_t *
             wardrive_status.gps_fallback_rows = plus_one(wardrive_status.gps_fallback_rows);
     }
     portEXIT_CRITICAL(&wardrive_lock);
-    publish_sighting(observation, true);
+    publish_sighting(observation, true, false);
     *outcome = located ? CERBERUS_WARDRIVE_RECENT_APPENDED_WIGLE :
         CERBERUS_WARDRIVE_RECENT_APPENDED_UNLOCATED;
     return ESP_OK;
