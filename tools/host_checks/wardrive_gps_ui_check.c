@@ -1,5 +1,6 @@
 #undef NDEBUG
 #include "wardrive_service.h"
+#include "wardrive_log_feedback.h"
 #include "wardrive_gps_uart.h"
 static cerberus_gps_config_t cerberus_settings_gps_get(void){return cerberus_gps_config_default();}
 #include "ui_widgets.h"
