@@ -56,6 +56,31 @@ the original column header and observation bytes exactly. Its preflight result
 is PASS_WITH_WARNINGS for 2,291 missing accuracy measurements; server acceptance
 is NOT_TESTED. The original on-card file is preserved.
 
+### Installed rev138 capture
+
+The owner confirmed FIX + UTC and a normal Stop on rev138. The stopped session
+diagnostic records 31.415 seconds in combined mode, with the following counts:
+
+| Rev138 combined run | Observations |
+| --- | ---: |
+| S3 2.4 GHz Wi-Fi | 263 |
+| S3 BLE | 1,054 |
+| C5 5 GHz Wi-Fi | 121 |
+| Total accepted and reported saved | 1,438 |
+| Geotagged | 1,436 |
+| Preserved without location | 2 |
+
+Both receive queues drained with zero reported drops, both RF owners released,
+the worker stopped, and all reported radio/GPS/SD service errors were zero.
+The device reports two saved files. At the post-stop diagnostic capture, the
+LC29H had a fresh fix and valid UTC, 20 satellites and zero bad NMEA checksums
+at 115200 baud. This is a sampled fix status; the two fallback rows remain
+unlocated rather than borrowing a position.
+
+Private proof is `artifacts/device-rev138/combined-session-validation.json`,
+bound to the raw diagnostic capture. New-file SD readback is pending; these
+counts alone do not establish file contents or service acceptance.
+
 ## Validation status
 
 All 160 host suites pass, including ten new file-level preflight tests and
@@ -99,8 +124,9 @@ Private installation evidence is retained in
 `c4aff1d7a67994f054e992b3782c330fbbba835b724458edc20133dcee0ed423`).
 The immutable pre-install milestone remains separate from that installation
 receipt. Boot/idle checks do not establish fresh capture, GPS, touchscreen,
-SD save/reopen or sustained-load behavior. A new combined-mode capture and file
-readback are pending. No service upload or PR update has been performed.
+SD save/reopen or sustained-load behavior. The short combined-mode run above
+adds physical capture/Stop evidence; its file readback is pending. No service
+upload or PR update has been performed.
 
 Further acceptance needs sustained GPS fix/UTC, repeated combined-mode runs,
 separate-mode tests, endurance and a real service import result. Channel dwell
