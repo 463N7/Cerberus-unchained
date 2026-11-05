@@ -41,8 +41,17 @@ stopped cleanly, and physical SD readback accounts for every observation with
 zero reported queue drops. Its native CSV passes local preflight with missing
 accuracy/altitude warnings. Live service acceptance, physical uploader acceptance
 and endurance remain open; [rev138 proof](docs/DUAL_RADIO_REV138.md) is separate.
-A public binary release has not been selected.**
-The web installer remains unavailable until a matched release is deliberately selected.
+Rev140 has not been published as a binary release.**
+
+The published experimental release remains **`0.1.0-dev.rev136`**, paired with
+onboard C5 firmware revision 74 and protocol 2.
+[Install rev136 with the web flasher](https://463n7.github.io/Cerberus-unchained/)
+or [download its matched package and checksums](https://github.com/463N7/Cerberus-unchained/releases/tag/v0.1.0-dev.rev136).
+The guided installer programs the bridge, C5 and S3 using one USB cable in
+desktop Chrome or Edge. Its published files are preserved by this contribution;
+they do not install the rev140 development source described above.
+Rev136 remains experimental with limited physical acceptance; see its
+[checkpoint](docs/DUAL_RADIO_REV136.md) and the [flasher guide](docs/WEB_FLASHER.md).
 Sentinel 1.0.0 binaries are not Unchained firmware.
 
 ## Build and validation
