@@ -32,16 +32,22 @@ esp_err_t cerberus_upload_net_end(void)
 esp_err_t cerberus_upload_net_begin(const cerberus_upload_config_t *config,
     cerberus_upload_cancel_fn cancel,cerberus_upload_progress_fn progress,void *context)
 {
+    report(progress,context,"CHECKING UPLOAD CONFIGURATION",0,0);
     if(!cerberus_upload_config_wifi_ready(config)||claimed)return ESP_ERR_INVALID_STATE;
     if(cancelled(cancel,context))return ESP_ERR_INVALID_STATE;
+    report(progress,context,"CLAIMING S3 FOR HOME WI-FI",0,0);
     esp_err_t err=cerberus_s3_wifi_claim(CERBERUS_S3_WIFI_UPLOAD);if(err!=ESP_OK)return err;claimed=true;
+    report(progress,context,"CHECKING BLUETOOTH RELEASED",0,0);
     if(cerberus_s3_ble_host_owner()!=CERBERUS_S3_BLE_OWNER_NONE)return ESP_ERR_INVALID_STATE;
+    report(progress,context,"PREPARING HOME WI-FI",0,0);
     err=cerberus_s3_wifi_prepare(CERBERUS_S3_WIFI_UPLOAD);if(err!=ESP_OK)return err;
     station=esp_netif_create_default_wifi_sta();if(!station)return ESP_ERR_NO_MEM;
     wifi_init_config_t init=WIFI_INIT_CONFIG_DEFAULT();
     init.static_rx_buf_num=4;init.dynamic_rx_buf_num=8;init.dynamic_tx_buf_num=4;
     init.rx_ba_win=4;init.ampdu_rx_enable=0;init.ampdu_tx_enable=0;init.amsdu_tx_enable=0;
+    report(progress,context,"INITIALIZING HOME WI-FI",0,0);
     err=esp_wifi_init(&init);if(err!=ESP_OK)return err;initialized=true;
+    report(progress,context,"CONFIGURING HOME WI-FI",0,0);
     if((err=esp_wifi_set_storage(WIFI_STORAGE_RAM))!=ESP_OK)return err;
     if((err=esp_wifi_set_mode(WIFI_MODE_STA))!=ESP_OK)return err;
     wifi_config_t wifi={0};
@@ -50,11 +56,12 @@ esp_err_t cerberus_upload_net_begin(const cerberus_upload_config_t *config,
     wifi.sta.pmf_cfg.capable=true;wifi.sta.pmf_cfg.required=false;
     err=esp_wifi_set_config(WIFI_IF_STA,&wifi);cerberus_upload_config_clear(&wifi,sizeof(wifi));
     if(err!=ESP_OK)return err;
+    report(progress,context,"STARTING HOME WI-FI",0,0);
     if((err=esp_wifi_start())!=ESP_OK)return err;
     started=true;
     if((err=esp_wifi_set_ps(WIFI_PS_NONE))!=ESP_OK)return err;
-    if((err=esp_wifi_connect())!=ESP_OK)return err;
     report(progress,context,"CONNECTING HOME WI-FI",0,0);
+    if((err=esp_wifi_connect())!=ESP_OK)return err;
     int64_t deadline=esp_timer_get_time()+25000000LL;
     for(;;){
         if(cancelled(cancel,context))return ESP_ERR_INVALID_STATE;
@@ -92,10 +99,11 @@ static bool write_all(esp_http_client_handle_t client,const char *data,size_t le
 cerberus_upload_reply_t cerberus_upload_net_send(const cerberus_upload_config_t *config,
     cerberus_upload_service_t service,FILE *file,const cerberus_upload_file_t *plan,
     unsigned part,const char *name,cerberus_upload_cancel_fn cancel,
-    cerberus_upload_progress_fn progress,void *context,unsigned *http_status)
+    cerberus_upload_progress_fn progress,void *context,cerberus_upload_transfer_t *transfer)
 {
     cerberus_upload_reply_t reply={.result=CERBERUS_UPLOAD_UNKNOWN};
-    if(http_status)*http_status=0;
+    cerberus_upload_transfer_t detail={.error=ESP_ERR_INVALID_ARG};
+    if(transfer)*transfer=detail;
     if(!claimed||!started||!file||!plan||part>=plan->parts||!name||strlen(name)>64||
         !cerberus_upload_config_service_ready(config,service))return reply;
     for(const char *p=name;*p;++p)if(!((*p>='0'&&*p<='9')||(*p>='a'&&*p<='z')||
@@ -105,7 +113,8 @@ cerberus_upload_reply_t cerberus_upload_net_send(const cerberus_upload_config_t 
     esp_http_client_config_t cfg={.url=urls[service],.method=HTTP_METHOD_POST,
         .timeout_ms=10000,.disable_auto_redirect=true,.crt_bundle_attach=esp_crt_bundle_attach,
         .buffer_size=1024,.buffer_size_tx=1024,.user_agent="Cerberus/" CERBERUS_APP_VERSION};
-    esp_http_client_handle_t client=esp_http_client_init(&cfg);if(!client)return reply;
+    esp_http_client_handle_t client=esp_http_client_init(&cfg);
+    if(!client){if(transfer)transfer->error=ESP_ERR_NO_MEM;return reply;}
     char *buffer=heap_caps_malloc(4097,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     char head[256]={0},tail[48]={0},auth[300]={0},plain[196]={0};
     const char *boundary="CerberusWardrivePartV1";
@@ -133,7 +142,8 @@ cerberus_upload_reply_t cerberus_upload_net_send(const cerberus_upload_config_t 
     uint32_t total=(uint32_t)(head_bytes+plan->header_bytes+length+tail_bytes),sent=0;
     int64_t deadline=esp_timer_get_time()+180000000LL;
     if(err==ESP_OK&&cancelled(cancel,context))err=ESP_ERR_INVALID_STATE;
-    if(err==ESP_OK)err=esp_http_client_open(client,(int)total);
+    if(err==ESP_OK){report(progress,context,"CONNECTING TO UPLOAD SERVICE",0,0);
+        detail.attempted=true;err=esp_http_client_open(client,(int)total);}
     if(err==ESP_OK&&(!write_all(client,head,head_bytes,cancel,context,deadline)||
         !write_all(client,plan->headers,plan->header_bytes,cancel,context,deadline)||
         fseek(file,(long)plan->offsets[part],SEEK_SET)))err=ESP_FAIL;
@@ -147,7 +157,7 @@ cerberus_upload_reply_t cerberus_upload_net_send(const cerberus_upload_config_t 
         report(progress,context,"WAITING FOR RECEIPT",sent,length);
         int64_t response_length=esp_http_client_fetch_headers(client);
         unsigned status=(unsigned)esp_http_client_get_status_code(client);
-        if(http_status)*http_status=status;
+        detail.http_status=status;
         size_t used=0;bool complete=false;
         if(response_length>=0&&response_length<=4096)while(used<4096&&!cancelled(cancel,context)&&esp_timer_get_time()<deadline){
             int n=esp_http_client_read(client,buffer+used,(int)(4096-used));
@@ -157,8 +167,12 @@ cerberus_upload_reply_t cerberus_upload_net_send(const cerberus_upload_config_t 
             if(n==0)break;
         }
         if(buffer)buffer[used]=0;
-        reply=cerberus_upload_reply(service,status,buffer,used,complete&&!cancelled(cancel,context));
+        detail.response_bytes=(uint32_t)used;
+        detail.response_complete=complete&&!cancelled(cancel,context);
+        reply=cerberus_upload_reply(service,status,buffer,used,detail.response_complete);
+        if(reply.result==CERBERUS_UPLOAD_UNKNOWN)err=ESP_ERR_INVALID_RESPONSE;
     }
+    detail.error=err;if(transfer)*transfer=detail;
     esp_http_client_close(client);esp_http_client_cleanup(client);
     if(buffer){cerberus_upload_config_clear(buffer,4097);heap_caps_free(buffer);}
     return reply;

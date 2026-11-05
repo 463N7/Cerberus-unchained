@@ -312,7 +312,7 @@ static void wardrive_gps_view_handle_tap(uint16_t x, uint16_t y)
             cerberus_wardrive_recent_status_t status;
             cerberus_wardrive_get_recent_status(&status);
             wardrive_start_pending = false;
-            if (wardrive_recent_active(status.state)) cerberus_wardrive_request_stop();
+            if (wardrive_recent_active(status.state)) {wardrive_logs_arm_after_stop();cerberus_wardrive_request_stop();}
         } else return;
     } else if (!wardrive_gps_view.paint_valid) return;
     else if (y >= 54U && y < 86U) {

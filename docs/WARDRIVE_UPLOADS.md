@@ -2,10 +2,13 @@
 
 Use **Scan → Wardriving → LOGS / UPLOAD** after stopping capture. Rev139 adds
 the integrated log manager and uploader; rev140 adds one JSON profile for home
-Wi-Fi and all three services. Installation and physical acceptance are recorded
+Wi-Fi and all three services. Rev141 adds opt-in upload after an explicit Stop
+and identifies saved receipts that require account review. Installation and physical acceptance are recorded
 separately in the [rev139](DUAL_RADIO_REV139.md) and [rev140](DUAL_RADIO_REV140.md)
-checkpoints. No live service upload has been performed during development.
-CSV validation is not a WiGLE acceptance receipt.
+checkpoints and the [rev141 update](DUAL_RADIO_REV141.md). The owner's rev140
+upload has a matching queued WiGLE transaction; processing/credit are still
+unverified. WDGWars delivery remains uncertain. CSV validation alone is not a
+WiGLE acceptance receipt.
 
 ## Import one JSON profile from SD
 
@@ -18,7 +21,8 @@ CSV validation is not a WiGLE acceptance receipt.
 3. Save as UTF-8 without a byte-order mark, named **UPLOAD.JSON**. Copy it to
    **/CERBERUS/CONFIG/UPLOAD.JSON** on the SD card. Create `CONFIG` if necessary.
    Safely eject the card or USB drive and return SD ownership to Cerberus.
-4. Open **LOGS / UPLOAD → HOME WI-FI / API SETUP → IMPORT JSON FROM SD**.
+4. Open **LOGS / UPLOAD → HOME WI-FI / API SETUP → IMPORT SD JSON**
+   (**IMPORT JSON FROM SD** on rev140).
    Review the replacement notice and tap **CONFIRM IMPORT**. This replaces the
    entire saved upload profile, including fields left empty or disabled.
 5. Wait for **PROFILE SAVED / SD COPY REMOVED**. Reopen setup to check the
@@ -29,7 +33,8 @@ The JSON contains these exact sections:
 
 ```json
 {
-  "schema": "cerberus-wardrive-upload-v1",
+  "schema": "cerberus-wardrive-upload-v2",
+  "auto_upload_after_stop": false,
   "home_wifi": { "ssid": "", "password": "" },
   "wigle": { "enabled": false, "api_name": "", "api_token": "" },
   "wdgwars": { "enabled": false, "token": "" },
@@ -39,6 +44,10 @@ The JSON contains these exact sections:
 
 All sections and fields are required; comments, unknown or repeated keys and
 incomplete enabled destinations are rejected. Maximum file size is 4,096 bytes.
+Rev140's v1 JSON without `auto_upload_after_stop` remains accepted and selects
+manual mode. Saved v1 profiles also load with automatic upload OFF; upgrading
+never enables it implicitly. V2 profiles and subsequent saves use the v2 NVS
+encoding. Downgrading to rev140 requires importing a v1 profile again.
 Limits are measured in UTF-8 bytes: SSID 32, password 64, WiGLE API name 64,
 WiGLE token 128, WDGWars token exactly 64 when present, and Wardrift token 128.
 JSON supports UTF-8 SSIDs even though the on-device keyboard is ASCII. The home
@@ -52,9 +61,36 @@ that file after checking setup. File removal is not a secure erase. The private
 PC copy also remains under the user's control. Filled profile filenames are
 ignored by Git; never include credentials in an issue, PR or firmware image.
 
-The read-only `upload_profile` console command reports readiness flags and the
-enabled-destination mask only. It does not print the network name, password,
-tokens or credential fingerprints.
+The read-only `upload_profile` console command reports readiness flags, the
+enabled-destination mask and automatic-mode flag only. `upload_status` reports
+the current action, stage, service, result and numeric HTTP/transport counters.
+It does not print network names, passwords, tokens, receipt IDs or response
+contents. Transfer diagnostics describe the current attempt and are not stored
+in the receipt journal; older uncertain receipts have no recoverable HTTP cause.
+
+## Automatic upload after Stop
+
+Set `auto_upload_after_stop` to `true` in the same JSON, or turn **AUTO AFTER
+STOP: ON** in setup and **SAVE SETUP**. A complete home AP and at least one
+enabled, configured service are required. The distributed template defaults OFF.
+
+When enabled, an explicit **STOP** in Wardriving, Recent Networks or GPS status
+arms one upload pass. Cerberus waits for **STOPPED**, which means capture has
+saved its files and released its radio owners. It then opens **Logs & Uploads**
+and uploads pending located logs to the selected services over the saved home
+AP. S3 handles Wi-Fi/TLS and SD; C5's capture is already stopped. This adds no
+network polling or upload task while recording.
+
+An absent home AP reports a connection error; it does not retry indefinitely.
+Boot, entering a menu, capture errors, sleep and Back-to-Home do not start a pass.
+Starting another capture cancels a pending trigger. **CANCEL OPERATION** and
+**BACK / CANCEL AND CLOSE** work during the pass. Manual Upload and Upload All
+remain available. Saving/importing settings by itself never starts an upload.
+
+Queued or accepted parts are skipped. An uncertain or previously rejected part
+stops the automatic pass and names the service requiring review. Correcting
+settings does not erase the original delivery history or make an uncertain part
+safe to resend. Automatic mode does not reconcile provider accounts.
 
 ## Set up home Wi-Fi and services
 
@@ -76,8 +112,9 @@ tokens or credential fingerprints.
    revision `0b6ac93f996beafb69070fe04b68656ce604c2d0`, separate from the pinned
    develop tree. Wardrift's homepage did not expose readable API documentation
    during this audit; live account verification remains required.
-6. Toggle **WIGLE**, **WDGW** and **DRIFT** ON for the desired services, then
-   **SAVE SETUP**. Destinations default OFF. Saving does not connect or upload.
+6. Toggle **WIGLE**, **WDGW** and **DRIFT** ON for the desired services. Choose
+   **AUTO AFTER STOP** OFF for manual uploads or ON for the behavior above, then
+   **SAVE SETUP**. Destinations and automatic mode default OFF. Saving does not connect or upload.
    **CANCEL SETUP / LOGS** discards unsaved edits.
 
 Password/key entry is masked, with an explicit reveal control. Setup reports
@@ -145,6 +182,11 @@ review. Do not remove receipts just to force retry without checking the account.
 Interrupted journal writes and invalid CRCs fail closed. Authentication/rate
 errors stop the pass without automatic retry. Requests are sequential, at least
 2.5 seconds apart. No synthetic test records are uploaded to production services.
+
+If a saved uncertain receipt blocks a retry, rev141 displays, for example,
+**WDGWARS / CHECK ACCOUNT FIRST**, preserving each service's separate result.
+Rev140 could leave **VALIDATING SAVED CSV / ESP_ERR_INVALID_STATE** on that same
+path, despite valid CSV and successfully saved credentials.
 
 ## Implementation and contracts
 

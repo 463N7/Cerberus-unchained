@@ -1,5 +1,6 @@
 {
-  "schema": "cerberus-wardrive-upload-v1",
+  "schema": "cerberus-wardrive-upload-v2",
+  "auto_upload_after_stop": false,
   "home_wifi": {
     "ssid": "",
     "password": ""

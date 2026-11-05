@@ -4,9 +4,12 @@ import os,subprocess,sys
 root=Path(__file__).resolve().parents[1];out=root/'artifacts/wardrive-log-manager-checks';out.mkdir(parents=True,exist_ok=True)
 env=dict(os.environ,ZIG_GLOBAL_CACHE_DIR=str(out/'zig-global'),ZIG_LOCAL_CACHE_DIR=str(out/'zig-local'))
 exe=out/('manager.exe' if os.name=='nt' else 'manager')
+console=(root/'s3_main/main/usb_console.c').read_text()
+start=console.index('static void print_upload_status(void)\n{')
+(out/'upload_status_impl.h').write_text(console[start:console.index('static void print_upload_profile(void)\n{',start)])
 subprocess.run([sys.executable,'-m','ziglang','cc','-std=c11','-D_POSIX_C_SOURCE=200809L','-O1','-Wall','-Wextra','-Werror',
     '-include',str(root/'tools/host_checks/upload_stubs/host_time.h'),
-    '-I',str(root/'tools/host_checks/upload_stubs'),'-I',str(root/'tools/host_checks/stubs'),
+    '-I',str(out),'-I',str(root/'tools/host_checks/upload_stubs'),'-I',str(root/'tools/host_checks/stubs'),
     '-I',str(root/'s3_main/main'),'-I',str(root/'shared'),str(root/'tools/host_checks/wardrive_log_manager_check.c'),
     *[str(root/'s3_main/main'/n) for n in ['wardrive_log_manager.c','wardrive_upload_config.c','wardrive_upload_json.c','wardrive_upload_file.c','wardrive_upload_receipt.c','wardrive_upload_reply.c','wardrive_log.c']],
     '-o',str(exe)],check=True,env=env)
@@ -22,7 +25,7 @@ section=header[start:header.index('\n\n',start)]
 unloc_header=''.join(bytes(s,'utf8').decode('unicode_escape') for s in re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"',section))
 unloc=['']*34;unloc[:5]=['1','2','S3','BLE','02:00:00:00:00:02']
 import csv,io,tempfile,json
-for mode in ('normal','unknown','cancel','sd_fail','network_fail','busy','import_ok','import_invalid','import_save_fail','import_readback_fail','import_remove_fail','import_cancel_after_save'):
+for mode in ('normal','unknown','wdgwars_unknown','auto_ok','auto_off','auto_unknown','auto_rejected','cancel','sd_fail','network_fail','busy','import_ok','import_invalid','import_save_fail','import_readback_fail','import_remove_fail','import_cancel_after_save'):
     with tempfile.TemporaryDirectory(dir=out,prefix=mode+'-') as td:
         folder=Path(td)/'card/CERBERUS/WARD';folder.mkdir(parents=True)
         (folder/'WIGLE001.CSV').write_text(meta+columns+row*10,newline='')
@@ -35,4 +38,4 @@ for mode in ('normal','unknown','cancel','sd_fail','network_fail','busy','import
         profile['wigle']={'enabled':True,'api_name':'json-name','api_token':'json-token'}
         (config/'UPLOAD.JSON').write_text('invalid {' if mode=='import_invalid' else json.dumps(profile))
         subprocess.run([str(exe),mode],cwd=td,check=True,env=env)
-print('Log manager: twelve lifecycle/failure/import scenarios passed; no real network/card accessed')
+print('Log manager: seventeen lifecycle/failure/import/automatic scenarios passed; no real network/card accessed')

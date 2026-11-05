@@ -29,22 +29,23 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source version: `0.1.0-dev.rev140`, targeting onboard C5 protocol
-firmware revision 75. Rev139 adds saved-log management, home Wi-Fi/API setup and
-manual WiGLE, WDGWars and provisional Wardrift uploads. Rev140 adds a validated
-single-JSON SD import for that setup, with a blank public example and verified
-save before SD-profile removal. See the [setup guide](docs/WARDRIVE_UPLOADS.md),
-[rev139 scope](docs/DUAL_RADIO_REV139.md) and [rev140 scope](docs/DUAL_RADIO_REV140.md).
-Rev140 is installed with paired boot/SD/idle checks and unchanged sampled idle
-memory from rev139. Physical JSON-import/persistence acceptance remains pending
-in its checkpoint.
+**Current source version: `0.1.0-dev.rev141`, targeting onboard C5 protocol
+firmware revision 75. One JSON profile configures home Wi-Fi, WiGLE, WDGWars,
+Wardrift and opt-in automatic uploads after Stop. Rev141 also identifies saved
+receipts requiring account review and adds credential-free transfer diagnostics.
+See the [setup guide](docs/WARDRIVE_UPLOADS.md), [rev141 scope](docs/DUAL_RADIO_REV141.md)
+and [rev140 installation](docs/DUAL_RADIO_REV140.md).
+Rev140 is installed with paired boot/SD/idle checks. Its private profile import
+and SD-copy removal are verified. WiGLE has a matching queued transaction;
+processing/credit and WDGWars delivery remain unverified. Saved-profile restart
+persistence and physical automatic-mode acceptance remain separate checks.
 Rev139 has physical log-details/navigation acceptance. The measured capture
 baseline is rev138: its 1,438-observation combined run
 stopped cleanly, and physical SD readback accounts for every observation with
 zero reported queue drops. Its native CSV passes local preflight with missing
-accuracy/altitude warnings. Live service acceptance, physical uploader acceptance
-and endurance remain open; [rev138 proof](docs/DUAL_RADIO_REV138.md) is separate.
-Rev140 has not been published as a binary release.**
+accuracy/altitude warnings. Complete provider acceptance and endurance remain
+open; [rev138 proof](docs/DUAL_RADIO_REV138.md) is separate.
+Rev141 has not been published as a binary release.**
 
 The published experimental release remains **`0.1.0-dev.rev136`**, paired with
 onboard C5 firmware revision 74 and protocol 2.
@@ -52,7 +53,7 @@ onboard C5 firmware revision 74 and protocol 2.
 or [download its matched package and checksums](https://github.com/463N7/Cerberus-unchained/releases/tag/v0.1.0-dev.rev136).
 The guided installer programs the bridge, C5 and S3 using one USB cable in
 desktop Chrome or Edge. Its published files are preserved by this contribution;
-they do not install the rev140 development source described above.
+they do not install the rev141 development source described above.
 Rev136 remains experimental with limited physical acceptance; see its
 [checkpoint](docs/DUAL_RADIO_REV136.md) and the [flasher guide](docs/WEB_FLASHER.md).
 Sentinel 1.0.0 binaries are not Unchained firmware.

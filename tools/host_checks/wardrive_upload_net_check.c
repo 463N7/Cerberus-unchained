@@ -92,16 +92,21 @@ int main(int argc,char **argv)
     assert(cerberus_upload_net_begin(&cfg,canceled,progress,NULL)==ESP_OK);
     FILE *f=fopen(argv[1],"rb");assert(f);cerberus_upload_file_t plan;assert(cerberus_upload_file_prepare(f,&plan,NULL,NULL));
     const char *responses[]={"{\"success\":true,\"results\":{\"transids\":[{\"transId\":\"test-123\"}]}}","{\"ok\":true,\"imported\":1}","{\"accepted\":true}"};
-    for(service=0;service<3;++service){response=responses[service];unsigned http;
-        cerberus_upload_reply_t r=cerberus_upload_net_send(&cfg,(cerberus_upload_service_t)service,f,&plan,0,"fixture-001.csv",canceled,progress,NULL,&http);
-        assert(r.result==(service==0?CERBERUS_UPLOAD_QUEUED:CERBERUS_UPLOAD_ACCEPTED)&&http==200&&!client.active&&!allocs);
+    for(service=0;service<3;++service){response=responses[service];cerberus_upload_transfer_t transfer;
+        cerberus_upload_reply_t r=cerberus_upload_net_send(&cfg,(cerberus_upload_service_t)service,f,&plan,0,"fixture-001.csv",canceled,progress,NULL,&transfer);
+        assert(r.result==(service==0?CERBERUS_UPLOAD_QUEUED:CERBERUS_UPLOAD_ACCEPTED)&&transfer.http_status==200&&!client.active&&!allocs);
+        assert(transfer.error==ESP_OK&&transfer.attempted&&transfer.response_complete&&transfer.response_bytes==strlen(response));
         if(service==0)assert(!strcmp(auth,"Basic bmFtZTp0b2tlbg==")&&!api_key[0]);
         else assert(!auth[0]&&!strcmp(api_key,service==1?cfg.wdgwars_token:cfg.wardrift_token));
         if(service==2){assert(!strcmp(content_type,"text/csv")&&!strcmp(filename,"fixture-001.csv"));assert(used==plan.summary.bytes);}
         else assert(strstr(content_type,"multipart/form-data")&&strstr(sent,"name=\"file\"")&&strstr(sent,"filename=\"fixture-001.csv\""));
         for(unsigned fault=0;fault<5;++fault){response_incomplete=fault==0;read_fail=fault==1;write_fail=fault==2;status=fault==3?302:200;cancel_now=fault==4;
-            r=cerberus_upload_net_send(&cfg,(cerberus_upload_service_t)service,f,&plan,0,"fixture.csv",canceled,progress,NULL,&http);
-            assert(r.result==CERBERUS_UPLOAD_UNKNOWN&&!client.active&&!allocs);}
+            r=cerberus_upload_net_send(&cfg,(cerberus_upload_service_t)service,f,&plan,0,"fixture.csv",canceled,progress,NULL,&transfer);
+            assert(r.result==CERBERUS_UPLOAD_UNKNOWN&&!client.active&&!allocs&&transfer.error!=ESP_OK);
+            assert(transfer.attempted==!cancel_now);
+            if(fault==0||fault==1)assert(!transfer.response_complete&&transfer.http_status==200);
+            if(fault==2||fault==4)assert(!transfer.response_bytes&&!transfer.http_status);
+            if(fault==3)assert(transfer.http_status==302&&transfer.response_complete);}
         response_incomplete=read_fail=write_fail=cancel_now=false;status=200;
     }
     fclose(f);stop_fail=true;assert(cerberus_upload_net_end()!=ESP_OK&&claimed&&started&&initialized);

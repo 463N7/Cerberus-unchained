@@ -1,7 +1,7 @@
 #include "wardrive_upload_config.h"
 #include <string.h>
 
-_Static_assert(sizeof(cerberus_upload_config_t) == 487U, "Wire field layout changed");
+_Static_assert(sizeof(cerberus_upload_config_t) == 488U, "Wire field layout changed");
 
 void cerberus_upload_config_clear(void *bytes, size_t length)
 {
@@ -46,6 +46,11 @@ cerberus_upload_field_t cerberus_upload_config_invalid(const cerberus_upload_con
     if (n && (n != 64U || !hexadecimal(c->wdgwars_token, n))) return CERBERUS_UPLOAD_FIELD_WDGWARS_TOKEN;
     if (!visible(c->wardrift_token, sizeof(c->wardrift_token), false)) return CERBERUS_UPLOAD_FIELD_WARDRIFT_TOKEN;
     if (c->destinations & ~7U) return CERBERUS_UPLOAD_FIELD_DESTINATIONS;
+    if (c->auto_upload_after_stop > 1U) return CERBERUS_UPLOAD_FIELD_AUTOMATIC;
+    if (c->auto_upload_after_stop && (!c->ssid[0] || !c->destinations ||
+        ((c->destinations & 1U) && (!c->wigle_name[0] || !c->wigle_token[0])) ||
+        ((c->destinations & 2U) && !c->wdgwars_token[0]) ||
+        ((c->destinations & 4U) && !c->wardrift_token[0]))) return CERBERUS_UPLOAD_FIELD_AUTOMATIC;
     return CERBERUS_UPLOAD_FIELD_NONE;
 }
 
@@ -81,6 +86,7 @@ static void canonical(cerberus_upload_config_t *out, const cerberus_upload_confi
     COPY_FIELD(wdgwars_token); COPY_FIELD(wardrift_token);
 #undef COPY_FIELD
     out->destinations = in->destinations;
+    out->auto_upload_after_stop = in->auto_upload_after_stop;
 }
 
 static bool overlap(const void *a, size_t na, const void *b, size_t nb)
@@ -95,7 +101,7 @@ bool cerberus_upload_config_encode(const cerberus_upload_config_t *c, uint8_t ou
         overlap(c, sizeof(*c), out, CERBERUS_UPLOAD_CONFIG_WIRE_BYTES)) return false;
     cerberus_upload_config_t clean; canonical(&clean, c);
     memset(out, 0, CERBERUS_UPLOAD_CONFIG_WIRE_BYTES);
-    memcpy(out, "CBUPCFG1", 8); out[8] = 0xE7; out[9] = 1; /* 487 bytes */
+    memcpy(out, "CBUPCFG2", 8); out[8] = 0xE8; out[9] = 1; /* 488 bytes */
     memcpy(out + 16, &clean, sizeof(clean));
     cerberus_upload_config_clear(&clean, sizeof(clean));
     uint32_t crc = checksum(out);
@@ -112,13 +118,16 @@ bool cerberus_upload_config_decode(const uint8_t *bytes, size_t length, cerberus
     }
     cerberus_upload_config_t candidate, clean;
     memset(&candidate, 0, sizeof(candidate)); memset(&clean, 0, sizeof(clean));
-    bool valid = !memcmp(bytes, "CBUPCFG1", 8) && bytes[8] == 0xE7 && bytes[9] == 1 && !bytes[10] && !bytes[11];
+    bool legacy = !memcmp(bytes, "CBUPCFG1", 8) && bytes[8] == 0xE7;
+    bool valid = (legacy || (!memcmp(bytes, "CBUPCFG2", 8) && bytes[8] == 0xE8)) &&
+        bytes[9] == 1 && !bytes[10] && !bytes[11];
     uint32_t expected = 0;
     for (unsigned i = 0; i < 4; ++i) expected |= (uint32_t)bytes[12 + i] << (8U * i);
     valid = valid && expected == checksum(bytes);
-    for (size_t i = 16 + sizeof(candidate); i < length; ++i) valid = valid && bytes[i] == 0;
+    size_t payload = legacy ? 487U : sizeof(candidate);
+    for (size_t i = 16 + payload; i < length; ++i) valid = valid && bytes[i] == 0;
     if (valid) {
-        memcpy(&candidate, bytes + 16, sizeof(candidate));
+        memcpy(&candidate, bytes + 16, payload);
         valid = cerberus_upload_config_invalid(&candidate) == CERBERUS_UPLOAD_FIELD_NONE;
         if (valid) { canonical(&clean, &candidate); valid = !memcmp(&clean, &candidate, sizeof(clean)); }
     }
@@ -132,7 +141,7 @@ bool cerberus_upload_config_decode(const uint8_t *bytes, size_t length, cerberus
 const char *cerberus_upload_field_name(cerberus_upload_field_t field)
 {
     static const char *const names[] = {"OK", "HOME WI-FI SSID", "HOME WI-FI PASSWORD", "WIGLE API NAME",
-        "WIGLE API TOKEN", "WDGWARS TOKEN", "WARDRIFT TOKEN", "DESTINATIONS"};
+        "WIGLE API TOKEN", "WDGWARS TOKEN", "WARDRIFT TOKEN", "DESTINATIONS", "AUTO UPLOAD"};
     return (unsigned)field < sizeof(names)/sizeof(names[0]) ? names[field] : "INVALID FIELD";
 }
 

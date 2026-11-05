@@ -60,6 +60,10 @@ void nvs_close(nvs_handle_t handle)
 static bool zero(const void *data, size_t n)
 { const unsigned char *p = data; while (n--) if (*p++) return false; return true; }
 static void reset_calls(unsigned failure) { assert(!opened); calls = closes = 0; fail_at = failure; }
+static void repair_crc(uint8_t b[512])
+{memset(b+12,0,4);uint32_t crc=~0U;for(unsigned i=0;i<512;++i){crc^=b[i];
+    for(unsigned j=0;j<8;++j)crc=(crc>>1)^(0xedb88320U&(0U-(crc&1U)));}crc=~crc;
+    for(unsigned i=0;i<4;++i)b[12+i]=(uint8_t)(crc>>(8*i));}
 
 int main(int argc, char **argv)
 {
@@ -79,6 +83,11 @@ int main(int argc, char **argv)
     assert(!cerberus_upload_config_service_ready(&c, (cerberus_upload_service_t)99));
     assert(cerberus_upload_config_encode(&c, wire));
     assert(cerberus_upload_config_decode(wire, sizeof(wire), &d)); assert(!memcmp(&c, &d, sizeof(c)));
+    memcpy(bad,wire,512);memcpy(bad,"CBUPCFG1",8);bad[8]=0xe7;repair_crc(bad);
+    assert(cerberus_upload_config_decode(bad,512,&d)&&!d.auto_upload_after_stop&&!memcmp(&c,&d,sizeof(c)));
+    bad[503]=1;repair_crc(bad);assert(!cerberus_upload_config_decode(bad,512,&d)); /* Legacy padding is not an opt-in. */
+    c.auto_upload_after_stop=1;assert(cerberus_upload_config_encode(&c,wire));
+    assert(cerberus_upload_config_decode(wire,512,&d)&&d.auto_upload_after_stop);
     for (unsigned i = 0; i < 512; ++i) for (unsigned bit = 0; bit < 8; ++bit) {
         memcpy(bad, wire, 512); bad[i] ^= (uint8_t)(1U << bit); memset(&d, 0xA5, sizeof(d));
         assert(!cerberus_upload_config_decode(bad, 512, &d)); assert(zero(&d, sizeof(d)));
@@ -106,12 +115,15 @@ int main(int argc, char **argv)
     d = c; memset(d.password, 'f', 64); d.password[64] = 0; assert(cerberus_upload_config_invalid(&d) == CERBERUS_UPLOAD_FIELD_NONE);
     d.password[0] = 'z'; assert(cerberus_upload_config_invalid(&d) == CERBERUS_UPLOAD_FIELD_PASSWORD);
     d = c; d.destinations = 8; assert(cerberus_upload_config_invalid(&d) == CERBERUS_UPLOAD_FIELD_DESTINATIONS);
+    d = c; d.auto_upload_after_stop=2;assert(cerberus_upload_config_invalid(&d)==CERBERUS_UPLOAD_FIELD_AUTOMATIC);
+    d = c; d.destinations=0;assert(cerberus_upload_config_invalid(&d)==CERBERUS_UPLOAD_FIELD_AUTOMATIC);
     d = c; memset(d.password, 0, sizeof(d.password)); assert(cerberus_upload_config_wifi_ready(&d)); /* explicit open network */
     memset(&d, 0xCC, sizeof(d)); reset_calls(0);
     assert(cerberus_upload_settings_load(&d) == ESP_OK && zero(&d, sizeof(d)) && !opened);
     assert(cerberus_upload_settings_save(&c) == ESP_OK);
     assert(cerberus_upload_settings_load(&d) == ESP_OK && !memcmp(&c, &d, sizeof(c)));
     print_upload_profile();assert(strstr(console_output,"upload_profile_home_ready=1"));
+    assert(strstr(console_output,"upload_profile_auto_after_stop=1"));
     assert(!strstr(console_output,c.ssid)&&!strstr(console_output,c.password)&&!strstr(console_output,c.wigle_name)&&
         !strstr(console_output,c.wigle_token)&&!strstr(console_output,c.wdgwars_token)&&!strstr(console_output,c.wardrift_token));
     for (unsigned failure = 1; failure <= 3; ++failure) {

@@ -69,18 +69,23 @@ fallbacks remain visible at both samples. The private installation receipt is
 `artifacts/device-rev140/installation-receipt.json`, SHA-256
 `4298dcc8ea158d066e8a6d02d850cd9616865ac1fe4b19f6440cdf0b9cb6f9bf`.
 
-The installed read-only profile diagnostic works and initially reports all
-destinations and readiness flags OFF. A private profile was prepared, validated
-with the production parser and copied to the owner's SD card. The owner has
-been asked to perform **IMPORT JSON FROM SD** and return Home. At this checkpoint
-that interaction is still pending: physical profile import, SD-copy removal and
-saved-profile persistence across restart are **not yet accepted**. Private
-credentials are absent from the firmware source, example, diagnostics and PR.
+The installed read-only profile diagnostic initially reported all readiness
+flags OFF. A private profile was prepared, validated with the production parser
+and copied to the owner's SD card. After the owner's interaction, the console
+reported home/WiGLE/WDGWars ready, with destinations mask `0x03`. Physical SD
+inspection confirmed removal of the imported JSON and unchanged recorded CSV.
+Profile import and SD cleanup are therefore verified; saved-profile persistence
+across restart remains a separate check. Private credentials are absent from
+the firmware source, example, diagnostics and PR.
 
 The measured capture and log-navigation baselines remain
-[rev138](DUAL_RADIO_REV138.md) and [rev139](DUAL_RADIO_REV139.md). Live home
-association/TLS, provider processing/credit and upload cancellation remain
-separate acceptance tasks. The Wardrift adapter remains provisional. This is
+[rev138](DUAL_RADIO_REV138.md) and [rev139](DUAL_RADIO_REV139.md). The SD journals
+also show a live WiGLE queued acknowledgement and an uncertain WDGWars result.
+A read-only provider query found the matching WiGLE transaction, confirming
+the home-network/TLS/upload path for that attempt. Processing/credit, WDGWars
+delivery and upload cancellation remain separate acceptance tasks. The misleading
+retry-stage label and follow-up diagnostics are addressed in
+[rev141](DUAL_RADIO_REV141.md). The Wardrift adapter remains provisional. This is
 not a claim of complete Marauder parity or encrypted credential storage.
 
 The contribution incorporates upstream main through `db1dfdc`, preserving its

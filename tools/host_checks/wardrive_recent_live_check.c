@@ -22,6 +22,7 @@ void cerberus_wardrive_copy_recent(cerberus_wardrive_recent_snapshot_t *out){++c
 void cerberus_wardrive_get_recent_status(cerberus_wardrive_recent_status_t *out){++status_reads;*out=compact;}
 void cerberus_wardrive_request_stop(void){++stop_requests;}
 static esp_err_t draw_detail_page(void);
+static void wardrive_logs_arm_after_stop(void){}
 #include "wardrive_recent_live_ui.h"
 static esp_err_t draw_detail_page(void)
 {

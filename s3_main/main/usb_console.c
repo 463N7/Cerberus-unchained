@@ -32,6 +32,7 @@
 #include "wardrive_service.h"
 #include "wardrive_gps_uart.h"
 #include "wardrive_upload_settings.h"
+#include "wardrive_log_manager.h"
 
 #include "driver/usb_serial_jtag.h"
 #include "driver/usb_serial_jtag_vfs.h"
@@ -93,6 +94,7 @@ static __attribute__((noinline)) void print_reports(void);
 static __attribute__((noinline)) void print_radio(void);
 static __attribute__((noinline)) void print_gps(void);
 static __attribute__((noinline)) void print_upload_profile(void);
+static __attribute__((noinline)) void print_upload_status(void);
 static __attribute__((noinline)) void print_dual_ble(void);
 static __attribute__((noinline)) void print_ble_memory(void);
 static __attribute__((noinline)) void print_battery(void);
@@ -169,6 +171,7 @@ static void print_help(void)
         "radio    Show C5, S3 BLE/Wi-Fi and Wardriving status without renewing leases\r\n"
         "gps      Show receiver, baud and fix health without coordinates\r\n"
         "upload_profile Show saved upload readiness without credentials\r\n"
+        "upload_status Show log operation and numeric transfer diagnostics\r\n"
         "dual_ble Read cached two-receiver BLE/Fox state without SPI or scanning\r\n"
         "ble_memory Read cached S3 BLE lifecycle heap samples without heap walks\r\n"
         "battery  Show cached onboard battery gauge status\r\n"
@@ -1365,16 +1368,28 @@ static void print_wardrive_relations(const cerberus_wardrive_status_t *status)
 }
 /* END WIFI RELATION DIAGNOSTICS. */
 
+static void print_upload_status(void)
+{
+    cerberus_log_manager_status_t s;cerberus_log_manager_status(&s);
+    console_printf("upload_active=%u\r\nupload_busy=%u\r\nupload_closing=%u\r\nupload_action=%u\r\nupload_service=%u\r\nupload_error=%d\r\nupload_stage=%s\r\nupload_profile_saved=%u\r\n",
+        (unsigned)s.active,(unsigned)s.busy,(unsigned)s.closing,(unsigned)s.action,s.service,
+        (int)s.error,s.stage,(unsigned)s.profile_saved);
+    console_printf("upload_attempted=%u\r\nupload_transport_error=%d\r\nupload_http_status=%u\r\nupload_response_bytes=%lu\r\nupload_response_complete=%u\r\n",
+        (unsigned)s.transfer.attempted,(int)s.transfer.error,s.transfer.http_status,
+        (unsigned long)s.transfer.response_bytes,(unsigned)s.transfer.response_complete);
+    for(unsigned i=0;i<3;++i)console_printf("upload_destination_%u_result=%u\r\n",i,(unsigned)s.destination[i].result);
+}
+
 static void print_upload_profile(void)
 {
     cerberus_upload_config_t config={0};
     esp_err_t error=cerberus_upload_settings_load(&config);
-    console_printf("upload_profile_error=%d\r\nupload_profile_home_ready=%u\r\nupload_profile_wigle_ready=%u\r\nupload_profile_wdgwars_ready=%u\r\nupload_profile_wardrift_ready=%u\r\nupload_profile_destinations=0x%02x\r\n",
+    console_printf("upload_profile_error=%d\r\nupload_profile_home_ready=%u\r\nupload_profile_wigle_ready=%u\r\nupload_profile_wdgwars_ready=%u\r\nupload_profile_wardrift_ready=%u\r\nupload_profile_destinations=0x%02x\r\nupload_profile_auto_after_stop=%u\r\n",
         (int)error,(unsigned)(error==ESP_OK&&cerberus_upload_config_wifi_ready(&config)),
         (unsigned)(error==ESP_OK&&cerberus_upload_config_service_ready(&config,CERBERUS_UPLOAD_WIGLE)),
         (unsigned)(error==ESP_OK&&cerberus_upload_config_service_ready(&config,CERBERUS_UPLOAD_WDGWARS)),
         (unsigned)(error==ESP_OK&&cerberus_upload_config_service_ready(&config,CERBERUS_UPLOAD_WARDRIFT)),
-        (unsigned)(error==ESP_OK?config.destinations:0));
+        (unsigned)(error==ESP_OK?config.destinations:0),(unsigned)(error==ESP_OK?config.auto_upload_after_stop:0));
     cerberus_upload_config_clear(&config,sizeof(config));
 }
 
@@ -1676,6 +1691,8 @@ static void execute_command(char *line)
         print_gps();
     } else if (strcmp(start, "upload_profile") == 0) {
         print_upload_profile();
+    } else if (strcmp(start, "upload_status") == 0) {
+        print_upload_status();
     } else if (strcmp(start, "battery") == 0) {
         print_battery();
     } else {

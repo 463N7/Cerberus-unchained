@@ -50,6 +50,7 @@ static unsigned logs_opened;
 static void wardrive_logs_open(void){++logs_opened;}
 static bool wardrive_logs_is_open(void){return false;}
 static void wardrive_logs_tick(bool asleep){(void)asleep;}
+static void wardrive_logs_arm_after_stop(void){}
 static void wardrive_gps_view_open(void){}
 static bool wardrive_gps_view_is_open(void){return false;}
 static void wardrive_gps_view_release_if_hidden(uint32_t now_ms,bool asleep){(void)now_ms;(void)asleep;}

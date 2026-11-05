@@ -25,8 +25,8 @@ subprocess.run([sys.executable, "-m", "ziglang", "cc", "-std=c11", "-O1", "-Wall
 wire = out / "empty-config.bin"
 subprocess.run([str(exe), str(wire)], check=True, env=env)
 expected = bytearray(512)
-expected[:8] = b"CBUPCFG1"
-struct.pack_into("<H", expected, 8, 487)
+expected[:8] = b"CBUPCFG2"
+struct.pack_into("<H", expected, 8, 488)
 struct.pack_into("<I", expected, 12, zlib.crc32(expected))
 assert wire.read_bytes() == expected
 print("Upload configuration independent Python wire/CRC cross-check passed")
@@ -53,8 +53,8 @@ def check(profile,valid,raw=None):
             (profile['wigle']['api_name'],65),(profile['wigle']['api_token'],129),
             (profile['wdgwars']['token'],65),(profile['wardrift']['token'],129)):
             data=value.encode('utf-8');assert len(data)<size;payload+=data+b'\0'*(size-len(data))
-        payload+=bytes([mask]);assert len(payload)==487
-        assert wire.read_bytes()[16:503]==payload
+        payload+=bytes([mask,profile.get('auto_upload_after_stop',False)]);assert len(payload)==488
+        assert wire.read_bytes()[16:504]==payload
     else:assert not wire.exists()
     checks+=1
 check(blank,True)
@@ -62,6 +62,13 @@ ready=copy.deepcopy(blank);ready['home_wifi']={'ssid':'Lab "café"','password':'
 ready['wigle']={'enabled':True,'api_name':'fixture-name','api_token':'fixture-token'}
 ready['wdgwars']={'enabled':True,'token':'a'*64};ready['wardrift']={'enabled':True,'token':'fixture-token'}
 check(ready,True);check(ready,True,json.dumps(ready,ensure_ascii=False).encode())
+p=copy.deepcopy(ready);p['auto_upload_after_stop']=True;check(p,True)
+for value in (1,'true',None):
+    p=copy.deepcopy(ready);p['auto_upload_after_stop']=value;check(p,False)
+p=copy.deepcopy(blank);p['auto_upload_after_stop']=True;check(p,False)
+p=copy.deepcopy(ready);p['schema']='cerberus-wardrive-upload-v1';del p['auto_upload_after_stop'];check(p,True)
+p=copy.deepcopy(ready);del p['auto_upload_after_stop'];check(p,False)
+p=copy.deepcopy(ready);p['schema']='cerberus-wardrive-upload-v1';check(p,False)
 for ssid in ('A'*32,'é'*16,'Fixture \U0001f4e1'):
     p=copy.deepcopy(ready);p['home_wifi']['ssid']=ssid;check(p,True)
 for password in ('','A'*63,'a'*64,'slash\\quote"'):
