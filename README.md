@@ -29,25 +29,27 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source version: `0.1.0-dev.rev143`, targeting onboard C5 protocol
-firmware revision 75. Wardriving saves one `CERBWardrive001.CSV` per session,
+**Current source and installed development checkpoint: `0.1.0-dev.rev143`,
+with onboard C5 protocol firmware revision 75.**
+Wardriving saves one `CERBWardrive001.CSV` per session,
 using WiGLE 1.6 with valid GPS/UTC rows and visible skipped-observation counts.
 One JSON profile configures home Wi-Fi, WiGLE, WDGWars and Wardrift for manual
 Upload / Upload All. Rev143 adds a direct service retry button and clearer
 legacy-log labels; see the [rev143 scope](docs/DUAL_RADIO_REV143.md).
-See the [setup guide](docs/WARDRIVE_UPLOADS.md), [rev141 installation and scope](docs/DUAL_RADIO_REV141.md)
-and [rev140 baseline](docs/DUAL_RADIO_REV140.md).
-Rev140 private-profile import, SD-copy removal and saved settings across restart
-are verified. WiGLE has a matching queued transaction; processing/credit and
-WDGWars delivery remain unverified. Rev139 has physical log-details/navigation
-acceptance. The rev138 capture baseline accounts for all 1,438 observations in
-physical SD readback, with zero reported queue drops. Complete provider acceptance,
-uploader transitions and endurance remain open. The paired rev142 images are
-installed with verified writes, mounted SD, retained profile readiness and two
-stable idle samples 62 seconds apart. Rev141 receipt details and Back navigation
-are owner-confirmed; the rev143 capture/retry changes await physical acceptance.
-Rev142 passes all 166 local host suites and five native targets; this
-package is not published as a binary release.**
+See the [setup guide](docs/WARDRIVE_UPLOADS.md) for the single JSON profile and
+manual upload workflow. Rev143 passes all 166 local host suites and five native
+targets. Its paired installation has verified image writes, mounted SD, retained
+settings and two stable idle samples 79 seconds apart. Physical acceptance of
+the new single-file recording and direct retry controls remains pending.
+
+Earlier [rev138 SD readback](docs/DUAL_RADIO_REV138.md) accounts for all 1,438
+observations in that capture with zero reported queue drops. Private-profile
+import and restart persistence are verified. WiGLE has a matching queued
+transaction; processing/credit remains unverified. A rev142 WDGWars retry failed
+while opening the connection without an HTTP response; rev143 adds underlying
+socket/TLS diagnostics. WDGWars delivery, Wardrift acceptance, long-drive
+endurance and complete Marauder parity remain open. This development package
+is not published as a binary release.
 
 The published experimental release remains **`0.1.0-dev.rev136`**, paired with
 onboard C5 firmware revision 74 and protocol 2.

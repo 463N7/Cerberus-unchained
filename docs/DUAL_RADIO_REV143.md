@@ -62,6 +62,46 @@ boundaries, actual storage/manager upload/delete paths, and rendered navigation.
 Network fixtures additionally exercise connection failure, diagnostic collection
 before transport destruction, zero CSV body writes and reset on a later success.
 The worker suite covers 24 scenarios, including the new name through the actual
-storage and receipt lifecycle. Native builds, full regression, installation,
-physical single-file capture and live WDGWars v2 acceptance are tracked
-separately. The installed baseline is [rev142](DUAL_RADIO_REV142.md).
+storage and receipt lifecycle. Firmware source
+`6f57021b1d37cb9a53f3de442f296e0459d50eb5` passes all 166 host suites and five
+native targets on 1,299 identical inputs. Native READY, C5 Locate/parser
+placement and console-stack gates pass. The known console frame path uses
+2,256 of 4,096 bytes; this is a partial static bound, not a whole-program or
+loaded runtime guarantee. The S3 application is 2,331,248 bytes, C5 is
+1,728,736 bytes and the bridge is 255,296 bytes. All 22 checksums verify for
+`cerberus-unchained-0.1.0-dev.rev143-20261105T064800Z`.
+Manifest SHA-256:
+`8326908116c37900865dba938993c9aa75702d15e9edd99266165ef6c3f65bd1`.
+Effective firmware-source digest:
+`467ea23d997733b880464bbdd4c3600c31a67e2b0518956b81a620473c40426f`.
+
+The matched rev143 pair is installed. Before restarting the completed rev142
+upload error page, the installed source and fresh diagnostics established that
+the worker had closed its CSV, completed receipt synchronization/close and
+released Wi-Fi before publishing idle. All existing radio and storage checks
+remained in place. A guarded non-flash restart released the idle page's logical
+SD lease; fresh cold captures then passed the original strict flash admission.
+No active recording, transfer, settings import or receipt deletion was triggered.
+
+Fresh verified rev142 recovery backups cover 2,400,256 S3 bytes and 2,097,152
+C5 bytes. All nine bridge/C5/S3 image writes verify. Two post-update idle
+captures 79.47 seconds apart confirm mounted SD, released owners, advancing
+uptime, C5 protocol 2/capability 75, boot count 1 and no previous reset fault.
+S3 free internal memory remains 135,236 bytes, largest internal block 94,208
+bytes, free PSRAM 1,426,140 bytes and task count 10. C5 free memory remains
+53,460 bytes. Four startup READY timeouts and legacy fallbacks are retained;
+neither increases, and the other listed SPI error counters remain zero. The
+observed console stack minimum after the diagnostic sequence is 1,284 bytes.
+
+The saved home/WiGLE/WDGWars profile loads after the update; Wardrift remains
+empty/disabled. The complete CRC-valid profile in the fresh verified backup
+matches every private configuration field and the owner-supplied key files.
+Only match/readiness results are retained in public reporting. No upload was
+started during installation or verification. A public PC connection also
+verified WDGWars TLS 1.2 reachability; this does not establish the device's
+connection cause or service acceptance.
+
+Physical single-file capture, the direct retry controls and a rev143 WDGWars
+response remain pending. The prior rev138 SD readback and rev142 connection
+failure keep their original scope; installation alone does not establish these
+new feature behaviors, long-drive completeness or complete Marauder parity.
