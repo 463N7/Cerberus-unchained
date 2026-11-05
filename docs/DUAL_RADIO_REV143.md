@@ -36,6 +36,17 @@ immediately hits the same hold. No HTTP request occurs before confirmation.
 Other services and acknowledged parts remain skipped during a service retry.
 Uploads remain manual and use the existing single v1 configuration profile.
 
+A subsequent read-only rev142 snapshot recorded an actual WDGWars service retry,
+with `ESP_ERR_HTTP_CONNECT` (28674), HTTP status 0 and no response bytes. This
+establishes a connection-opening failure, not a CSV rejection or a bad API key.
+It does not resolve the earlier uncertain delivery. Rev143 therefore also copies
+the socket errno, ESP-TLS error, underlying TLS code and certificate flags before
+closing the transport. The read-only diagnostic exposes numeric values only;
+successful attempts reset them. This uses the installed ESP-IDF 6.0.1
+[HTTP client diagnostic API](https://docs.espressif.com/projects/esp-idf/en/v6.0.1/esp32s3/api-reference/protocols/esp_http_client.html).
+No certificate checks, redirects, retry confirmations or receipt protections
+are relaxed. The underlying connection cause and live upload remain unverified.
+
 The CSV schema follows WiGLE's [official v1.6 specification](https://api.wigle.net/csvFormat-1_6.html),
 including the pre-header, Earth metadata, fixed 14 columns, UTC and CSV escaping.
 JustCallMeKoko and the Marauder contributors' [WiFiScan.cpp](https://github.com/justcallmekoko/ESP32Marauder/blob/79cc6bcba1db6679baee1dab2b0c1ad5010e6363/esp32_marauder/WiFiScan.cpp#L6409)
@@ -48,6 +59,8 @@ or account credit.
 Focused checks pass for GPS loss/recovery within one stream, no extra UNLOC
 file, equal sightings, stale observations, full-file stop, longer-name parser
 boundaries, actual storage/manager upload/delete paths, and rendered navigation.
+Network fixtures additionally exercise connection failure, diagnostic collection
+before transport destruction, zero CSV body writes and reset on a later success.
 The worker suite covers 24 scenarios, including the new name through the actual
 storage and receipt lifecycle. Native builds, full regression, installation,
 physical single-file capture and live WDGWars v2 acceptance are tracked

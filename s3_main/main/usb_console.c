@@ -1377,6 +1377,8 @@ static void print_upload_status(void)
     console_printf("upload_attempted=%u\r\nupload_transport_error=%d\r\nupload_http_status=%u\r\nupload_response_bytes=%lu\r\nupload_response_complete=%u\r\n",
         (unsigned)s.transfer.attempted,(int)s.transfer.error,s.transfer.http_status,
         (unsigned long)s.transfer.response_bytes,(unsigned)s.transfer.response_complete);
+    console_printf("upload_socket_errno=%d\r\nupload_tls_error=%d\r\nupload_tls_code=%d\r\nupload_tls_flags=%d\r\n",
+        s.transfer.socket_errno,(int)s.transfer.tls_error,s.transfer.tls_code,s.transfer.tls_flags);
     for(unsigned i=0;i<3;++i)console_printf("upload_destination_%u_result=%u\r\n",i,(unsigned)s.destination[i].result);
 }
 

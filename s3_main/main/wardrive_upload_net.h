@@ -5,6 +5,8 @@
 typedef void (*cerberus_upload_progress_fn)(void *context, const char *stage, uint32_t sent, uint32_t total);
 typedef struct {
     esp_err_t error;
+    esp_err_t tls_error;
+    int socket_errno, tls_code, tls_flags;
     unsigned http_status;
     uint32_t response_bytes;
     bool attempted, response_complete;

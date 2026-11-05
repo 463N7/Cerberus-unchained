@@ -16,7 +16,8 @@
 static unsigned calls,fail_call,allocs,stops,deinits,releases;
 static int64_t clock_us;
 static bool started,initialized,claimed,station_alive,sync_alive,stop_fail,ble_busy,cancel_now,ip_missing,sync_missing;
-static bool response_incomplete,read_fail,write_fail;
+static bool response_incomplete,read_fail,write_fail,open_fail,transport_closed;
+static unsigned tls_reads;
 static esp_netif_t iface;
 static unsigned service,status=200,expected_length,used,read_at;
 static char sent[8192],auth[300],content_type[100],api_key[150],filename[100];
@@ -61,14 +62,14 @@ esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *c)
     assert(!client.active&&started&&sync_alive);assert(c->disable_auto_redirect&&c->crt_bundle_attach==esp_crt_bundle_attach&&c->method==HTTP_METHOD_POST);
     const char *urls[]={"https://api.wigle.net/api/v2/file/upload","https://wdgwars.pl/api/v2/upload-csv","https://wardrift.net/v1/ingest/signals"};
     assert(!strcmp(c->url,urls[service])&&c->timeout_ms==10000&&c->buffer_size<=1024&&c->buffer_size_tx<=1024);
-    client.active=true;used=read_at=0;sent[0]=auth[0]=content_type[0]=api_key[0]=filename[0]=0;return &client;
+    client.active=true;transport_closed=false;used=read_at=0;sent[0]=auth[0]=content_type[0]=api_key[0]=filename[0]=0;return &client;
 }
 esp_err_t esp_http_client_set_header(esp_http_client_handle_t c,const char *key,const char *value)
 {assert(c==&client&&c->active);if(!strcmp(key,"Authorization"))strcpy(auth,value);
     else if(!strcmp(key,"Content-Type"))strcpy(content_type,value);else if(!strcmp(key,"X-API-Key"))strcpy(api_key,value);
     else if(!strcmp(key,"X-File-Name"))strcpy(filename,value);
     else if(!strcmp(key,"Accept"))assert(!strcmp(value,"application/json"));else assert(!"unknown header");return ESP_OK;}
-esp_err_t esp_http_client_open(esp_http_client_handle_t c,int length){assert(c==&client&&length>0&&length<8192);expected_length=(unsigned)length;return ESP_OK;}
+esp_err_t esp_http_client_open(esp_http_client_handle_t c,int length){assert(c==&client&&length>0&&length<8192);expected_length=(unsigned)length;return open_fail?ESP_ERR_HTTP_CONNECT:ESP_OK;}
 int esp_http_client_write(esp_http_client_handle_t c,const char *bytes,int length)
 {assert(c==&client&&length>0);if(write_fail)return -1;int n=length>17?17:length;assert(used+(unsigned)n<sizeof(sent));memcpy(sent+used,bytes,(size_t)n);used+=(unsigned)n;sent[used]=0;return n;}
 int64_t esp_http_client_fetch_headers(esp_http_client_handle_t c){assert(c==&client&&used==expected_length);return (int64_t)strlen(response);}
@@ -76,7 +77,10 @@ int esp_http_client_get_status_code(esp_http_client_handle_t c){assert(c==&clien
 int esp_http_client_read(esp_http_client_handle_t c,char *buffer,int length){assert(c==&client);if(read_fail)return -1;
     size_t n=strlen(response)-read_at;if(n>(size_t)length)n=(size_t)length;if(n>7)n=7;memcpy(buffer,response+read_at,n);read_at+=(unsigned)n;return (int)n;}
 bool esp_http_client_is_complete_data_received(esp_http_client_handle_t c){assert(c==&client);return !response_incomplete&&read_at==strlen(response);}
-esp_err_t esp_http_client_close(esp_http_client_handle_t c){assert(c==&client);return ESP_OK;}
+int esp_http_client_get_errno(esp_http_client_handle_t c){assert(c==&client&&c->active&&!transport_closed);return open_fail?110:0;}
+esp_err_t esp_http_client_get_and_clear_last_tls_error(esp_http_client_handle_t c,int *code,int *flags)
+{assert(c==&client&&c->active&&!transport_closed);++tls_reads;*code=open_fail?-0x2700:0;*flags=open_fail?8:0;return open_fail?0x801a:ESP_OK;}
+esp_err_t esp_http_client_close(esp_http_client_handle_t c){assert(c==&client);transport_closed=true;return ESP_OK;}
 esp_err_t esp_http_client_cleanup(esp_http_client_handle_t c){assert(c==&client&&c->active);c->active=false;return ESP_OK;}
 static bool canceled(void *p){(void)p;return cancel_now;}
 static void progress(void *p,const char *stage,uint32_t sent_bytes,uint32_t total){(void)p;(void)stage;assert(sent_bytes<=total);}
@@ -97,6 +101,7 @@ int main(int argc,char **argv)
         cerberus_upload_reply_t r=cerberus_upload_net_send(&cfg,(cerberus_upload_service_t)service,f,&plan,0,"fixture-001.csv",canceled,progress,NULL,&transfer);
         assert(r.result==(service==0?CERBERUS_UPLOAD_QUEUED:CERBERUS_UPLOAD_ACCEPTED)&&transfer.http_status==200&&!client.active&&!allocs);
         assert(transfer.error==ESP_OK&&transfer.attempted&&transfer.response_complete&&transfer.response_bytes==strlen(response));
+        assert(!transfer.socket_errno&&!transfer.tls_error&&!transfer.tls_code&&!transfer.tls_flags);
         if(service==0)assert(!strcmp(auth,"Basic bmFtZTp0b2tlbg==")&&!api_key[0]);
         else assert(!auth[0]&&!strcmp(api_key,service==1?cfg.wdgwars_token:cfg.wardrift_token));
         if(service==2){assert(!strcmp(content_type,"text/csv")&&!strcmp(filename,"fixture-001.csv"));assert(used==plan.summary.bytes);}
@@ -116,6 +121,17 @@ int main(int argc,char **argv)
         "fixture.csv",canceled,progress,NULL,&queued_transfer);
     assert(queued_reply.result==CERBERUS_UPLOAD_QUEUED&&!strcmp(queued_reply.transaction,"1234")&&!queued_reply.counts_valid);
     assert(queued_transfer.error==ESP_OK&&queued_transfer.http_status==202&&queued_transfer.response_complete&&!allocs&&!client.active);
+    open_fail=true;unsigned before=tls_reads;
+    queued_reply=cerberus_upload_net_send(&cfg,CERBERUS_UPLOAD_WDGWARS,f,&plan,0,
+        "fixture.csv",canceled,progress,NULL,&queued_transfer);
+    assert(queued_reply.result==CERBERUS_UPLOAD_UNKNOWN&&queued_transfer.error==ESP_ERR_HTTP_CONNECT);
+    assert(queued_transfer.attempted&&!used&&!queued_transfer.http_status&&!queued_transfer.response_bytes);
+    assert(queued_transfer.socket_errno==110&&queued_transfer.tls_error==0x801a&&queued_transfer.tls_code==-0x2700&&queued_transfer.tls_flags==8);
+    assert(tls_reads==before+1&&!client.active&&!allocs);open_fail=false;
+    queued_reply=cerberus_upload_net_send(&cfg,CERBERUS_UPLOAD_WDGWARS,f,&plan,0,
+        "fixture.csv",canceled,progress,NULL,&queued_transfer);
+    assert(queued_reply.result==CERBERUS_UPLOAD_QUEUED&&tls_reads==before+1);
+    assert(!queued_transfer.socket_errno&&!queued_transfer.tls_error&&!queued_transfer.tls_code&&!queued_transfer.tls_flags);
     fclose(f);stop_fail=true;assert(cerberus_upload_net_end()!=ESP_OK&&claimed&&started&&initialized);
     assert(cerberus_upload_net_begin(&cfg,canceled,progress,NULL)!=ESP_OK);
     assert(cerberus_upload_net_end()==ESP_OK&&!claimed&&!station_alive&&!initialized&&!sync_alive);

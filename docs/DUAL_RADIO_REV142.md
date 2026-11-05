@@ -90,3 +90,10 @@ WiGLE name/token and WDGWars token matched the owner-supplied key files. The
 post-update profile load succeeded. Only match/readiness results are recorded;
 credentials and backup contents remain private. This verifies configuration
 persistence, not current network reachability or service delivery.
+
+A later snapshot at 2026-11-05 06:41 UTC recorded the explicit retry action for
+WDGWars, with an attempted connection and `ESP_ERR_HTTP_CONNECT` (28674).
+HTTP status and response bytes were zero; WiGLE remained QUEUED and WDGWars
+remained UNKNOWN. This supersedes the earlier zero-attempt observation for that
+later action only. Rev142 has no retained socket/TLS detail, so it cannot
+distinguish the underlying connection cause. Rev143 adds those diagnostics.

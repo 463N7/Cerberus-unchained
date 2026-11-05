@@ -173,6 +173,13 @@ cerberus_upload_reply_t cerberus_upload_net_send(const cerberus_upload_config_t 
         reply=cerberus_upload_reply(service,status,buffer,used,detail.response_complete);
         if(reply.result==CERBERUS_UPLOAD_UNKNOWN)err=ESP_ERR_INVALID_RESPONSE;
     }
+    if(err!=ESP_OK){
+        /* Copy numeric diagnostics before close destroys the TLS transport.
+         * Never retain headers, credential values or response bodies here. */
+        detail.socket_errno=esp_http_client_get_errno(client);
+        detail.tls_error=esp_http_client_get_and_clear_last_tls_error(client,
+            &detail.tls_code,&detail.tls_flags);
+    }
     detail.error=err;if(transfer)*transfer=detail;
     esp_http_client_close(client);esp_http_client_cleanup(client);
     if(buffer){cerberus_upload_config_clear(buffer,4097);heap_caps_free(buffer);}
