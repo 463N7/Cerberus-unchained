@@ -6,7 +6,9 @@ Wi-Fi and all three services. Installation and physical acceptance are recorded
 separately in the [rev139](DUAL_RADIO_REV139.md) and [rev140](DUAL_RADIO_REV140.md)
 checkpoints and the [rev141 update](DUAL_RADIO_REV141.md). Upload and Upload All
 remain manual and require confirmation. Stopping capture, importing a profile
-or rebooting never starts an upload. The owner's rev140 upload has a matching
+or rebooting never starts an upload. Paired rev141 installation preserves the
+saved profile, and the owner confirmed log receipt details and Back navigation.
+The owner's rev140 upload has a matching
 queued WiGLE transaction; processing/credit are still unverified. WDGWars delivery
 remains uncertain. CSV validation alone is not a WiGLE acceptance receipt.
 

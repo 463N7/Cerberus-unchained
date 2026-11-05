@@ -33,15 +33,18 @@ imply upstream endorsement of Cerberus Unchained.
 firmware revision 75. One JSON profile configures home Wi-Fi, WiGLE, WDGWars and
 Wardrift for manual Upload / Upload All. Rev141 identifies saved receipts that
 require account review and adds credential-free transfer diagnostics.
-See the [setup guide](docs/WARDRIVE_UPLOADS.md), [rev141 scope](docs/DUAL_RADIO_REV141.md)
-and [rev140 installation](docs/DUAL_RADIO_REV140.md).
+See the [setup guide](docs/WARDRIVE_UPLOADS.md), [rev141 installation and scope](docs/DUAL_RADIO_REV141.md)
+and [rev140 baseline](docs/DUAL_RADIO_REV140.md).
 Rev140 private-profile import, SD-copy removal and saved settings across restart
 are verified. WiGLE has a matching queued transaction; processing/credit and
 WDGWars delivery remain unverified. Rev139 has physical log-details/navigation
 acceptance. The rev138 capture baseline accounts for all 1,438 observations in
 physical SD readback, with zero reported queue drops. Complete provider acceptance,
-uploader transitions and endurance remain open. Rev141's installation evidence
-will be recorded separately; it has not been published as a binary release.**
+uploader transitions and endurance remain open. The paired rev141 images are
+installed with verified writes, mounted SD, retained profile readiness and two
+stable idle samples 85 seconds apart. The owner confirmed receipt details and
+Back navigation. All 166 local host suites and five native targets pass; this
+package is not published as a binary release.**
 
 The published experimental release remains **`0.1.0-dev.rev136`**, paired with
 onboard C5 firmware revision 74 and protocol 2.
