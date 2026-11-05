@@ -12,6 +12,8 @@ rev141; rev142 adds service retries and rev143 makes them directly accessible.
 The owner's rev140 upload has a matching
 queued WiGLE transaction; processing/credit are still unverified. WDGWars delivery
 remains uncertain. CSV validation alone is not a WiGLE acceptance receipt.
+Rev144 is installed with explicit no-save feedback; its verification and
+remaining acceptance are in the [rev144 checkpoint](DUAL_RADIO_REV144.md).
 
 ## Import one JSON profile from SD
 
@@ -99,6 +101,15 @@ of this profile, leaving captures and receipts intact. Rotate compromised keys
 with their providers.
 
 ## Review, upload and delete
+
+For a new recording, wait for **GPS DATA > FIX + UTC / WIGLE CSV**, tap START,
+and check that **SD: ... ROWS** increases. Stop and wait for **CSV SAVED / OPEN
+LOGS BELOW**, then open **LOGS / UPLOAD**. A successful radio scan alone does
+not mean a CSV was recorded. Rev144 keeps **STOPPED / NO CSV SAVED** and the
+reason visible if no eligible observations were written. An empty log list
+explains this sequence; an SD catalog error is shown separately. The read-only
+`ward_logs` console diagnostic distinguishes absent directories, CSV entries,
+temporary captures and filenames excluded by the native-name filter.
 
 Production recording saves one **CERBWardrive001.CSV**–**CERBWardrive999.CSV**
 in `/CERBERUS/WARD` per session. The first qualifying Wi-Fi/BLE observation opens
@@ -204,7 +215,7 @@ Wardrift's current limits still need live verification.
 | Service | Request | Acknowledgement |
 | --- | --- | --- |
 | WiGLE | `POST https://api.wigle.net/api/v2/file/upload`; Basic API-name/token; multipart `file` | HTTP 200, `success: true`, exactly one transaction ID; QUEUED |
-| WDGWars | `POST https://wdgwars.pl/api/upload-csv`; `X-API-Key`; multipart `file` | HTTP 200, `ok: true`, numeric `imported`; ACCEPTED with `no_gps`/`bad_rows` counts |
+| WDGWars | `POST https://wdgwars.pl/api/v2/upload-csv`; `X-API-Key`; multipart `file`; `Accept: application/json` | HTTP 202, `ok: true`, positive `job_id`: QUEUED; synchronous HTTP 200/import counts remain supported |
 | Wardrift | `POST https://wardrift.net/v1/ingest/signals`; `X-API-Key`, `X-File-Name`; raw `text/csv` | HTTP 200, `accepted: true`; provisional until live verification |
 
 HTTPS verifies CA chain/hostname and disables redirects. Complete responses are
