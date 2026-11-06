@@ -35,7 +35,7 @@ files remaining visible after an unsaved session; and the actual diagnostic
 catalog through leased storage, including busy and allocation failures. These
 fixtures do not prove physical touchscreen acceptance or a newly recorded file.
 
-Final source `7a6e36c94e7163cfc76794b6b572c10cb860c21b` passes all 166 host
+The catalog fix in `7a6e36c94e7163cfc76794b6b572c10cb860c21b` passed all 166 host
 suites and five native targets on 1,300 identical inputs. All 22 package
 checksums verify. The package is
 `cerberus-unchained-0.1.0-dev.rev144-20261105T080205Z`, with manifest SHA-256
@@ -46,7 +46,7 @@ The S3 application is 2,333,584 bytes; C5 is 1,728,736 bytes and the bridge is
 255,296 bytes. Native placement and console-stack checks pass; the known
 console frame bound remains 2,256/4,096 bytes, not a complete runtime bound.
 
-The final S3 correction is installed with a fresh verified 2,400,256-byte
+The S3 catalog fix was installed with a fresh verified 2,400,256-byte
 recovery backup and all three programmed image digests verified. Its C5 and
 bridge binaries exactly match the preceding verified rev144 paired update,
 so they were retained. That baseline has fresh verified backups and all nine
@@ -59,18 +59,38 @@ increase; other listed SPI error counters remain zero. The observed console
 stack minimum after diagnostics is 1,284 bytes. Profile load succeeds; the
 CRC-valid backup matches every private-profile field and supplied key.
 
-The real-card diagnostic confirms `/CERBERUS/WARD` exists and contains one
+At the time of the catalog check, `/CERBERUS/WARD` contained one
 non-CSV/non-TMP entry: **zero CSV entries, zero temporary captures and zero
-unrecognized CSV names**. Thus the current empty catalog is not caused by its
-filename filter. The diagnostics do not establish how earlier recordings
-became absent. The last session's missing GPS/UTC explains why it added no new
-file. No recording, upload, file deletion or receipt modification was initiated
+unrecognized CSV names**. The empty catalog matched the contents of the card.
+The reason earlier recordings were absent is unknown. The last session lacked
+valid GPS/UTC and added no new file. No recording, upload, file deletion or receipt modification was initiated
 during this validation. Earlier private SD readbacks remain preserved locally.
 
 The diagnostic now exposes directory-present, directory-entry, CSV, temporary
 and unrecognized-CSV counts, plus one bounded hex-encoded unrecognized basename
 when applicable. Host fixtures distinguish a missing directory from filtered
 files, temporary captures and successfully recognized logs without reading CSV
-contents. Physical touchscreen acceptance and a new recording with valid GPS
-remain pending; WDGWars retry remains deferred. This is the requested bounded
-checkpoint and pause, not complete Marauder parity.
+contents.
+
+## Confirmed uploads
+
+Commit `336b2cc` shows **UPLOADED** for a service once all parts of the file
+have confirmed receipts. A WiGLE transaction ID confirms receipt of its part.
+WiGLE processes the file separately. The worker can read receipts written by
+earlier builds. A regression test interrupts a two-part upload after the first
+receipt and verifies that resuming sends only the second part.
+
+Before this update, a stopped rev144 drive reported 1,182 geotagged rows, one
+saved file and zero S3 or C5 queue drops. Those figures come from the device
+counters. The earlier rev138 test includes a direct [CSV readback](DUAL_RADIO_REV138.md).
+
+All 166 host suites and five firmware targets passed at `336b2cc`. The updated
+S3 image was installed and verified. The C5 and bridge images matched the
+installed copies. Two boot checks 59 seconds apart showed both chips online
+and the SD card mounted. The saved upload profile loaded after restart. The
+new status label was checked with the UI test harness. Its touchscreen check
+is still open.
+
+WiGLE previously returned a transaction ID. The last WDGWars attempt failed
+during the TLS handshake on the device. WiGLE processing and live WDGWars
+and Wardrift uploads still need confirmation.

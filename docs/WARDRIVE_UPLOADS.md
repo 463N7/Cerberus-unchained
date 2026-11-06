@@ -1,19 +1,12 @@
 # Wardriving logs, home Wi-Fi and uploads
 
-Use **Scan → Wardriving → LOGS / UPLOAD** after stopping capture. Rev139 adds
-the integrated log manager and uploader; rev140 adds one JSON profile for home
-Wi-Fi and all three services. Installation and physical acceptance are recorded
-separately in the [rev139](DUAL_RADIO_REV139.md) and [rev140](DUAL_RADIO_REV140.md)
-checkpoints and the [rev143 update](DUAL_RADIO_REV143.md). Upload and Upload All
-remain manual and require confirmation. Stopping capture, importing a profile
-or rebooting never starts an upload. Paired rev142 installation preserves the
-saved profile. The owner confirmed log receipt details and Back navigation on
-rev141; rev142 adds service retries and rev143 makes them directly accessible.
-The owner's rev140 upload has a matching
-queued WiGLE transaction; processing/credit are still unverified. WDGWars delivery
-remains uncertain. CSV validation alone is not a WiGLE acceptance receipt.
-Rev144 is installed with explicit no-save feedback; its verification and
-remaining acceptance are in the [rev144 checkpoint](DUAL_RADIO_REV144.md).
+Stop the capture, then open **Scan → Wardriving → LOGS / UPLOAD**. Pick a file
+to see its row counts and the upload status for each service. Choose **UPLOAD
+THIS LOG** to send it, or **UPLOAD ALL LOCATED LOGS** from the file list to send
+several. Both actions ask for confirmation before connecting to your home Wi-Fi.
+
+**UPLOADED** means the service acknowledged every part of the file. You can
+reopen the log to see its saved receipts. [Results and retries](#results-and-retries)
 
 ## Import one JSON profile from SD
 

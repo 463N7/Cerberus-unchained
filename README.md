@@ -29,32 +29,25 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current source and installed development checkpoint: `0.1.0-dev.rev144`,
-with onboard C5 protocol firmware revision 75.**
-Wardriving saves one `CERBWardrive001.CSV` per session,
-using WiGLE 1.6 with valid GPS/UTC rows and visible skipped-observation counts.
-One JSON profile configures home Wi-Fi, WiGLE, WDGWars and Wardrift for manual
-Upload / Upload All. Rev143 adds a direct service retry button and clearer
-legacy-log labels; see the [rev143 scope](docs/DUAL_RADIO_REV143.md).
-Rev144 makes unsaved sessions explicit, explains an empty log list, and adds a
-read-only SD catalog diagnostic; see the [missing-log fix](docs/DUAL_RADIO_REV144.md).
-See the [setup guide](docs/WARDRIVE_UPLOADS.md) for the single JSON profile and
-manual upload workflow. Final rev144 source passes all 166 local host suites
-and five native targets on 1,300 unchanged inputs. Its installed S3 image is
-verified; the C5 and bridge are byte-identical to the verified paired baseline.
-SD and saved profile load, and two idle samples 92 seconds apart remain stable.
-The actual card catalog contains no CSV or temporary captures; the preceding
-three-second session saved no rows because it had no valid GPS/UTC. A new
-located single-file recording and physical retry navigation remain unverified.
+**Current development build** `0.1.0-dev.rev144` uses onboard C5 firmware revision 75.
 
-Earlier [rev138 SD readback](docs/DUAL_RADIO_REV138.md) accounts for all 1,438
-observations in that capture with zero reported queue drops. Private-profile
-import and restart persistence are verified. WiGLE has a matching queued
-transaction; processing/credit remains unverified. A rev142 WDGWars retry failed
-while opening the connection without an HTTP response; rev143 adds underlying
-socket/TLS diagnostics. WDGWars delivery, Wardrift acceptance, long-drive
-endurance and complete Marauder parity remain open. This development package
-is not published as a binary release.
+Open **Scan → Wardriving** to check the GPS fix before starting a drive.
+Cerberus writes sightings with valid position and UTC data to one WiGLE 1.6
+file per session, such as `CERBWardrive001.CSV`. It keeps repeat sightings.
+If the session ends before it can save a row, the Stop screen explains why.
+
+After stopping, open **LOGS / UPLOAD** to review a file or upload it over home
+Wi-Fi. One JSON profile holds the network settings and service credentials.
+A service shows **UPLOADED** once it has acknowledged every part of the file.
+The device can read that status from saved receipts when you reopen the log.
+[Setup and upload guide](docs/WARDRIVE_UPLOADS.md)
+
+A rev144 test session reported one saved file with 1,182 geotagged rows. The
+upload-status update was then installed and checked on the S3/C5 board.
+WiGLE acknowledged an earlier upload. The last WDGWars attempt failed during
+the TLS handshake on the board. Live Wardrift uploads, long drives and full
+Marauder feature parity remain open. [CSV readback](docs/DUAL_RADIO_REV138.md) ·
+[Rev144 device checks](docs/DUAL_RADIO_REV144.md)
 
 The published experimental release remains **`0.1.0-dev.rev136`**, paired with
 onboard C5 firmware revision 74 and protocol 2.
