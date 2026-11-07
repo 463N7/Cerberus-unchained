@@ -29,7 +29,7 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current development build** `0.1.0-dev.rev144` uses onboard C5 firmware revision 75.
+**Current experimental release** `0.1.0-dev.rev144` uses onboard C5 firmware revision 75.
 
 Open **Scan → Wardriving** to check the GPS fix before starting a drive.
 Cerberus writes sightings with valid position and UTC data to one WiGLE 1.6
@@ -49,15 +49,19 @@ the TLS handshake on the board. Live Wardrift uploads, long drives and full
 Marauder feature parity remain open. [CSV readback](docs/DUAL_RADIO_REV138.md) ·
 [Rev144 device checks](docs/DUAL_RADIO_REV144.md)
 
-The published experimental release remains **`0.1.0-dev.rev136`**, paired with
-onboard C5 firmware revision 74 and protocol 2.
-[Install rev136 with the web flasher](https://463n7.github.io/Cerberus-unchained/)
-or [download its matched package and checksums](https://github.com/463N7/Cerberus-unchained/releases/tag/v0.1.0-dev.rev136).
+The published experimental release is **`0.1.0-dev.rev144`**, paired with
+onboard C5 firmware revision 75 and protocol 2.
+[Install rev144 with the web flasher](https://463n7.github.io/Cerberus-unchained/)
+or [download its matched package and checksums](https://github.com/463N7/Cerberus-unchained/releases/tag/v0.1.0-dev.rev144).
 The guided installer programs the bridge, C5 and S3 using one USB cable in
-desktop Chrome or Edge. Its published files are preserved by this contribution;
-they do not install the current development source described above.
-Rev136 remains experimental with limited physical acceptance; see its
-[checkpoint](docs/DUAL_RADIO_REV136.md) and the [flasher guide](docs/WEB_FLASHER.md).
+desktop Chrome or Edge. The release images match the package installed on the
+owner's Cerberus: all nine image writes and 29 paired installation/startup checks
+passed, including mounted SD, buffered display, advancing processor uptimes and
+clean startup. This does not establish full radio, GPS or upload-service acceptance.
+The [SD assets and copy instructions](https://463n7.github.io/Cerberus-unchained/#sd-assets)
+are directly below the flasher; the existing rev136 SD pack is also compatible.
+See the [rev144 checkpoint](docs/DUAL_RADIO_REV144.md) and
+[flasher guide](docs/WEB_FLASHER.md). The prior rev136 release remains available.
 Sentinel 1.0.0 binaries are not Unchained firmware.
 
 ## Build and validation
