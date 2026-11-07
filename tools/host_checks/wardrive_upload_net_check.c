@@ -154,10 +154,10 @@ static void clock_checks(const cerberus_upload_config_t *cfg)
     before=sync_starts;unsigned sets=time_sets;
     assert(cerberus_upload_net_begin(cfg,canceled,progress,NULL)==ESP_OK);
     assert(sync_starts==before&&time_sets==sets+1&&!strcmp(last_stage,"USING GPS UTC FOR TLS"));
-    assert(wall_offset_us+clock_us==INT64_C(1709210096123000));end_upload();
-    clock_us+=900000000;
+    assert(wall_offset_us+clock_us==INT64_C(1709210096123000)+clock_us%1000);end_upload();
+    clock_us=(int64_t)gps_time.received_ms*1000+900000000;
     assert(cerberus_upload_net_begin(cfg,canceled,progress,NULL)==ESP_OK&&sync_starts==before);end_upload();
-    clock_us+=1000;
+    ++clock_us;
     assert(cerberus_upload_net_begin(cfg,canceled,progress,NULL)==ESP_ERR_TIMEOUT&&sync_starts==before+2);end_upload();
 
     /* Reading a held-over GPS sample must not restart its age allowance. */

@@ -59,7 +59,7 @@ static bool upload_gps_utc(const cerberus_wardrive_gps_time_t *sample,
 {
     const char *s = sample->utc;
     if (now < 0 || sample->received_ms > (uint64_t)now / 1000U ||
-        (uint64_t)now / 1000U - sample->received_ms > CERBERUS_WARDRIVE_GPS_TIME_HOLDOVER_MS ||
+        now - (int64_t)sample->received_ms * 1000 > UPLOAD_CLOCK_HOLDOVER_US ||
         s[4] != '-' || s[7] != '-' || s[10] != 'T' || s[13] != ':' ||
         s[16] != ':' || s[19] != '.' || s[23] != 'Z' || s[24]) return false;
     for (unsigned i = 0; i < 23U; ++i) {
