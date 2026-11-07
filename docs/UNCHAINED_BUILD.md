@@ -3,7 +3,7 @@
 Unchained is experimental firmware built on its rev81 foundation, with the
 accumulated dual-radio observation, analysis, storage and Wardriving additions.
 The source version comes from the checked-in CMake configuration. The published
-experimental rev136 package targets onboard C5 capability revision 74 and protocol 2.
+experimental rev144 package targets onboard C5 capability revision 75 and protocol 2.
 A version label, host check or
 compiler result does not establish on-device acceptance.
 
@@ -55,7 +55,7 @@ python tools/check_build_unified.py
 python tools/check_field_kit.py
 ```
 
-The rev136 runner covers 158 named suites and uses separate Zig caches. The
+The rev144 runner covers 166 named suites and uses separate Zig caches. The
 registered `check_radio_worker.py` suite runs both the shared 802.15.4 worker
 checks and the receive-continuity regression. Run the suite against stable
 sources, separately from firmware builds. See [validation](VALIDATION.md)
@@ -64,7 +64,7 @@ and [the current contribution and remaining work](CONTRIBUTION_REV93.md). The
 
 Hosted CI runs the full suite on Ubuntu and four isolated Windows shards. Each
 Windows shard keeps its serial UI fixtures sequential. The aggregate gate requires
-all 158 suites exactly once, matching source/registry/commit hashes,
+all 166 suites exactly once, matching source/registry/commit hashes,
 verified log hashes and a single GitHub run attempt. Ancillary build-report,
 SD-resource and shard-regression checks still run on both operating systems.
 
@@ -92,11 +92,13 @@ no OTA rollback slot.
 The inherited Sentinel 1.0.0 binaries are removed from the current web asset
 tree and preserved under `reference/sentinel-1.0.0/`, with their original
 checksums and notices. They also remain in Git history and the Sentinel project.
-`web/public/firmware/latest.json` selects the matched rev136 Unchained set by
+`web/public/firmware/latest.json` selects the matched rev144 Unchained set by
 manifest hash. The browser rejects Sentinel product manifests. The
 [public Unchained flasher](https://463n7.github.io/Cerberus-unchained/) and
-[experimental release](https://github.com/463N7/Cerberus-unchained/releases/tag/v0.1.0-dev.rev136)
-were published after the owner's visual review on 2026-11-03.
+[experimental release](https://github.com/463N7/Cerberus-unchained/releases/tag/v0.1.0-dev.rev144)
+use the exact image set verified on the owner's board. All nine writes and 29
+installation/startup checks passed; full feature acceptance remains in progress.
+The earlier rev136 web release remains immutable and available for recovery.
 
 After a matched Unchained package has passed the appropriate checks, validate
 it and deliberately select it for a local installer build:
