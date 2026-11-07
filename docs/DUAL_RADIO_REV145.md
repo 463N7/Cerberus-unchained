@@ -20,7 +20,7 @@ The matched package includes the vendored handler and its CMake hook in its sour
 
 The SDK integration test reproduces the old rejection and verifies the corrected chain path using real Mbed TLS/PSA cryptography. It rejects unknown roots, incorrect hostnames, expired/future leaf and intermediate certificates, and a modified signature. It completes 128 repeated verifications and 16 allocation-failure trials without retained allocations.
 
-All 166 standard host suites and all five firmware targets passed at `e7d909a`, with unchanged input hashes. The additional SDK integration check passed separately.
+All 166 standard host suites and all five firmware targets passed at `5939108`, with unchanged input hashes. The build/report tests also reject packaging after a vendored TLS source change. All 22 package checksums verified. The additional SDK integration check passed separately against the unchanged handler.
 
 A TLS 1.2 handshake from the PC, using the actual SDK verifier and firmware certificate bundle, gave these results. The test stopped after TLS; it sent no HTTP request or API credentials.
 
@@ -30,4 +30,6 @@ A TLS 1.2 handshake from the PC, using the actual SDK verifier and firmware cert
 | `api.wigle.net` | Verified | Verified |
 | `wardrift.net` | Verified | Verified |
 
-The candidate has not been installed; the connected board still reports rev144. On-device WDGWars TLS, actual upload acknowledgement and repeated-upload memory use remain open. No logs were uploaded or receipts changed during this investigation. A saved uncertain receipt still requires the existing service retry confirmation.
+The matched rev145 package was installed on November 7 after fresh S3 and C5 recovery backups were checked against the installed images. Each programmed image passed flash-digest verification. Both chips booted, the SD card mounted and the saved upload profile loaded. Two idle observations 41.8 seconds apart showed advancing uptime and SPI traffic without a reset or additional transport errors.
+
+On-device WDGWars TLS, actual upload acknowledgement and repeated-upload memory use remain open. No logs were uploaded or receipts changed during this investigation. A saved uncertain receipt still requires the existing service retry confirmation.
