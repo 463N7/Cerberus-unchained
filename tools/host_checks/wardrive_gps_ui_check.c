@@ -1,6 +1,8 @@
 #undef NDEBUG
 #include "wardrive_service.h"
+#include "wardrive_log_feedback.h"
 #include "wardrive_gps_uart.h"
+static cerberus_gps_config_t cerberus_settings_gps_get(void){return cerberus_gps_config_default();}
 #include "ui_widgets.h"
 #include "display.h"
 #include "esp_check.h"
@@ -31,6 +33,11 @@ static const char *TAG="gps_ui_host";
 static uint16_t pixels[480][320];
 static char drawn[16384],lines[480][128];
 static bool wardrive_start_pending,wardrive_return_pending,wardrive_gps_enabled,wardrive_include_expansions;
+static uint8_t wardrive_mode;
+static esp_err_t gps_preview_error;
+static void gps_preview_poll(uint32_t now,bool asleep){(void)now;(void)asleep;}
+esp_err_t cerberus_wardrive_set_mode(uint8_t mode){wardrive_mode=mode;return ESP_OK;}
+
 static esp_err_t wardrive_start_error;
 static char wardrive_blocked_reason[64];
 static uint32_t wardrive_start_requested_ms,wardrive_last_start_attempt_ms,wardrive_last_draw_ms;
@@ -39,6 +46,10 @@ static esp_err_t draw_detail_page(void);
 static void wardrive_recent_open(void){++recent_opens;recent_opened=true;}
 static void wardrive_recent_close(void){++recent_closes;recent_opened=false;}
 static bool wardrive_recent_is_open(void){return recent_opened;}
+/* Log-manager lifetime and controls have their own production UI suite. */
+static bool wardrive_logs_is_open(void){return false;}
+static void wardrive_logs_tick(bool asleep){(void)asleep;}
+static void wardrive_logs_open(void){CHECK(false);}
 static bool wardrive_recent_active(cerberus_wardrive_state_t state)
 {return state==CERBERUS_WARDRIVE_STARTING||state==CERBERUS_WARDRIVE_RUNNING||state==CERBERUS_WARDRIVE_STOPPING;}
 static bool recon_sessions_idle_for_takeover(void){return !held_recon;}
@@ -145,7 +156,7 @@ static void line_row(unsigned index,unsigned result,const char *text)
 }
 static void entry_and_data(const char *prefix)
 {
-    reset();actual_open_wardrive();CHECK(!wardrive_gps_enabled&&!wardrive_gps_view_is_open());
+    reset();actual_open_wardrive();CHECK(wardrive_gps_enabled&&!wardrive_gps_view_is_open());
     actual_tap(80,80);CHECK(wardrive_gps_view_is_open()&&wardrive_gps_view.hidden&&!allocations&&!trace_begins&&!service_starts);
     CHECK(strstr(drawn,"S3 GPS UART OFF")&&strstr(drawn,"NO RECENT NMEA")&&!strstr(drawn,"ABSENT"));save(prefix,"off-data");
     actual_tap(200,65);CHECK(wardrive_gps_view.nmea&&trace_begins==1&&!allocations&&!live_token);

@@ -147,7 +147,7 @@ static size_t recent_indexes(const cerberus_wardrive_recent_t *state,
             CERBERUS_WARDRIVE_RECENT_HISTORY;
         const cerberus_wardrive_recent_row_t *row = &state->rows[index];
         bool duplicate = false;
-        for (size_t i = 0U; i < count; ++i)
+        for (size_t i = 0U; !state->all_observations && i < count; ++i)
             duplicate |= same_identity(row, &state->rows[indexes[i]]);
         if (!duplicate) indexes[count++] = (uint8_t)index;
     }

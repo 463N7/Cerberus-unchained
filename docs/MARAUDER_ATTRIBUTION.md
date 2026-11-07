@@ -72,6 +72,23 @@ that upstream implementation code was copied or that all options are complete.
 The [design and acceptance contract](WIFI_PACKET_COUNT_PLAN.md) keeps serial
 capture and physical count/recording acceptance separate.
 
+## Wardriving upload workflow reference
+
+Rev142's manual retry and WDGWars v2 integration reference JustCallMeKoko and
+the Marauder contributors' `MenuFunctions.cpp` upload actions and `WiFiScan.cpp`
+`uploadFile`/`wdgwarsUpload` at develop revision
+[`79cc6bc`](https://github.com/justcallmekoko/ESP32Marauder/tree/79cc6bcba1db6679baee1dab2b0c1ad5010e6363),
+rechecked on 2026-11-05. This is behavior/API reference credit. Cerberus's leased
+worker, explicit service retry, strict response parser and durable receipt
+journal are independently implemented. [Rev142](DUAL_RADIO_REV142.md) records
+the provider references, differences and separate acceptance limits.
+
+Rev143 references the same revision's `WiFiScan.cpp` wardrive CSV writer and
+shared log stream. Cerberus independently implements the CERBWardrive filename,
+one-file lifecycle, strict GPS/UTC/age checks, repeated-row retention and direct
+retry UI. The file schema is checked against WiGLE's official CSV v1.6
+specification; [rev143](DUAL_RADIO_REV143.md) records the behavior and limits.
+
 ## Carry this credit into future contributions
 
 - Name **JustCallMeKoko and the ESP32 Marauder contributors** in the PR description

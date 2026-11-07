@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "main.c"
+        "../../shared/wardrive_radio.c"
         "mdns_scanner.c"
         "network_diagnostics.c"
         "network_scanner.c"

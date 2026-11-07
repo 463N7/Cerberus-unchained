@@ -16,7 +16,7 @@ assert "gps_error = start_optional_gps(gps_enabled);" in service
 assert "gps_error = stop_optional_gps(gps_enabled);" in service
 assert "snapshot_optional_gps(wardrive_status.gps_requested, &gps, NULL);" in service
 assert "wardrive_status.gps_requested = enable_gps;" in service
-assert "wardrive_gps_enabled = false;" in ui
+assert "wardrive_gps_enabled = cerberus_settings_gps_get().enabled != 0U;" in ui
 assert "cerberus_wardrive_start(wardrive_include_expansions," in ui
 
 fixture = r'''

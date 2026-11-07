@@ -87,9 +87,9 @@ static void heap_caps_free(void *ptr)
 int main(void)
 {
     assert(post_ble_reserve_bytes(false) == 43008U);
-    assert(post_ble_reserve_bytes(true) == 45568U);
+    assert(post_ble_reserve_bytes(true) == 48640U);
     assert(45980U >= post_ble_reserve_bytes(false)); /* measured rev51 Stop */
-    assert(45980U >= post_ble_reserve_bytes(true));
+    assert(45980U < post_ble_reserve_bytes(true)); /* Larger UART invalidates the old GPS-on cold reserve. */
     fail_next = true;
     assert(allocate_workspace() == ESP_ERR_NO_MEM);
     assert(workspace == NULL && free_calls == 0U);

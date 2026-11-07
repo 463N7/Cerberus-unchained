@@ -1804,3 +1804,14 @@ esp_err_t cerberus_ble_scanner_get_data_chunk(
 }
 
 #include "dual_ble_service_impl.h"
+
+bool cerberus_ble_wardrive_ready(void)
+{
+    if(!scanner_mutex)return false;
+    xSemaphoreTake(scanner_mutex,portMAX_DELAY);
+    bool ready=host_synced&&!scan_radio_owned_locked()&&!dual_attached&&
+        connection_status.state!=CERBERUS_BLE_CONNECTION_CONNECTING&&
+        connection_status.state!=CERBERUS_BLE_CONNECTION_CONNECTED&&
+        connection_status.state!=CERBERUS_BLE_CONNECTION_DISCONNECTING;
+    xSemaphoreGive(scanner_mutex);return ready;
+}

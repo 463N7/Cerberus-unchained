@@ -3,6 +3,7 @@
 #include "esp_err.h"
 #include "wardrive_gps_core.h"
 #include "wardrive_recent.h"
+#include "wardrive_stream.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -31,6 +32,9 @@ typedef enum {
 
 typedef struct {
     cerberus_wardrive_state_t state;
+    uint8_t mode;
+    cerberus_wd_status_t s3_stream,c5_stream;
+    uint32_t s3_wifi_logged,c5_ble_logged;
     bool gps_requested; /* UART2 is used only when explicitly enabled. */
     bool gps_present; /* Checksum-valid NMEA was received recently. */
     cerberus_wardrive_gps_snapshot_t gps;
@@ -66,6 +70,7 @@ typedef struct {
     uint32_t duplicate_sightings, invalid_sightings, dedupe_evicted;
     uint32_t sd_rows, files_saved;
     uint32_t geotagged_rows, unlocated_rows, gps_fallback_rows;
+    uint32_t skipped_no_fix, skipped_time, skipped_format;
     uint64_t sd_bytes;
     esp_err_t c5_error, s3_ble_error, expansion_error, sd_error;
     esp_err_t error_code;
@@ -104,10 +109,13 @@ esp_err_t cerberus_wardrive_clear_recent(void);
 /* Start requires exclusive access to the onboard C5 scan and S3 BLE scanner.
  * The UI must suspend/drain Recon before calling. R1-R6 are opt-in; enabling
  * them does not imply that expansion radios are installed. GPS is opt-in;
- * without a wired receiver, leave enable_gps false. Scans and unlocated CSV
- * continue with no GPS reader or UART driver. With GPS enabled, fresh GPS/RMC
+ * without a wired receiver, leave enable_gps false. Scanning continues without
+ * a GPS reader, but the production stream saves only valid located WiGLE rows
+ * to one CERBWardrive CSV. Skipped observations have explicit counters. Fresh GPS/RMC
  * results enter WiGLE; other valid observations enter an unlocated sidecar. */
 esp_err_t cerberus_wardrive_start(bool include_expansions, bool enable_gps);
+/* Idle-only mode selection. Applies to the next integrated session. */
+esp_err_t cerberus_wardrive_set_mode(uint8_t mode);
 /* Stop is asynchronous. Both terminal states mean the worker has closed its
  * SD file. STOPPED confirms release of all started scans; ERROR reports a
  * radio or storage fault, including an expansion STOP that remains uncertain.

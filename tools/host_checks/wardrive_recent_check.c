@@ -70,7 +70,7 @@ static void basic_and_invalid(void)
         case 1: bad.type = CERBERUS_WARDRIVE_WIFI_RELATION; break;
         case 2: bad.label_length = 33U; break;
         case 3: memset(bad.address,0,6U); break;
-        case 4: bad.radio = CERBERUS_WARDRIVE_RADIO_S3; break;
+        case 4: bad.type=CERBERUS_WARDRIVE_BLE; bad.radio=CERBERUS_WARDRIVE_RADIO_R1; break;
         case 5: bad.radio = 8U; break;
         case 6: bad.channel = 0U; break;
         case 7: bad.rssi_dbm = 1; break;
@@ -265,6 +265,12 @@ int main(void)
 {
     basic_and_invalid(); identity_and_horizon(); values_and_outcomes();
     clocks_and_exhaustion(); reference_stream();
+    cerberus_wardrive_recent_t repeated={0};CHECK(cerberus_wardrive_recent_begin(&repeated,1));
+    repeated.all_observations=true;cerberus_wardrive_observation_t same=observation(1,false);
+    for(unsigned i=1;i<=12;++i)(void)offer(&repeated,i,&same,i,true);
+    cerberus_wardrive_recent_row_t rows[10];
+    CHECK(cerberus_wardrive_recent_copy_recent(&repeated,rows,10)==10);
+    for(unsigned i=0;i<10;++i)CHECK(rows[i].sequence==12U-i);
     printf("wardrive_recent PASS %u assertions; model=%zu row=%zu bytes\n",assertions,
         sizeof(cerberus_wardrive_recent_t),sizeof(cerberus_wardrive_recent_row_t));
     return 0;

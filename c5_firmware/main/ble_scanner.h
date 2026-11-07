@@ -67,3 +67,5 @@ esp_err_t cerberus_ble_gatt_read_get_data(
 #ifdef __cplusplus
 }
 #endif
+
+bool cerberus_ble_wardrive_ready(void);

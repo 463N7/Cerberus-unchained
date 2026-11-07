@@ -35,6 +35,7 @@ typedef struct {
     uint32_t overwritten, invalid_receipts;
     uint8_t count, next;
     bool has_receipt;
+    bool all_observations; /* Streaming Wardriving shows repeats as separate rows. */
 } cerberus_wardrive_recent_t;
 
 void cerberus_wardrive_recent_init(cerberus_wardrive_recent_t *state);
@@ -63,7 +64,8 @@ bool cerberus_wardrive_recent_set_outcome(cerberus_wardrive_recent_t *state,
     cerberus_wardrive_recent_ticket_t ticket,
     cerberus_wardrive_recent_outcome_t outcome);
 
-/* Newest at most ten distinct identities among the last 24 events, preserving
+/* Newest at most ten events when all_observations is set; otherwise distinct
+ * identities among the last 24 events, preserving
  * each latest event's complete value. Key: AP BSSID or BLE address+type, with
  * record kind separating radios. Radio slot is source metadata, not identity.
  * This deliberately has an event horizon, not a persistent unique-device set.

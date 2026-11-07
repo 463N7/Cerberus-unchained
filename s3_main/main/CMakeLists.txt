@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "main.c"
+        "../../shared/wardrive_radio.c"
         "battery.c"
         "bmp_viewer.c"
         "boot_logo.c"
@@ -25,6 +26,15 @@ idf_component_register(
         "wardrive_gps_uart.c"
         "wardrive_service.c"
         "wardrive_wigle.c"
+        "wardrive_log.c"
+        "wardrive_upload_config.c"
+        "wardrive_upload_json.c"
+        "wardrive_upload_settings.c"
+        "wardrive_upload_reply.c"
+        "wardrive_upload_file.c"
+        "wardrive_upload_receipt.c"
+        "wardrive_upload_net.c"
+        "wardrive_log_manager.c"
         "field_menu.c"
         "wifi_target_view.c"
         "ble_test.c"
@@ -139,6 +149,7 @@ idf_component_register(
         esp_driver_usb_serial_jtag
         esp_driver_uart
         esp_http_server
+        esp_http_client
         esp_psram
         esp_wifi
         esp_netif
@@ -146,3 +157,6 @@ idf_component_register(
         nvs_flash
         sdmmc
 )
+
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    CERBERUS_APP_VERSION="${PROJECT_VER}")

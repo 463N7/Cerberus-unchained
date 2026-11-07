@@ -98,9 +98,10 @@ typedef struct {
 } wardrive_storage_stream_t;
 static wardrive_storage_stream_t sd_wardrive_stream, sd_wigle_stream;
 static bool sd_wardrive_session_active;
+static uint64_t sd_ward_log_lease, sd_ward_log_sequence;
 static bool wardrive_storage_busy(void)
 {
-    return sd_wardrive_session_active || sd_wardrive_stream.file != NULL ||
+    return sd_ward_log_lease || sd_wardrive_session_active || sd_wardrive_stream.file != NULL ||
         sd_wigle_stream.file != NULL;
 }
 
@@ -154,6 +155,9 @@ static bool recon_next_component(const char **cursor, const char **start, size_t
 
 static bool recon_path_protected(const char *path)
 {
+    /* A log manager owns a fixed reviewed catalog. Exclude all File Tools
+     * mutations until it releases the card, including alias/ancestor paths. */
+    if (sd_ward_log_lease) return true;
     if (!sd_recon.active && !sd_packet_count) return false;
     /* During begin, before a session directory exists, conservatively protect
      * the Recon root and its ancestors. The same mutex excludes other callers. */
@@ -1153,7 +1157,7 @@ static esp_err_t wardrive_stream_begin(wardrive_storage_stream_t *stream,
         ESP_RETURN_ON_ERROR(cerberus_storage_mount(), TAG, "SD mount for Wardriving failed");
     }
     ESP_RETURN_ON_ERROR(take_storage_mutex(), TAG, "storage lock failed");
-    if (require_firmware_owner_locked() != ESP_OK || stream->file != NULL ||
+    if (require_firmware_owner_locked() != ESP_OK || sd_ward_log_lease || stream->file != NULL ||
         sd_wifi_capture_file != NULL || sd_recon.active || sd_packet_count) {
         release_storage_mutex();
         return ESP_ERR_INVALID_STATE;
@@ -1269,7 +1273,7 @@ static esp_err_t wardrive_stream_append(wardrive_storage_stream_t *stream,
     }
     stream->bytes += row_length;
     ++stream->pending_rows;
-    bool due = stream->pending_rows >= 25U ||
+    bool due = stream->pending_rows >= 256U ||
         esp_timer_get_time() - stream->last_sync_us >= 2000000LL;
     esp_err_t error = ESP_OK;
     if (due && (fflush(stream->file) != 0 || fsync(fileno(stream->file)) != 0))
@@ -1356,7 +1360,7 @@ esp_err_t cerberus_storage_wardrive_finish(bool keep, char *name,
     size_t capacity, uint64_t *bytes)
 { return wardrive_stream_finish(&sd_wardrive_stream, keep, name, capacity, bytes); }
 esp_err_t cerberus_storage_wardrive_wigle_begin(const char *header, size_t length)
-{ return wardrive_stream_begin(&sd_wigle_stream, "WIGLE", header, length); }
+{ return wardrive_stream_begin(&sd_wigle_stream, "CERBWardrive", header, length); }
 esp_err_t cerberus_storage_wardrive_wigle_append(const char *row, size_t length)
 { return wardrive_stream_append(&sd_wigle_stream, row, length); }
 esp_err_t cerberus_storage_wardrive_wigle_sync(void)
@@ -3352,3 +3356,4 @@ esp_err_t cerberus_storage_ssid_text_load(const char *relative_path,
 { return wifi_interchange_storage_load(relative_path, file_name, data, capacity, length, true); }
 
 #include "storage_packet_count_impl.h"
+#include "storage_wardrive_logs_impl.h"

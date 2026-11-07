@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the 158 registered host suites through Packet Count progress and diagnostics.
+"""Run the 166 registered host suites through integrated Wardriving uploads.
 
 The checked-in synthetic fixtures need no board, radio, or private captures.
 Generated fixtures, native executables, previews, logs, and the result receipt
@@ -24,6 +24,11 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "artifacts" / "host-checks"
 
 CHECKS = (
+    'check_wardrive_logs.py',
+    'check_wardrive_upload_config.py',
+    'check_wardrive_upload_protocol.py',
+    'check_wardrive_log_manager.py',
+    'check_wardrive_upload_net.py',
     'check_usb_console.py',
     'check_ui_directory_memory.py',
     'check_s3_wifi_scanner.py',
@@ -109,6 +114,8 @@ CHECKS = (
     'check_ble_vendor_cache.py',
     'check_wardrive_ble_capture.py',
     'check_wardrive_core.py',
+    'check_wardrive_stream.py',
+    'check_wardrive_radio.py',
     'check_wardrive_log_routing.py',
     'check_wardrive_memory.py',
     'check_wardrive_stop.py',
@@ -182,6 +189,7 @@ SERIAL_CHECKS = (
     'check_csi_live_ui.py',
     'render_wifi_target.py',
     'check_wardrive_ui.py',
+    'check_wardrive_upload_ui.py',
     'check_wardrive_gps_ui.py',
     'check_s3_ble_discovery_ui.py',
     'render_network_picker.py',
@@ -190,8 +198,8 @@ SERIAL_CHECKS = (
 
 def registered_checks() -> tuple[str, ...]:
     names = (*CHECKS, *SERIAL_CHECKS)
-    if len(names) != 158 or len(set(names)) != 158:
-        raise ValueError("Expected 158 unique suites; do not silently skip a suite")
+    if len(names) != 166 or len(set(names)) != 166:
+        raise ValueError("Expected 166 unique suites; do not silently skip a suite")
     return names
 
 
@@ -210,7 +218,7 @@ def selected_checks(shard_index: int | None = None,
         return names
     if (type(shard_index) is not int or type(shard_count) is not int or
             not 1 <= shard_count <= len(names) or not 0 <= shard_index < shard_count):
-        raise ValueError("Supply both --shard-index and --shard-count; index is zero-based and count is 1..158")
+        raise ValueError("Supply both --shard-index and --shard-count; index is zero-based and count is 1..166")
     return names[shard_index::shard_count]
 
 
@@ -322,7 +330,7 @@ def main() -> int:
     changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
     receipt = {
         "format": 1,
-        "suite_set": "rev136",
+        "suite_set": "rev144",
         "recorded_utc": datetime.now(timezone.utc).isoformat(),
         "status": "passed" if not changed and head == head_after and
             (args.shard_count is None or clean_after) and

@@ -140,3 +140,5 @@ esp_err_t cerberus_wifi_ap_target_metadata(const cerberus_wifi_ap_job_t *request
 #ifdef __cplusplus
 }
 #endif
+
+bool cerberus_wifi_wardrive_ready(void);

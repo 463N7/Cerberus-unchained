@@ -128,7 +128,7 @@ int main(int argc, char **argv)
     assert(cerberus_storage_wardrive_wigle_append(row, sizeof(row)-1U) == ESP_OK);
     assert(cerberus_storage_wardrive_wigle_sync() == ESP_OK);
     assert(cerberus_storage_wardrive_wigle_finish(true, name, sizeof(name), &bytes) == ESP_OK);
-    assert(!strcmp(name, "WIGLE001.CSV"));
+    assert(!strcmp(name, "CERBWardrive001.CSV"));
     assert(cerberus_storage_reserve_for_usb() == ESP_ERR_INVALID_STATE);
     assert(cerberus_storage_wardrive_finish(false, name, sizeof(name), NULL) == ESP_OK);
     assert(cerberus_storage_reserve_for_usb() == ESP_ERR_INVALID_STATE);

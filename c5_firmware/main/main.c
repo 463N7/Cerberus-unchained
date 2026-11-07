@@ -10,6 +10,7 @@
 #include "radio_test_service.h"
 #include "wifi_scanner.h"
 #include "wifi_capture_service.h"
+#include "wardrive_radio.h"
 
 #include "driver/gpio.h"
 #include "driver/spi_slave.h"
@@ -168,6 +169,14 @@ static void prepare_v2_response(const cerberus_spi_frame_t *request)
     }
     if (request->command != CERBERUS_SPI_COMMAND_EVENT_QUEUE_POP_BATCH) {
         event_batch_cache_valid = false;
+    }
+    if(request->command>=CERBERUS_WD_START&&request->command<=CERBERUS_WD_RELEASE){
+        if(received_transfer_bytes!=64U||request->payload_length!=sizeof(cerberus_wd_request_t))return;
+        cerberus_wd_request_t query;memcpy(&query,request->payload,sizeof(query));
+        cerberus_wd_frame_t frame={.magic=CERBERUS_SPI_MAGIC,.version=CERBERUS_PROTOCOL_VERSION,
+            .command=request->command,.sequence=request->sequence,.length=54};
+        (void)cerberus_wardrive_radio_exchange(request->command,&query,frame.payload);
+        frame.crc=cerberus_protocol_crc16(&frame,62U);memcpy(tx_buffer,&frame,sizeof(frame));return;
     }
 
     switch ((cerberus_spi_command_t)request->command) {

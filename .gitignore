@@ -36,3 +36,6 @@ docs/TOOLS_AUDIT.md
 /docs/BASE_BACKLOG.md
 /docs/BASE_README.md
 /docs/SENTINEL_ACCEPTANCE.md
+**/UPLOAD.JSON
+**/wardrive_upload.json
+**/*.private.json

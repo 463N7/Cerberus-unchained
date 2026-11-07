@@ -1,3 +1,4 @@
+#include "wardrive_foreign_boundary.h"
 #undef NDEBUG
 #include "cerberus_protocol.h"
 #include "wifi_channel_survey_metrics.h"

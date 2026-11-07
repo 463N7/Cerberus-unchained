@@ -4,6 +4,7 @@
 #include "field_survey_view.h"
 #include "field_menu.h"
 #include "wardrive_service.h"
+#include "wardrive_log_feedback.h"
 #include "wifi_target_view.h"
 #include "wifi_packet_monitor_core.h"
 #include "wifi_packet_count_scan.h"
@@ -300,6 +301,7 @@ typedef enum {
     UI_SETTINGS_MODE_ACCESSIBILITY,
     UI_SETTINGS_MODE_DATA,
     UI_SETTINGS_MODE_TOUCH_CALIBRATION,
+    UI_SETTINGS_MODE_GPS,
 } ui_settings_mode_t;
 
 typedef enum {
@@ -407,6 +409,11 @@ static void ble_archive_save_c5(bool selected);
 static void ble_archive_open_file(const char *path, const char *name);
 static bool ble_archive_is_file(const char *name);
 static bool wardrive_recent_is_open(void);
+static bool wardrive_logs_is_open(void);
+static esp_err_t wardrive_logs_draw(void);
+static void wardrive_logs_open(void);
+static void wardrive_logs_tap(uint16_t x,uint16_t y);
+static void wardrive_logs_tick(bool asleep);
 static esp_err_t wardrive_recent_draw(void);
 static void wardrive_recent_open(void);
 static void wardrive_recent_close(void);
@@ -513,6 +520,7 @@ static const ui_menu_item_t menu_items[] = {
 };
 
 static bool wardrive_include_expansions;
+static uint8_t wardrive_mode;
 static bool wardrive_gps_enabled; /* OFF on entry: GPS is not fitted on this unit. */
 static bool wardrive_start_pending;
 static bool wardrive_return_pending;
@@ -6716,6 +6724,7 @@ static esp_err_t draw_settings_data(void)
     return draw_button(52, 344, 216, 58, "FACTORY RESET");
 }
 
+#include "gps_settings_ui.h"
 static esp_err_t draw_settings(void)
 {
     if (settings_reset_confirmation) {
@@ -6778,6 +6787,7 @@ static esp_err_t draw_settings(void)
     if (settings_mode == UI_SETTINGS_MODE_CLOCK_TIMER) {
         return draw_settings_clock_timer();
     }
+    if (settings_mode == UI_SETTINGS_MODE_GPS) return draw_settings_gps();
     if (settings_mode == UI_SETTINGS_MODE_NOTIFICATIONS) {
         return draw_settings_notifications();
     }
@@ -6824,6 +6834,7 @@ static esp_err_t draw_settings(void)
         ui_config.settings_available ? UI_GOOD : UI_BAD,
         1), TAG, "settings persistence status failed");
 
+    ESP_RETURN_ON_ERROR(draw_small_button(52, 308, 216, 32, "GPS RECEIVER"), TAG,"GPS settings entry");
     ESP_RETURN_ON_ERROR(draw_small_button(4, 350, 74, 54, "TIME"), TAG,
         "settings time button failed");
     ESP_RETURN_ON_ERROR(draw_small_button(84, 350, 74, 54, "ALERTS"), TAG,
@@ -8112,51 +8123,61 @@ static esp_err_t draw_wardrive(void)
 
     ESP_RETURN_ON_ERROR(draw_centered(60, "CONTINUOUS SCAN / STOP TO SAVE", UI_MUTED, 1), TAG, "wardrive mode");
     bool gps_selected = active ? status.gps_requested : wardrive_gps_enabled;
+    cerberus_wardrive_gps_uart_state_t receiver={0};
+    esp_err_t gps_read=cerberus_wardrive_gps_uart_get_state(&receiver);
+    if(gps_selected&&gps_read==ESP_OK){
+        status.gps=receiver.gps;status.gps_error=receiver.error;
+        if(status.gps_error==ESP_OK&&gps_preview_error!=ESP_ERR_NOT_FINISHED)status.gps_error=gps_preview_error;
+    }
     const char *gps_line = gps_selected ? "GPS DATA > ON / NO RECENT NMEA" :
-        "GPS DATA > OFF / UNLOC CSV";
+        "GPS DATA > OFF / SCAN ONLY";
     uint16_t gps_color = UI_MUTED;
     if (gps_selected && status.gps_error != ESP_OK) {
-        gps_line = "GPS DATA > UART ERROR / UNLOC CSV";
+        gps_line = "GPS DATA > UART ERROR / SCAN ONLY";
         gps_color = UI_BAD;
     } else if (gps_selected && status.gps.state == CERBERUS_WARDRIVE_GPS_NO_FIX) {
         gps_line = "GPS DATA > NMEA / NO FIX";
     } else if (gps_selected && status.gps.state == CERBERUS_WARDRIVE_GPS_STALE) {
-        gps_line = "GPS DATA > FIX STALE / UNLOC CSV";
+        gps_line = "GPS DATA > FIX STALE / SCAN ONLY";
     } else if (gps_selected && status.gps.state == CERBERUS_WARDRIVE_GPS_FRESH) {
         gps_line = status.gps.utc_valid ?
             "GPS DATA > FIX + UTC / WIGLE CSV" : "GPS DATA > FIX / UTC UNVERIFIED";
         gps_color = status.gps.utc_valid ? UI_GOOD : UI_MUTED;
     }
     ESP_RETURN_ON_ERROR(draw_centered(80, gps_line, gps_color, 1), TAG, "wardrive GPS");
+    if(gps_selected){
+        snprintf(line,sizeof(line),"SAT %u  %lu BAUD  %s",status.gps.satellites_valid?status.gps.satellites:0U,
+            (unsigned long)receiver.active_baud,receiver.detecting_baud?"DETECTING":"NMEA");
+        ESP_RETURN_ON_ERROR(draw_centered(93,line,UI_MUTED,1),TAG,"wardrive live GPS");
+    }
+    const char *unsaved = cerberus_wardrive_unsaved_reason(&status);
+    const char *state_label = wardrive_state_label(status.state);
+    if (unsaved) state_label = "STOPPED / NO CSV SAVED";
+    else if (status.state == CERBERUS_WARDRIVE_RUNNING &&
+        (!status.gps_requested || status.gps.state != CERBERUS_WARDRIVE_GPS_FRESH || !status.gps.utc_valid))
+        state_label = "SCANNING / WAITING FOR GPS";
     snprintf(line, sizeof(line), "STATE: %s", wardrive_start_pending ?
-        "WAITING FOR RADIOS" : wardrive_state_label(status.state));
+        "WAITING FOR RADIOS" : state_label);
     ESP_RETURN_ON_ERROR(draw_centered(105, line,
         status.state == CERBERUS_WARDRIVE_ERROR ? UI_BAD :
         active ? UI_GOOD : UI_TEXT, 1), TAG, "wardrive state");
-    snprintf(line, sizeof(line), "C5 WI-FI: %lu SWEEPS / %lu AP",
-        (unsigned long)status.c5_wifi_sweeps,
-        (unsigned long)status.c5_wifi_observations);
-    ESP_RETURN_ON_ERROR(draw_centered(132, line, UI_TEXT, 1), TAG, "wardrive Wi-Fi");
-    snprintf(line, sizeof(line), "S3 BLE: %lu SWEEPS / %lu OBS",
-        (unsigned long)status.s3_ble_sweeps,
-        (unsigned long)status.s3_ble_observations);
-    ESP_RETURN_ON_ERROR(draw_centered(156, line, UI_TEXT, 1), TAG, "wardrive BLE");
-    if (status.c5_probe_state == CERBERUS_WARDRIVE_PROBE_AVAILABLE)
-        snprintf(line, sizeof(line), "HINT OBS: PROBE %lu / BLE %lu",
-            (unsigned long)status.c5_probe_observations,
-            (unsigned long)status.s3_ble_flock_observations);
-    else
-        snprintf(line, sizeof(line), "PROBE %s / BLE HINTS %lu",
-            status.c5_probe_state == CERBERUS_WARDRIVE_PROBE_WAITING ? "WAIT" :
-            status.c5_probe_state == CERBERUS_WARDRIVE_PROBE_UNSUPPORTED ? "UNSUPPORTED" : "UNAVAILABLE",
-            (unsigned long)status.s3_ble_flock_observations);
-    ESP_RETURN_ON_ERROR(draw_centered(178, line, UI_MUTED, 1), TAG, "wardrive probe/BLE hints");
+    uint8_t mode=active?status.mode:wardrive_mode;
+    const char *mode_label=mode==CERBERUS_WD_WIFI?"MODE: WI-FI ONLY":
+        mode==CERBERUS_WD_BLE?"MODE: BLUETOOTH ONLY":"MODE: WI-FI + BLUETOOTH";
+    ESP_RETURN_ON_ERROR(draw_small_button(24,118,272,28,mode_label),TAG,"wardrive mode select");
+    snprintf(line,sizeof(line),"S3 %s: %lu WIFI / %lu BLE",
+        mode==CERBERUS_WD_WIFI?"2.4G":mode==CERBERUS_WD_BLE?"BLE":"2.4G/BLE",
+        (unsigned long)status.s3_stream.wifi_reports,(unsigned long)status.s3_stream.ble_reports);
+    ESP_RETURN_ON_ERROR(draw_centered(158,line,UI_TEXT,1),TAG,"wardrive S3 receiver");
+    snprintf(line,sizeof(line),"C5 %s: %lu WIFI / %lu BLE",mode==CERBERUS_WD_BLE?"BLE":"5G",
+        (unsigned long)status.c5_stream.wifi_reports,(unsigned long)status.c5_stream.ble_reports);
+    ESP_RETURN_ON_ERROR(draw_centered(178,line,UI_TEXT,1),TAG,"wardrive C5 receiver");
     snprintf(line, sizeof(line), "LOGGED: AP %lu / BLE %lu / R1-R6 %lu",
-        (unsigned long)status.c5_wifi_logged,
-        (unsigned long)status.s3_ble_logged,
+        (unsigned long)(status.c5_wifi_logged+status.s3_wifi_logged),
+        (unsigned long)(status.s3_ble_logged+status.c5_ble_logged),
         (unsigned long)status.expansion_logged);
     ESP_RETURN_ON_ERROR(draw_centered(200, line, UI_GOOD, 1), TAG, "wardrive logged");
-    snprintf(line, sizeof(line), "DROPPED: AP %lu / BLE %lu / R1-R6 %lu",
+    snprintf(line, sizeof(line), "QUEUE DROPS: C5 %lu / S3 %lu / R %lu",
         (unsigned long)status.c5_wifi_scan_dropped,
         (unsigned long)status.s3_ble_scan_dropped,
         (unsigned long)status.expansion_radio_dropped);
@@ -8168,21 +8189,24 @@ static esp_err_t draw_wardrive(void)
         (unsigned long long)(status.sd_bytes / 1024U));
     ESP_RETURN_ON_ERROR(draw_centered(260, line, UI_TEXT, 1), TAG, "wardrive storage");
     snprintf(line, sizeof(line), "LAST FILE: %s", status.last_file_name[0] ?
-        status.last_file_name : "NONE YET");
+        status.last_file_name : unsaved ? "NO CSV CREATED" : "NONE YET");
     ESP_RETURN_ON_ERROR(draw_centered(280, line, UI_MUTED, 1), TAG, "wardrive file");
-    snprintf(line, sizeof(line), "GEO %lu / UNLOC %lu ROWS",
-        (unsigned long)status.geotagged_rows, (unsigned long)status.unlocated_rows);
+    snprintf(line, sizeof(line), "NOT SAVED: %llu / NO FIX %lu",
+        (unsigned long long)((uint64_t)status.skipped_no_fix+status.skipped_time+status.skipped_format),
+        (unsigned long)status.skipped_no_fix);
     ESP_RETURN_ON_ERROR(draw_centered(300, line, UI_MUTED, 1), TAG, "wardrive format");
     esp_err_t error = wardrive_start_error != ESP_OK ? wardrive_start_error : status.error_code;
     if (error != ESP_OK) {
         if (wardrive_blocked_reason[0])
             snprintf(line, sizeof(line), "%s", wardrive_blocked_reason);
         else if (status.c5_error != ESP_OK)
-            snprintf(line, sizeof(line), "C5 WI-FI: %s", esp_err_to_name(status.c5_error));
+            snprintf(line, sizeof(line), "C5: %s", esp_err_to_name(status.c5_error));
         else if (status.s3_ble_error != ESP_OK)
-            snprintf(line, sizeof(line), "S3 BLE: %s", esp_err_to_name(status.s3_ble_error));
+            snprintf(line, sizeof(line), "S3: %s", esp_err_to_name(status.s3_ble_error));
         else if (status.expansion_error != ESP_OK)
             snprintf(line, sizeof(line), "R1-R6: %s", esp_err_to_name(status.expansion_error));
+        else if (status.sd_error == ESP_ERR_INVALID_SIZE)
+            snprintf(line, sizeof(line), "LOG SIZE LIMIT / START A NEW SESSION");
         else if (status.sd_error != ESP_OK)
             snprintf(line, sizeof(line), "SD: %s", esp_err_to_name(status.sd_error));
         else
@@ -8190,6 +8214,12 @@ static esp_err_t draw_wardrive(void)
         ESP_RETURN_ON_ERROR(draw_centered(324, line, UI_BAD, 1), TAG, "wardrive error");
     } else if (wardrive_return_pending) {
         ESP_RETURN_ON_ERROR(draw_centered(324, "WAITING FOR RADIOS AND FILES", UI_GOOD, 1), TAG, "wardrive exit");
+    } else if (active && (!status.gps_requested || status.gps.state != CERBERUS_WARDRIVE_GPS_FRESH || !status.gps.utc_valid)) {
+        ESP_RETURN_ON_ERROR(draw_centered(324, "SCANNING / CSV NEEDS GPS FIX + UTC", UI_MUTED, 1), TAG, "wardrive fix wait");
+    } else if (unsaved) {
+        ESP_RETURN_ON_ERROR(draw_centered(324, unsaved, UI_BAD, 1), TAG, "wardrive unsaved reason");
+    } else if (status.state == CERBERUS_WARDRIVE_STOPPED && status.files_saved) {
+        ESP_RETURN_ON_ERROR(draw_centered(324, "CSV SAVED / OPEN LOGS BELOW", UI_GOOD, 1), TAG, "wardrive saved");
     }
     ESP_RETURN_ON_ERROR(draw_small_button(24, 346, 132, 28,
         wardrive_include_expansions ? "R1-R6: ON" : "R1-R6: OFF"),
@@ -8197,9 +8227,10 @@ static esp_err_t draw_wardrive(void)
     ESP_RETURN_ON_ERROR(draw_small_button(164, 346, 132, 28,
         wardrive_gps_enabled ? "GPS: ON" : "GPS: OFF"),
         TAG, "wardrive GPS control");
-    ESP_RETURN_ON_ERROR(draw_button(24, 380, 132, 32,
+    ESP_RETURN_ON_ERROR(draw_button(8, 380, 96, 32,
         active || wardrive_start_pending ? "STOP" : "START"), TAG, "wardrive start stop");
-    return draw_button(164, 380, 132, 32, "RECENT NETS");
+    ESP_RETURN_ON_ERROR(draw_button(112,380,96,32,"RECENT NETS"),TAG,"wardrive recent");
+    return draw_button(216,380,96,32,"LOGS / UPLOAD");
 }
 
 static esp_err_t draw_detail_page(void)
@@ -8210,6 +8241,7 @@ static esp_err_t draw_detail_page(void)
     if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_PROBE_SNIFF) return probe_sniff_draw();
     if (wardrive_gps_view_is_open()) return wardrive_gps_view_draw();
     if (wardrive_recent_is_open()) return wardrive_recent_draw();
+    if (wardrive_logs_is_open()) return wardrive_logs_draw();
     if (current_page == UI_PAGE_BLE_ARCHIVE) return ble_archive_draw();
     if (current_page == UI_PAGE_WIFI_ARCHIVE) return wifi_archive_draw();
     if (current_page == UI_PAGE_WIFI && wifi_mode == UI_WIFI_MODE_CSI) return csi_draw(true);
@@ -8716,6 +8748,8 @@ static void handle_dashboard_tap(uint16_t x, uint16_t y)
 
 static void handle_settings_tap(uint16_t x, uint16_t y)
 {
+    if(settings_mode==UI_SETTINGS_MODE_GPS){gps_settings_tap(x,y);ESP_ERROR_CHECK(draw_detail_page());return;}
+    if(settings_mode==UI_SETTINGS_MODE_DISPLAY&&!settings_reset_confirmation&&!settings_restore_confirmation&&x>=52U&&x<268U&&y>=308U&&y<340U){gps_settings_open();ESP_ERROR_CHECK(draw_detail_page());return;}
     if (settings_reset_confirmation) {
         if (y >= 330U && y < 388U && x >= 20U && x < 152U) {
             settings_reset_confirmation = false;
@@ -11511,6 +11545,7 @@ static void handle_scripts_tap(uint16_t x, uint16_t y)
 #include "airtag_json_live_ui.h"
 #include "wardrive_recent_live_ui.h"
 #include "wardrive_gps_live_ui.h"
+#include "wardrive_logs_ui.h"
 #include "sentinel_watch_ui.h"
 #include "remote_id_live_ui.h"
 #include "mac_monitor_live_ui.h"
@@ -11560,7 +11595,7 @@ static void open_tool_page(ui_page_t page)
     if (current_page == UI_PAGE_WARDRIVE) {
         wardrive_gps_view_close();
         wardrive_recent_close();
-        wardrive_gps_enabled = false;
+        wardrive_gps_enabled = cerberus_settings_gps_get().enabled != 0U;
         wardrive_start_pending = false;
         wardrive_return_pending = false;
         wardrive_start_error = ESP_OK;
@@ -11824,24 +11859,31 @@ static void ble_attack_tick(uint32_t now_ms, bool asleep)
 
 static void wardrive_handle_tap(uint16_t x, uint16_t y)
 {
+    if(y>=380U&&y<412U&&x>=216U&&x<312U){wardrive_logs_open();return;}
+    if(y>=380U&&y<412U&&x>=112U&&x<208U){wardrive_recent_open();return;}
+    if(y>=380U&&y<412U&&x>=104U)return;
+    if(y>=380U&&y<412U&&x>=8U&&x<24U)x=24U;
     if (x < 24U || x >= 296U) return;
     if (y >= 72U && y < 98U) {
         wardrive_gps_view_open();
         return;
     }
-    if (y >= 380U && y < 412U && x >= 164U) {
-        wardrive_recent_open();
-        return;
-    }
-    if (y >= 380U && y < 412U && x >= 156U) return;
     cerberus_wardrive_status_t status;
     cerberus_wardrive_get_status(&status);
     bool active = status.state == CERBERUS_WARDRIVE_STARTING ||
         status.state == CERBERUS_WARDRIVE_RUNNING ||
         status.state == CERBERUS_WARDRIVE_STOPPING;
+    if(y>=118U&&y<146U&&!active&&!wardrive_start_pending){
+        wardrive_mode=(uint8_t)((wardrive_mode+1U)%3U);
+        if(wardrive_mode==CERBERUS_WD_BLE)wardrive_include_expansions=false;
+        wardrive_start_error=cerberus_wardrive_set_mode(wardrive_mode);
+        wardrive_last_draw_ms=0U;ESP_ERROR_CHECK(draw_detail_page());
+        return;
+    }
     if (y >= 346U && y < 374U && !active && !wardrive_start_pending) {
-        if (x < 160U) wardrive_include_expansions = !wardrive_include_expansions;
-        else wardrive_gps_enabled = !wardrive_gps_enabled;
+        if (x < 160U) {
+            if(wardrive_mode!=CERBERUS_WD_BLE)wardrive_include_expansions=!wardrive_include_expansions;
+        } else wardrive_gps_enabled = !wardrive_gps_enabled;
     } else if (y >= 380U && y < 412U) {
         if (active) {
             cerberus_wardrive_request_stop();
@@ -11863,7 +11905,9 @@ static void wardrive_handle_tap(uint16_t x, uint16_t y)
 
 static void wardrive_tick(uint32_t now_ms, bool asleep)
 {
+    wardrive_logs_tick(asleep);
     wardrive_gps_view_release_if_hidden(now_ms, asleep);
+    gps_preview_poll(now_ms,asleep);
     if (current_page != UI_PAGE_WARDRIVE) return;
     cerberus_wardrive_status_t status;
     cerberus_wardrive_get_status(&status);
@@ -11906,7 +11950,7 @@ static void wardrive_tick(uint32_t now_ms, bool asleep)
     }
     if (!asleep && (wardrive_last_draw_ms == 0U ||
         (uint32_t)(now_ms - wardrive_last_draw_ms) >=
-            (wardrive_recent_is_open() || wardrive_gps_view_is_open() ? 500U : 1000U))) {
+            (wardrive_recent_is_open() || wardrive_gps_view_is_open() || wardrive_logs_is_open() ? 500U : 1000U))) {
         ESP_ERROR_CHECK(draw_detail_page());
         wardrive_last_draw_ms = now_ms;
     }
@@ -11917,6 +11961,7 @@ static void handle_tap(uint16_t x, uint16_t y)
     if (x >= CERBERUS_LCD_WIDTH || y >= CERBERUS_LCD_HEIGHT) {
         return;
     }
+    if (wardrive_logs_is_open()) {wardrive_logs_tap(x,y);return;}
     if (wardrive_gps_view_is_open()) {
         wardrive_gps_view_handle_tap(x, y);
         return;
@@ -12650,6 +12695,7 @@ void cerberus_ui_run(const cerberus_ui_config_t *config)
                  ble_mode == UI_BLE_MODE_ANALYZER)) &&
             ui_screen_timeout_seconds > 0U &&
             !watch_keeps_awake() &&
+            !wardrive_logs_is_open() &&
             !remote_id_keeps_awake() &&
             !mac_monitor_keeps_awake() &&
             !ble_discovery_keeps_awake() &&

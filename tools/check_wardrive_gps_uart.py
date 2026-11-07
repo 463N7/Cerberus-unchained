@@ -48,6 +48,7 @@ int xTaskCreate(void (*)(void *),const char *,unsigned,void *,unsigned,void *);
 int64_t esp_timer_get_time(void);
 esp_err_t uart_driver_install(int,int,int,int,void *,int);
 esp_err_t uart_param_config(int,const uart_config_t *);
+esp_err_t uart_set_baudrate(int,uint32_t);
 esp_err_t uart_set_pin(int,int,int,int,int);
 esp_err_t uart_flush_input(int);
 esp_err_t uart_driver_delete(int);

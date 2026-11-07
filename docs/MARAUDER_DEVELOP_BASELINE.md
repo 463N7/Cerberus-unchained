@@ -9,6 +9,14 @@ Observed on 2026-10-29 from `https://github.com/justcallmekoko/ESP32Marauder.git
 
 The two commits have the **same Git tree**, `8b5d8ede62ce3e4e78941ca5b10abfb97896ec60`. An explicit fetch of `refs/heads/master` into the separate `develop` checkout followed by `git diff --quiet` returned zero. The old checkout at `../integration/marauder-source` was not changed; the new checkout is `../integration/marauder-develop-2026-10-29`. These are snapshots. Recheck the remote before future parity claims because `develop` can advance.
 
+### Rechecked on 2026-11-05 UTC
+
+The read-only GitHub branch API still reports develop at
+`79cc6bcba1db6679baee1dab2b0c1ad5010e6363`. Rev139 refreshes Wardriving, GPS
+and storage/upload evidence in the coverage ledger without claiming complete
+parity. The additional Wardrift adapter references the separate public PR #1634;
+that open contribution is not presented as merged develop functionality.
+
 ### Rechecked on 2026-11-01
 
 The GitHub `develop` branch remains at

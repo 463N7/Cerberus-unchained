@@ -62,7 +62,7 @@ jobs:
         run: python tools/check_host_shards.py
       - name: Install pinned host compiler
         run: python -m pip install ziglang==0.14.1
-      - name: Run assigned rev130 host suites
+      - name: Run assigned rev144 host suites
         run: python tools/run_host_checks.py --jobs 2 ${{ matrix.shard_args }}
       - name: Check build-report failure handling
         if: matrix.os == 'ubuntu-latest' || matrix.label == 'windows-0'
@@ -102,7 +102,7 @@ jobs:
           pattern: cerberus-unchained-host-checks-windows-*-${{ github.run_number }}-attempt-${{ github.run_attempt }}
           path: artifacts/windows-host-shards
           merge-multiple: false
-      - name: Require all 158 Windows suites and matching source bindings
+      - name: Require all 166 Windows suites and matching source bindings
         run: >-
           python tools/verify_host_shards.py artifacts/windows-host-shards
           --expected-head "${{ github.sha }}"

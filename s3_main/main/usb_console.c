@@ -30,6 +30,9 @@
 #include "usb_mass_storage.h"
 #include "system_health.h"
 #include "wardrive_service.h"
+#include "wardrive_gps_uart.h"
+#include "wardrive_upload_settings.h"
+#include "wardrive_log_manager.h"
 
 #include "driver/usb_serial_jtag.h"
 #include "driver/usb_serial_jtag_vfs.h"
@@ -89,6 +92,10 @@ static __attribute__((noinline)) void print_remote_id(void);
 static __attribute__((noinline)) void print_stations(void);
 static __attribute__((noinline)) void print_reports(void);
 static __attribute__((noinline)) void print_radio(void);
+static __attribute__((noinline)) void print_gps(void);
+static __attribute__((noinline)) void print_upload_profile(void);
+static __attribute__((noinline)) void print_upload_status(void);
+static __attribute__((noinline)) void print_wardrive_logs(void);
 static __attribute__((noinline)) void print_dual_ble(void);
 static __attribute__((noinline)) void print_ble_memory(void);
 static __attribute__((noinline)) void print_battery(void);
@@ -163,6 +170,10 @@ static void print_help(void)
         "stations Read passive station capture without renewing its lease\r\n"
         "reports  Read the first 32 SD log names and network CSVs\r\n"
         "radio    Show C5, S3 BLE/Wi-Fi and Wardriving status without renewing leases\r\n"
+        "gps      Show receiver, baud and fix health without coordinates\r\n"
+        "upload_profile Show saved upload readiness without credentials\r\n"
+        "upload_status Show log operation and numeric transfer diagnostics\r\n"
+        "ward_logs    List finalized wardrive filenames and sizes, read-only\r\n"
         "dual_ble Read cached two-receiver BLE/Fox state without SPI or scanning\r\n"
         "ble_memory Read cached S3 BLE lifecycle heap samples without heap walks\r\n"
         "battery  Show cached onboard battery gauge status\r\n"
@@ -633,6 +644,43 @@ static void print_usb(void)
     cerberus_usb_mass_storage_get_status(&status);
     console_printf("msc_active=%u\r\nhost_attached=%u\r\nsafe_to_release=%u\r\nlast_error=%s\r\n",
         status.active, status.host_attached, status.safe_to_release, esp_err_to_name(status.last_error));
+}
+
+static void print_wardrive_logs(void)
+{
+    /* Use the same catalog and exclusive SD lease as the touchscreen. No CSV
+     * contents, network connection, deletion, or receipt mutation is allowed. */
+    const size_t capacity = CERBERUS_WARD_LOG_CAPACITY;
+    cerberus_ward_log_entry_t *entries = heap_caps_calloc(capacity, sizeof(*entries),
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint64_t lease = 0;
+    size_t count = 0;
+    cerberus_ward_log_catalog_info_t info = {0};
+    esp_err_t error = entries ? cerberus_ward_log_storage_begin(&lease) : ESP_ERR_NO_MEM;
+    if (error == ESP_OK) error = cerberus_ward_log_storage_list_info(lease, entries, capacity, &count, &info);
+    esp_err_t release = ESP_OK;
+    if (lease) {
+        do {
+            release = cerberus_ward_log_storage_end(lease);
+            if (release == ESP_ERR_TIMEOUT) vTaskDelay(pdMS_TO_TICKS(20));
+        } while (release == ESP_ERR_TIMEOUT);
+        if (error == ESP_OK) error = release;
+    }
+    console_printf("ward_logs_error=%d\r\nward_logs_release_error=%d\r\nward_logs_count=%u\r\n",
+        error, release, (unsigned)count);
+    console_printf("ward_logs_directory_present=%u\r\nward_logs_directory_entries=%lu\r\nward_logs_csv_entries=%lu\r\nward_logs_temporary_entries=%lu\r\nward_logs_unrecognized_csv=%lu\r\n",
+        info.directory_present,(unsigned long)info.entries,(unsigned long)info.csv_entries,
+        (unsigned long)info.temporary_entries,(unsigned long)info.unrecognized_csv);
+    if(error==ESP_OK&&info.first_unrecognized_csv[0]){
+        /* A bounded, hex-encoded basename cannot inject console fields. */
+        char encoded[CERBERUS_WARD_LOG_NAME_CAPACITY*2U]={0};
+        for(size_t i=0;info.first_unrecognized_csv[i];++i)
+            snprintf(encoded+i*2U,sizeof(encoded)-i*2U,"%02x",(unsigned char)info.first_unrecognized_csv[i]);
+        console_printf("ward_logs_first_unrecognized_hex=%s\r\n",encoded);
+    }
+    for (size_t i = 0; error == ESP_OK && i < count && !atomic_load(&console_stop_requested); ++i)
+        console_printf("ward_log=%s bytes=%" PRIu64 "\r\n", entries[i].name, entries[i].bytes);
+    heap_caps_free(entries);
 }
 
 static void print_reports(void)
@@ -1359,6 +1407,47 @@ static void print_wardrive_relations(const cerberus_wardrive_status_t *status)
 }
 /* END WIFI RELATION DIAGNOSTICS. */
 
+static void print_upload_status(void)
+{
+    cerberus_log_manager_status_t s;cerberus_log_manager_status(&s);
+    console_printf("upload_active=%u\r\nupload_busy=%u\r\nupload_closing=%u\r\nupload_action=%u\r\nupload_service=%u\r\nupload_error=%d\r\nupload_stage=%s\r\nupload_profile_saved=%u\r\n",
+        (unsigned)s.active,(unsigned)s.busy,(unsigned)s.closing,(unsigned)s.action,s.service,
+        (int)s.error,s.stage,(unsigned)s.profile_saved);
+    console_printf("upload_attempted=%u\r\nupload_transport_error=%d\r\nupload_http_status=%u\r\nupload_response_bytes=%lu\r\nupload_response_complete=%u\r\n",
+        (unsigned)s.transfer.attempted,(int)s.transfer.error,s.transfer.http_status,
+        (unsigned long)s.transfer.response_bytes,(unsigned)s.transfer.response_complete);
+    console_printf("upload_socket_errno=%d\r\nupload_tls_error=%d\r\nupload_tls_code=%d\r\nupload_tls_flags=%d\r\n",
+        s.transfer.socket_errno,(int)s.transfer.tls_error,s.transfer.tls_code,s.transfer.tls_flags);
+    for(unsigned i=0;i<3;++i)console_printf("upload_destination_%u_result=%u\r\n",i,(unsigned)s.destination[i].result);
+}
+
+static void print_upload_profile(void)
+{
+    cerberus_upload_config_t config={0};
+    esp_err_t error=cerberus_upload_settings_load(&config);
+    console_printf("upload_profile_error=%d\r\nupload_profile_home_ready=%u\r\nupload_profile_wigle_ready=%u\r\nupload_profile_wdgwars_ready=%u\r\nupload_profile_wardrift_ready=%u\r\nupload_profile_destinations=0x%02x\r\n",
+        (int)error,(unsigned)(error==ESP_OK&&cerberus_upload_config_wifi_ready(&config)),
+        (unsigned)(error==ESP_OK&&cerberus_upload_config_service_ready(&config,CERBERUS_UPLOAD_WIGLE)),
+        (unsigned)(error==ESP_OK&&cerberus_upload_config_service_ready(&config,CERBERUS_UPLOAD_WDGWARS)),
+        (unsigned)(error==ESP_OK&&cerberus_upload_config_service_ready(&config,CERBERUS_UPLOAD_WARDRIFT)),
+        (unsigned)(error==ESP_OK?config.destinations:0));
+    cerberus_upload_config_clear(&config,sizeof(config));
+}
+
+static void print_gps(void)
+{
+    cerberus_wardrive_gps_uart_state_t state={0};
+    esp_err_t error=cerberus_wardrive_gps_uart_get_state(&state);
+    console_printf("processor=GPS\r\nread_error=%ld\r\nprofile=%u\r\nrx_gpio=%u\r\ntx_assignment=%d\r\npps_assignment=%d\r\n"
+        "baud=%lu\r\ndetecting=%u\r\nreader=%u\r\nbytes=%lu\r\nstate=%u\r\nsatellites=%u\r\nfix_age_ms=%lu\r\n"
+        "valid_sentences=%lu\r\nbad_checksums=%lu\r\nutc_valid=%u\r\nerror=%ld\r\n",
+        (long)error,state.config.profile,state.config.rx_gpio,state.config.tx_gpio,state.config.pps_gpio,
+        (unsigned long)state.active_baud,state.detecting_baud,state.reader_running,(unsigned long)state.received_bytes,
+        state.gps.state,state.gps.satellites,(unsigned long)state.gps.fix_age_ms,(unsigned long)state.gps.valid_sentences,
+        (unsigned long)state.gps.bad_checksums,state.gps.utc_valid,(long)state.error);
+}
+
+
 /* Compact read-only view: never place the ten-row bank on the console stack. */
 __attribute__((noinline))
 static void print_wardrive_recent(void)
@@ -1443,6 +1532,10 @@ static void print_radio(void)
         (unsigned long)wardrive.geotagged_rows,
         (unsigned long)wardrive.unlocated_rows,
         (unsigned long)wardrive.gps_fallback_rows);
+    console_printf("skipped_no_fix=%lu\r\nskipped_time=%lu\r\nskipped_format=%lu\r\n",
+        (unsigned long)wardrive.skipped_no_fix,
+        (unsigned long)wardrive.skipped_time,
+        (unsigned long)wardrive.skipped_format);
     console_printf("ble_hint_scope=processed_typed_rows_per_sweep_not_unique_devices\r\n"
         "ble_flock_observations=%lu\r\nble_flock_clue=%lu\r\n"
         "ble_flock_signature=%lu\r\nble_flock_corroborated=%lu\r\n",
@@ -1461,6 +1554,16 @@ static void print_radio(void)
         (unsigned long)wardrive.c5_probe_dropped,
         (unsigned long)wardrive.c5_probe_unavailable_sweeps);
     print_wardrive_relations(&wardrive);
+    console_printf("wardrive_mode=%u\r\nstream_s3_wifi=%lu\r\nstream_s3_ble=%lu\r\nstream_c5_wifi=%lu\r\nstream_c5_ble=%lu\r\n"
+        "stream_s3_pending=%u\r\nstream_c5_pending=%u\r\nstream_s3_drops=%lu\r\nstream_c5_drops=%lu\r\n"
+        "stream_s3_channel=%u\r\nstream_c5_channel=%u\r\nstream_s3_channels=%u\r\nstream_c5_channels=%u\r\n"
+        "stream_s3_held=%u\r\nstream_c5_held=%u\r\nstream_s3_error=%ld\r\nstream_c5_error=%ld\r\n",
+        wardrive.mode,(unsigned long)wardrive.s3_stream.wifi_reports,(unsigned long)wardrive.s3_stream.ble_reports,
+        (unsigned long)wardrive.c5_stream.wifi_reports,(unsigned long)wardrive.c5_stream.ble_reports,
+        wardrive.s3_stream.pending,wardrive.c5_stream.pending,(unsigned long)wardrive.s3_stream.dropped,
+        (unsigned long)wardrive.c5_stream.dropped,wardrive.s3_stream.channel,wardrive.c5_stream.channel,
+        wardrive.s3_stream.valid_channels,wardrive.c5_stream.valid_channels,wardrive.s3_stream.held,wardrive.c5_stream.held,
+        (long)wardrive.s3_stream.error,(long)wardrive.c5_stream.error);
     print_wardrive_recent();
 }
 
@@ -1629,6 +1732,14 @@ static void execute_command(char *line)
         print_ble_memory();
     } else if (strcmp(start, "radio") == 0) {
         print_radio();
+    } else if (strcmp(start, "gps") == 0) {
+        print_gps();
+    } else if (strcmp(start, "upload_profile") == 0) {
+        print_upload_profile();
+    } else if (strcmp(start, "upload_status") == 0) {
+        print_upload_status();
+    } else if (strcmp(start, "ward_logs") == 0) {
+        print_wardrive_logs();
     } else if (strcmp(start, "battery") == 0) {
         print_battery();
     } else {

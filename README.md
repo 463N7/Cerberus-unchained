@@ -29,19 +29,36 @@ reference revisions and the distinction between adapted code and independently
 implemented workflows. This acknowledgment does not change any license or
 imply upstream endorsement of Cerberus Unchained.
 
-**Current experimental release: `0.1.0-dev.rev136`, paired with onboard C5
-firmware revision 74 and protocol 2.**
+**Current development build** `0.1.0-dev.rev144` uses onboard C5 firmware revision 75.
 
-[Install with the web flasher](https://463n7.github.io/Cerberus-unchained/) or
-[download the matched package and checksums](https://github.com/463N7/Cerberus-unchained/releases/tag/v0.1.0-dev.rev136).
-The guided installer programs the bridge, C5 and final S3 application using one
-USB cable. Open it directly in desktop Chrome or Edge.
+Open **Scan → Wardriving** to check the GPS fix before starting a drive.
+Cerberus writes sightings with valid position and UTC data to one WiGLE 1.6
+file per session, such as `CERBWardrive001.CSV`. It keeps repeat sightings.
+If the session ends before it can save a row, the Stop screen explains why.
 
-Native builds, matched packaging, installer checks and the complete Ubuntu/Windows
-host checks pass. Rev136 remains experimental and has not received a full hardware
-acceptance run. Earlier rev135 device evidence covers specific receive and cleanup
-paths; see [the checkpoint](docs/DUAL_RADIO_REV136.md) for remaining scope and
-[the flasher guide](docs/WEB_FLASHER.md) for installation and recovery.
+After stopping, open **LOGS / UPLOAD** to review a file or upload it over home
+Wi-Fi. One JSON profile holds the network settings and service credentials.
+A service shows **UPLOADED** once it has acknowledged every part of the file.
+The device can read that status from saved receipts when you reopen the log.
+[Setup and upload guide](docs/WARDRIVE_UPLOADS.md)
+
+A rev144 test session reported one saved file with 1,182 geotagged rows. The
+upload-status update was then installed and checked on the S3/C5 board.
+WiGLE acknowledged an earlier upload. The last WDGWars attempt failed during
+the TLS handshake on the board. Live Wardrift uploads, long drives and full
+Marauder feature parity remain open. [CSV readback](docs/DUAL_RADIO_REV138.md) ·
+[Rev144 device checks](docs/DUAL_RADIO_REV144.md)
+
+The published experimental release remains **`0.1.0-dev.rev136`**, paired with
+onboard C5 firmware revision 74 and protocol 2.
+[Install rev136 with the web flasher](https://463n7.github.io/Cerberus-unchained/)
+or [download its matched package and checksums](https://github.com/463N7/Cerberus-unchained/releases/tag/v0.1.0-dev.rev136).
+The guided installer programs the bridge, C5 and S3 using one USB cable in
+desktop Chrome or Edge. Its published files are preserved by this contribution;
+they do not install the current development source described above.
+Rev136 remains experimental with limited physical acceptance; see its
+[checkpoint](docs/DUAL_RADIO_REV136.md) and the [flasher guide](docs/WEB_FLASHER.md).
+Sentinel 1.0.0 binaries are not Unchained firmware.
 
 ## Build and validation
 
@@ -69,6 +86,15 @@ See [Unchained build and release instructions](docs/UNCHAINED_BUILD.md) and
 [the inherited validation procedures](docs/VALIDATION.md).
 
 ## Development status
+
+Rev137 provides Wi-Fi-only, Bluetooth-only and combined Wardriving modes.
+Wi-Fi-only splits S3 2.4 GHz and C5 5 GHz reception; Bluetooth-only uses both
+receivers. Combined mode keeps C5 on 5 GHz and assigns S3 alternating Wi-Fi/BLE
+windows. Bounded queues separate RF callbacks from CSV/SD work and preserve
+repeated observations, with overflow counters. GPS AUTO, LC29H-AA, ATGM336H
+and manual profiles live in one Settings branch. GNSS can be inspected before
+recording; stale or absent fixes route observations to unlocated output.
+See [roles, limits and validation scope](docs/DUAL_RADIO_REV137.md).
 
 Rev136 reuses Packet Count's raw-frame scratch for in-place PCAPNG encoding,
 removing a second 4,096-byte buffer from the optional S3 recording worker.
