@@ -18,4 +18,14 @@ Uploads still require the saved home AP, current UTC, CA and hostname verificati
 
 The SDK integration test reproduces the old rejection and verifies the corrected chain path using real Mbed TLS/PSA cryptography. It rejects unknown roots, incorrect hostnames, expired/future leaf and intermediate certificates, and a modified signature. It completes 128 repeated verifications and 16 allocation-failure trials without retained allocations.
 
-Firmware builds and the standard host suites are being validated. The candidate has not been installed. On-device WDGWars TLS, actual upload acknowledgement and repeated-upload memory use remain open. No logs were uploaded or receipts changed during this investigation.
+All 166 standard host suites and all five firmware targets passed at `e7d909a`, with unchanged input hashes. The additional SDK integration check passed separately.
+
+A TLS 1.2 handshake from the PC, using the actual SDK verifier and firmware certificate bundle, gave these results. The test stopped after TLS; it sent no HTTP request or API credentials.
+
+| Host | Original handler | Corrected handler |
+| --- | --- | --- |
+| `wdgwars.pl` | `-0x3000`, matching the recorded device error | Verified |
+| `api.wigle.net` | Verified | Verified |
+| `wardrift.net` | Verified | Verified |
+
+The candidate has not been installed; the connected board still reports rev144. On-device WDGWars TLS, actual upload acknowledgement and repeated-upload memory use remain open. No logs were uploaded or receipts changed during this investigation. A saved uncertain receipt still requires the existing service retry confirmation.
