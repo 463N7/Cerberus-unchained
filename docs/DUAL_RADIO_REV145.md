@@ -14,6 +14,8 @@ The S3 configuration now enables cross-signed root selection and certificate dat
 
 Uploads still require the saved home AP, current UTC, CA and hostname verification, and an explicit user action. Receipt handling and service retry confirmations are unchanged.
 
+The matched package includes the vendored handler and its CMake hook in its source fingerprint. Changing either requires a new matched build. S3, C5 and the recovery bridge share the rev145 package version; the C5 protocol and radio behavior are unchanged.
+
 ## Validation
 
 The SDK integration test reproduces the old rejection and verifies the corrected chain path using real Mbed TLS/PSA cryptography. It rejects unknown roots, incorrect hostnames, expired/future leaf and intermediate certificates, and a modified signature. It completes 128 repeated verifications and 16 allocation-failure trials without retained allocations.
