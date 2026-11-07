@@ -10,6 +10,7 @@ sdkconfig.old
 !sdkconfig.*.defaults
 !c5_firmware/sdkconfig.defaults
 !c5_firmware/sdkconfig.*.defaults
+!tools/host_checks/tls_stubs/sdkconfig.h
 dist/
 artifacts/
 __pycache__/

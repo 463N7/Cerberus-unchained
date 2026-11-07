@@ -70,6 +70,33 @@ class BuildReportChecks(unittest.TestCase):
         self.assertEqual(report["targets"]["onboard"]["mesh_locate_iram"],proof)
 
 
+class PackageSourceChecks(unittest.TestCase):
+    def test_vendored_source_changes_require_a_new_matched_build(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            vendor = root / "third_party/esp_crt_bundle"
+            vendor.mkdir(parents=True)
+            source = vendor / "esp_crt_bundle.c"
+            source.write_text("original handler", encoding="utf-8")
+            (vendor / "CMakeLists.txt").write_text("build hook", encoding="utf-8")
+            receipt_path = root / "matched-build.json"
+            with patch.object(packager, "ROOT", root), \
+                 patch.object(packager, "TARGETS", {}), \
+                 patch.object(packager, "RECEIPT", receipt_path), \
+                 patch.object(packager, "validate_console_proof"), \
+                 patch.object(packager, "validate_locate_proof"), \
+                 patch.object(packager, "inspect_target") as inspect:
+                before = packager.source_snapshot()
+                self.assertIn("third_party/esp_crt_bundle/esp_crt_bundle.c", before["files"])
+                self.assertIn("third_party/esp_crt_bundle/CMakeLists.txt", before["files"])
+                receipt_path.write_text(json.dumps({"source": before}), encoding="utf-8")
+                source.write_text("changed handler", encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "Build inputs changed"):
+                    packager.package(root / "package")
+                inspect.assert_not_called()
+                self.assertFalse((root / "package").exists())
+
+
 class MatchedConsoleProofChecks(unittest.TestCase):
     """The standalone packager must reject stale or missing native evidence."""
 

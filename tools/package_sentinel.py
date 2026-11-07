@@ -32,7 +32,7 @@ def sha256(path: Path) -> str:
 def source_snapshot() -> dict:
     """Capture build inputs, including uncommitted files and component locks."""
     paths = set()
-    for directory in ("shared", "boards", "s3_main", "c5_firmware/main"):
+    for directory in ("shared", "boards", "s3_main", "c5_firmware/main", "third_party"):
         for path in (ROOT / directory).rglob("*"):
             if path.is_file() and not any(p in {".pio", "managed_components", "__pycache__"} for p in path.parts):
                 paths.add(path)
